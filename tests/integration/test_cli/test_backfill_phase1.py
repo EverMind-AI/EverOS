@@ -29,7 +29,7 @@ from everos.config import load_settings
 from everos.core.utils.datetime import get_utc_now
 from everos.entrypoints.cli.commands._backfill import run_backfill
 from everos.infra.persistence.lancedb import (
-    AtomicFact,
+    AgentCase,
     Episode,
 )
 from everos.service import OpsService, build_application
@@ -108,18 +108,21 @@ def _episode(
     )
 
 
-def _fact(entry_id: str, *, vector: list[float] | None = None) -> AtomicFact:
-    return AtomicFact(
-        id=f"u1_{entry_id}",
+def _case(entry_id: str, *, vector: list[float] | None = None) -> AgentCase:
+    return AgentCase(
+        id=f"a1_{entry_id}",
         entry_id=entry_id,
-        owner_id="u1",
-        owner_type="user",
+        owner_id="a1",
+        owner_type="agent",
+        session_id="s1",
         timestamp=get_utc_now(),
         parent_id="mc1",
-        sender_ids=["u1"],
-        fact=f"fact body {entry_id}",
-        fact_tokens=f"fact body {entry_id}",
-        md_path="users/u1/.atomic_facts/atomic_fact-2026-01-01.md",
+        quality_score=0.5,
+        task_intent=f"task intent {entry_id}",
+        task_intent_tokens=f"task intent {entry_id}",
+        approach="step one",
+        approach_tokens="step one",
+        md_path="agents/a1/.cases/agent_case-2026-01-01.md",
         content_sha256=hashlib.sha256(entry_id.encode()).hexdigest(),
         vector=vector,
     )
@@ -158,7 +161,7 @@ async def test_small_db_backfills_null_vector_rows_only(
     await storage_view.repos.episode.add(
         [_episode("ep1"), _episode("ep2", vector=pre_embedded)]
     )
-    await storage_view.repos.atomic_fact.add([_fact("af1")])
+    await storage_view.repos.agent_case.add([_case("ac1")])
 
     code = await run_backfill(_ops(), phase="vectors", auto_yes=True)
     out = capsys.readouterr().out
@@ -166,10 +169,10 @@ async def test_small_db_backfills_null_vector_rows_only(
     assert code == 0
     ep1 = await storage_view.repos.episode.get_by_id("u1_ep1")
     ep2 = await storage_view.repos.episode.get_by_id("u1_ep2")
-    af1 = await storage_view.repos.atomic_fact.get_by_id("u1_af1")
+    ac1 = await storage_view.repos.agent_case.get_by_id("a1_ac1")
     assert ep1 is not None and ep1.vector is not None
     assert ep2 is not None and ep2.vector == pytest.approx(pre_embedded)
-    assert af1 is not None and af1.vector is not None
+    assert ac1 is not None and ac1.vector is not None
     assert "memories to process:  2" in out
     assert "phase 1 complete" in out
 

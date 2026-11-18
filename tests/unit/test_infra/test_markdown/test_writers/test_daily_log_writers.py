@@ -1,10 +1,11 @@
-"""Tests for AtomicFact / Foresight / AgentCase daily-log writers.
+"""Tests for the AgentCase daily-log writer, plus the frontmatter timestamp
+contract the daily-log writers share.
 
-The 4 daily-log kinds (episode + these 3) all share ``BaseDailyWriter``
-plumbing — exhaustive chassis tests live in ``test_base.py`` and
-``test_episode_writer.py`` indirectly via the e2e flows. Here we focus
-on the per-kind path resolution + frontmatter shape that each
-subclass owns: ``schema``, ``_frontmatter_updates``, and the
+The daily-log kinds (episode / image memory / agent case) all share
+``BaseDailyWriter`` plumbing — exhaustive chassis tests live in
+``test_base.py`` and ``test_episode_writer.py`` indirectly via the e2e
+flows. Here we focus on the per-kind path resolution + frontmatter shape
+that each subclass owns: ``schema``, ``_frontmatter_updates``, and the
 writer ↔ reader round-trip on a fresh tmp memory_root.
 """
 
@@ -19,13 +20,9 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentCaseReader,
     AgentCaseWriter,
-    AtomicFactReader,
-    AtomicFactWriter,
-    ForesightReader,
-    ForesightWriter,
+    EpisodeWriter,
     MarkdownReader,
 )
-from tests.fakes import handler_deps
 
 
 @pytest.fixture
@@ -33,126 +30,6 @@ def memory_root(tmp_path: Path) -> MemoryRoot:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     return mr
-
-
-# ── AtomicFact ────────────────────────────────────────────────────────────
-
-
-async def test_atomic_fact_writer_round_trip(memory_root: MemoryRoot) -> None:
-    writer = AtomicFactWriter(memory_root)
-    today = _dt.date(2026, 5, 15)
-    eid = await writer.append_entry(
-        "u1",
-        inline={
-            "owner_id": "u1",
-            "session_id": "s1",
-            "timestamp": "2026-05-15T10:00:00+00:00",
-            "parent_id": "mc_1",
-            "sender_ids": ["u1"],
-        },
-        sections={"Fact": "Alice prefers Italian."},
-        date=today,
-    )
-    path = (
-        memory_root.users_dir() / "u1" / ".atomic_facts" / "atomic_fact-2026-05-15.md"
-    )
-    parsed = await MarkdownReader.read(path)
-
-    # frontmatter
-    fm = parsed.frontmatter
-    assert fm["id"] == "atomic_fact_log_u1_2026-05-15"
-    assert fm["type"] == "atomic_fact_daily"
-    assert fm["file_type"] == "atomic_fact_daily"
-    assert fm["user_id"] == "u1"
-    assert fm["track"] == "user"
-    assert fm["date"] == "2026-05-15"
-    assert fm["entry_count"] == 1
-
-    # entry body
-    assert len(parsed.entries) == 1
-    entry = parsed.entries[0]
-    assert entry.id == eid.format()
-    structured = entry.as_structured()
-    assert structured.inline["owner_id"] == "u1"
-    assert structured.inline["parent_id"] == "mc_1"
-    assert structured.sections["Fact"] == "Alice prefers Italian."
-
-    # reader is symmetric
-    reader = AtomicFactReader(memory_root)
-    assert reader.path_for("u1", today) == path
-    found = await reader.find_structured("u1", eid)
-    assert found is not None
-    assert found.sections["Fact"] == "Alice prefers Italian."
-
-
-async def test_atomic_fact_writer_appends_multiple(memory_root: MemoryRoot) -> None:
-    writer = AtomicFactWriter(memory_root)
-    today = _dt.date(2026, 5, 15)
-    eid1 = await writer.append_entry(
-        "u1",
-        inline={
-            "owner_id": "u1",
-            "session_id": "s1",
-            "timestamp": "2026-05-15T10:00:00+00:00",
-            "parent_id": "mc_1",
-        },
-        sections={"Fact": "fact 1"},
-        date=today,
-    )
-    eid2 = await writer.append_entry(
-        "u1",
-        inline={
-            "owner_id": "u1",
-            "session_id": "s1",
-            "timestamp": "2026-05-15T11:00:00+00:00",
-            "parent_id": "mc_2",
-        },
-        sections={"Fact": "fact 2"},
-        date=today,
-    )
-    assert eid1.format() != eid2.format()
-    assert eid2.format().endswith("0002")
-
-
-# ── Foresight ─────────────────────────────────────────────────────────────
-
-
-async def test_foresight_writer_round_trip(memory_root: MemoryRoot) -> None:
-    writer = ForesightWriter(memory_root)
-    today = _dt.date(2026, 5, 15)
-    eid = await writer.append_entry(
-        "u1",
-        inline={
-            "owner_id": "u1",
-            "session_id": "s1",
-            "timestamp": "2026-05-15T10:00:00+00:00",
-            "parent_id": "mc_1",
-            "start_time": "2026-05-15T12:00:00+00:00",
-            "end_time": "2026-05-15T13:00:00+00:00",
-            "duration_days": 1,
-        },
-        sections={
-            "Foresight": "User will book lunch at noon.",
-            "Evidence": "Past calendar pattern.",
-        },
-        date=today,
-    )
-    path = memory_root.users_dir() / "u1" / ".foresights" / "foresight-2026-05-15.md"
-    parsed = await MarkdownReader.read(path)
-    fm = parsed.frontmatter
-    assert fm["id"] == "foresight_log_u1_2026-05-15"
-    assert fm["type"] == "foresight_daily"
-
-    structured = parsed.entries[0].as_structured()
-    assert structured.sections["Foresight"] == "User will book lunch at noon."
-    assert structured.sections["Evidence"] == "Past calendar pattern."
-    assert structured.inline["duration_days"] == "1"
-    assert structured.inline["start_time"].startswith("2026-05-15T12:00:00")
-
-    reader = ForesightReader(memory_root)
-    found = await reader.find_structured("u1", eid)
-    assert found is not None
-    assert found.sections["Evidence"] == "Past calendar pattern."
 
 
 # ── AgentCase ─────────────────────────────────────────────────────────────
@@ -198,71 +75,41 @@ async def test_agent_case_writer_round_trip(memory_root: MemoryRoot) -> None:
     assert found.sections["TaskIntent"].startswith("Scan contract")
 
 
-# ── round-trip with cascade handler (md → LanceDB row mapping) ─────────────
-
-
-async def test_atomic_fact_writer_output_feeds_handler(
-    memory_root: MemoryRoot,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The writer's md is exactly what AtomicFactHandler expects to read."""
-    from everos.component.embedding import EmbeddingProvider
-    from everos.component.tokenizer import Tokenizer
-    from everos.infra.cascade._projections import AtomicFactHandler
-    from everos.infra.cascade._projections._daily_log_base import ParsedEntry
-
-    class _T(Tokenizer):
-        def tokenize(self, t):  # type: ignore[no-untyped-def]
-            return [x for x in t.split() if x]
-
-        def tokenize_batch(self, ts):  # type: ignore[no-untyped-def]
-            return [self.tokenize(x) for x in ts]
-
-    class _E(EmbeddingProvider):
-        dim = 1024
-
-        async def embed(self, t):  # type: ignore[no-untyped-def]
-            return [0.0] * self.dim
-
-        async def embed_batch(self, ts):  # type: ignore[no-untyped-def]
-            return [await self.embed(x) for x in ts]
-
+async def test_agent_case_writer_appends_multiple(memory_root: MemoryRoot) -> None:
+    writer = AgentCaseWriter(memory_root)
     today = _dt.date(2026, 5, 15)
-    eid = await AtomicFactWriter(memory_root).append_entry(
-        "u1",
+    eid1 = await writer.append_entry(
+        "a1",
         inline={
-            "owner_id": "u1",
+            "owner_id": "a1",
             "session_id": "s1",
             "timestamp": "2026-05-15T10:00:00+00:00",
             "parent_id": "mc_1",
-            "sender_ids": ["u1"],
+            "quality_score": 0.5,
         },
-        sections={"Fact": "Alice prefers Italian."},
+        sections={"TaskIntent": "case 1", "Approach": "a"},
         date=today,
     )
-    path = (
-        memory_root.users_dir() / "u1" / ".atomic_facts" / "atomic_fact-2026-05-15.md"
+    eid2 = await writer.append_entry(
+        "a1",
+        inline={
+            "owner_id": "a1",
+            "session_id": "s1",
+            "timestamp": "2026-05-15T11:00:00+00:00",
+            "parent_id": "mc_2",
+            "quality_score": 0.5,
+        },
+        sections={"TaskIntent": "case 2", "Approach": "a"},
+        date=today,
     )
-    rel = path.relative_to(memory_root.root).as_posix()
-    parsed = await MarkdownReader.read(path)
-    entry = parsed.entries[0]
-    handler = AtomicFactHandler(
-        handler_deps(memory_root=memory_root, tokenizer=_T(), embedding=_E())
-    )
-    structured = entry.as_structured()
-    pe = ParsedEntry(entry.id, structured, handler._content_sha256(structured))
-    [row] = await handler._embed_entries([pe], "u1", "user", "default", "default", rel)
-    assert row.id == f"u1_{eid.format()}"
-    assert row.fact == "Alice prefers Italian."
-    assert row.parent_id == "mc_1"
-    assert row.sender_ids == ["u1"]
-    assert len(row.vector) == 1024
+    assert eid1.format() != eid2.format()
+    assert eid2.format().endswith("0002")
 
 
 # ── Display-tz contract for frontmatter timestamps (Gap #5) ────────────
 
 
-async def test_atomic_fact_frontmatter_last_appended_at_carries_display_tz_offset(
+async def test_daily_log_frontmatter_last_appended_at_carries_display_tz_offset(
     memory_root: MemoryRoot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -275,10 +122,10 @@ async def test_atomic_fact_frontmatter_last_appended_at_carries_display_tz_offse
     write an entry, read the .md file, assert the literal string ends
     with ``+08:00``.
 
-    Repeats the same check for ``ForesightWriter`` and
+    Checks a user-track writer (``EpisodeWriter``) and the agent-track
     ``AgentCaseWriter`` — they share ``BaseDailyWriter`` plumbing so a
-    regression on one would likely affect all three, but pinning each
-    rules out per-subclass shadowing of ``_frontmatter_updates``.
+    regression on one would likely affect both, but pinning each rules
+    out per-subclass shadowing of ``_frontmatter_updates``.
     """
     from everos.config import load_settings
     from everos.core.utils import datetime as _dt_module
@@ -289,9 +136,9 @@ async def test_atomic_fact_frontmatter_last_appended_at_carries_display_tz_offse
 
     today = _dt.date(2026, 5, 15)
 
-    # AtomicFact
-    af_writer = AtomicFactWriter(memory_root)
-    await af_writer.append_entry(
+    # Episode
+    ep_writer = EpisodeWriter(memory_root)
+    await ep_writer.append_entry(
         "u1",
         inline={
             "owner_id": "u1",
@@ -300,32 +147,12 @@ async def test_atomic_fact_frontmatter_last_appended_at_carries_display_tz_offse
             "parent_id": "mc_1",
             "sender_ids": ["u1"],
         },
-        sections={"Fact": "x"},
+        sections={"Summary": "x", "Content": "x"},
         date=today,
     )
-    af_path = (
-        memory_root.users_dir() / "u1" / ".atomic_facts" / "atomic_fact-2026-05-15.md"
-    )
-    af_fm = (await MarkdownReader.read(af_path)).frontmatter
-    assert af_fm["last_appended_at"].endswith("+08:00"), af_fm["last_appended_at"]
-
-    # Foresight
-    fs_writer = ForesightWriter(memory_root)
-    await fs_writer.append_entry(
-        "u1",
-        inline={
-            "owner_id": "u1",
-            "session_id": "s1",
-            "timestamp": "2026-05-15T10:00:00+00:00",
-            "scope": "today",
-            "horizon_days": 1,
-        },
-        sections={"Foresight": "x"},
-        date=today,
-    )
-    fs_path = memory_root.users_dir() / "u1" / ".foresights" / "foresight-2026-05-15.md"
-    fs_fm = (await MarkdownReader.read(fs_path)).frontmatter
-    assert fs_fm["last_appended_at"].endswith("+08:00"), fs_fm["last_appended_at"]
+    ep_path = memory_root.users_dir() / "u1" / "episodes" / "episode-2026-05-15.md"
+    ep_fm = (await MarkdownReader.read(ep_path)).frontmatter
+    assert ep_fm["last_appended_at"].endswith("+08:00"), ep_fm["last_appended_at"]
 
     # AgentCase
     ac_writer = AgentCaseWriter(memory_root)

@@ -51,11 +51,9 @@ USER_TRACK_OPERATORS: Mapping[str, str] = {
     "boundary": "Reply",  # everalgo-boundary names its batch reply model `Reply`
     "episode": "_EpisodeReply",
     "episode_summary": "_SummaryReply",
-    "atomic_facts": "_AtomicFactsReply",
     "profile_init": "_EpisodeInitOutput",
     "profile_update": "_UpdateOutput",
     "reflect": "_ReflectOutput",
-    "foresights": "_ForesightsReply",
 }
 """Operator name -> the reply model it requests; the default script shares the name."""
 

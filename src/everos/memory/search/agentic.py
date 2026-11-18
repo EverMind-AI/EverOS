@@ -3,7 +3,7 @@
 Implements the cluster main path from ``benchmarks/common/stages/search.py``
 (``enable_cluster_retrieval=True``):
 
-    fact-MaxSim (dense + sparse)
+    episode MaxSim (dense + sparse child recall, max-pooled onto parents)
         -> ahybrid_retrieve  (hybrid_full)
         -> acluster_retrieve (cluster_scoped, base=hybrid_full)
         -> aagentic_retrieve (base=cluster_scoped, round2=hybrid_full)
@@ -21,7 +21,6 @@ episode's global id -- from it.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, tzinfo
 from typing import TYPE_CHECKING, Any
@@ -49,7 +48,6 @@ if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
     from everos.component.rerank import RerankProvider
-    from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
     from everos.memory.search.recall.episode import EpisodeRecaller
 
 # ── Benchmark hyperparameters (config.py defaults) ──────────────────────────
@@ -67,10 +65,10 @@ _ROUND2_CAP: int = 40
 _MULTI_QUERY_COUNT: int = 3
 _REFINEMENT_STRATEGY: str = "multi_query"
 
-# Child-pool sizing for amaxsim_retrieve. The benchmark passes
-# len(full_fact_corpus); EverOS doesn't know the corpus size upfront,
-# so we pass a large sentinel and let the LanceDB limit clamp naturally.
-_FACT_CHILD_CANDIDATES: int = 100_000
+# Child-pool sizing for amaxsim_retrieve. The benchmark passes the corpus
+# size; EverOS doesn't know it upfront, so we pass a large sentinel and let
+# the engine's limit clamp naturally.
+_CHILD_CANDIDATES: int = 100_000
 
 # Qwen3-Reranker task instruction for the search scene (benchmark
 # ``config.reranker_instruction``). Steers the cross-encoder toward fact /
@@ -89,7 +87,6 @@ async def search_episodes_agentic(
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
-    atomic_fact_recaller: AtomicFactRecaller,
     cluster_store: ClusterStore,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     reranker: RerankProvider,
@@ -105,7 +102,6 @@ async def search_episodes_agentic(
         owner_id: Owner whose memories are searched.
         where: Compiled filter (owner + any request filters).
         episode_recaller: Episode-table sparse + dense + fetch callbacks.
-        atomic_fact_recaller: AtomicFact-table sparse + dense callbacks.
         cluster_store: Source of the owner's user-memory clusters.
         embed_query_fn: Async ``(str) -> list[float]`` query embedder.
         reranker: Cross-encoder rerank provider.
@@ -126,51 +122,45 @@ async def search_episodes_agentic(
         episodes_by_entry.update(result.stored_by_id)
         return result.candidates
 
-    # 1. Fact-level child retrieve closures (dense + sparse via both tables).
-    async def _fact_dense(q: str, k: int) -> list[Candidate]:
+    # 1. Child retrieve closures (dense + sparse over the episode table).
+    #    An episode becomes its own MaxSim child: there is no fact layer
+    #    between the two recall routes and the ranking any more.
+    async def _dense(q: str, k: int) -> list[Candidate]:
         vec = await embed_query_fn(q)
         if not vec:
             return []
-        fact_results, ep_results = await asyncio.gather(
-            atomic_fact_recaller.dense_recall(vec, where, limit=k),
-            episode_recaller.dense_recall_subject_as_child(vec, where, limit=k),
-        )
-        return (
-            fact_results.within_radius(radius).candidates
-            + ep_results.within_radius(radius).candidates
-        )
+        children = await episode_recaller.dense_recall_as_child(vec, where, limit=k)
+        episodes_by_entry.update(children.stored_by_id)
+        return children.within_radius(radius).candidates
 
-    async def _fact_sparse(q: str, k: int) -> list[Candidate]:
-        fact_results, ep_results = await asyncio.gather(
-            atomic_fact_recaller.sparse_recall(q, where, limit=k),
-            episode_recaller.sparse_recall_as_child(q, where, limit=k),
-        )
-        return fact_results.candidates + ep_results.candidates
+    async def _sparse(q: str, k: int) -> list[Candidate]:
+        children = await episode_recaller.sparse_recall_as_child(q, where, limit=k)
+        episodes_by_entry.update(children.stored_by_id)
+        return children.candidates
 
-    # 2. parent_fetch: maps entry_ids (from atomic_fact.parent_id) to episodes.
-    #    Atomic facts always point to episodes via entry_id regardless of
-    #    whether the episode is memcell-based or cluster-merged.
+    # 2. parent_fetch: the child candidates are keyed by ``entry_id``; map them
+    #    to whole episodes so the cluster / rerank stages see the full body.
     async def _parent_fetch(parent_ids: list[str]) -> list[Candidate]:
         parents = _keep(await episode_recaller.fetch_parents(parent_ids, where))
         return [_with_doc_metadata(c) for c in parents]
 
-    # 3. MaxSim RetrieveFns: fact vectors/BM25 -> max-pool by memcell -> candidates.
-    async def _dense(q: str, k: int) -> list[Candidate]:
+    # 3. MaxSim RetrieveFns: child vectors/BM25 -> max-pool -> candidates.
+    async def _dense_maxsim(q: str, k: int) -> list[Candidate]:
         return await amaxsim_retrieve(
             q,
-            child_retrieve=_fact_dense,
+            child_retrieve=_dense,
             parent_fetch=_parent_fetch,
             top_n=k,
-            child_candidates=_FACT_CHILD_CANDIDATES,
+            child_candidates=_CHILD_CANDIDATES,
         )
 
-    async def _sparse(q: str, k: int) -> list[Candidate]:
+    async def _sparse_maxsim(q: str, k: int) -> list[Candidate]:
         return await amaxsim_retrieve(
             q,
-            child_retrieve=_fact_sparse,
+            child_retrieve=_sparse,
             parent_fetch=_parent_fetch,
             top_n=k,
-            child_candidates=_FACT_CHILD_CANDIDATES,
+            child_candidates=_CHILD_CANDIDATES,
         )
 
     # 4. hybrid_full: RRF fusion of dense + sparse MaxSim.
@@ -182,8 +172,8 @@ async def search_episodes_agentic(
         ):
             return await ahybrid_retrieve(
                 q,
-                dense_retrieve=_dense,
-                sparse_retrieve=_sparse,
+                dense_retrieve=_dense_maxsim,
+                sparse_retrieve=_sparse_maxsim,
                 top_n=k,
                 dense_candidates=_DENSE_CANDIDATES,
                 sparse_candidates=_SPARSE_CANDIDATES,

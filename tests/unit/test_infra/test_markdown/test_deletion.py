@@ -1,4 +1,4 @@
-"""Removing entries from the daily logs: by session, by id, by parent."""
+"""Removing entries from the daily logs: by session and by id."""
 
 from __future__ import annotations
 
@@ -10,11 +10,10 @@ import pytest
 from everos.core.locks import LOCKS, owner_key
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
-    MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
     MarkdownReader,
 )
-from everos.memory.models import AtomicFact, Episode
+from everos.memory.models import Episode
 from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope
 
 _TS = 1_747_216_800_000
@@ -203,20 +202,3 @@ async def test_read_many_returns_the_episodes_in_md(root: MemoryRoot) -> None:
     assert found.ref == a
     assert (found.item.episode, found.item.session_id) == ("talk s1", "s1")
     assert found.item.timestamp == _TS
-
-
-async def test_remove_by_parents_only_those_facts(root: MemoryRoot) -> None:
-    facts = MarkdownAtomicFactStore(root)
-    refs = await facts.append_many(
-        _scope(),
-        [
-            AtomicFact(owner_id="u1", content=f"f{p}", timestamp=_TS, parent_id=p)
-            for p in ("ep_1", "ep_10", "ep_1")
-        ],
-        only_if=NO_SOURCE_CHECK,
-    )
-
-    removed = await facts.remove_by_parents(_scope(), ["ep_1"])
-
-    assert [r.entry_id for r in removed] == [refs[0].entry_id, refs[2].entry_id]
-    assert await _ids(root, refs[0].md_path) == [refs[1].entry_id]

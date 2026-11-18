@@ -6,8 +6,6 @@ Contract per the final design:
   (and optionally ``profiles``); ``agent`` returns ``agent_cases`` +
   ``agent_skills``. The four ``data.*`` arrays always exist; routes not
   applicable to the current ``owner_type`` stay as ``[]``.
-* ``atomic_facts`` are **nested** inside :class:`SearchEpisodeItem`,
-  never returned as a top-level array.
 * Item-side ``owner_type`` / ``type`` fields are intentionally narrowed
   to the currently-emitted Literal so callers get a tight schema. Loosen
   them only when a new emission path (agent episodes, agent profiles)
@@ -102,8 +100,9 @@ class SearchRequest(BaseModel):
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     """Post-fusion relevance floor for the episode HYBRID path.
 
-    Applied after heap-expand against the LR-calibrated score in ``[0, 1]``:
-    items scoring below this value are dropped. Independent of ``radius``
+    Applied to each episode's fused score after ranking; items scoring below
+    it are dropped. The value is bounded to ``[0, 1]`` but weighed against the
+    fusion's own scale, which is not a probability. Independent of ``radius``
     (which gates raw cosine at recall time); ``None`` disables the floor.
     Only the episode hybrid path consumes it — other methods ignore it.
     """
@@ -113,8 +112,7 @@ class SearchRequest(BaseModel):
         description=(
             "Opt-in LLM rerank pass for HYBRID. Applies to agent_case "
             "and agent_skill fusion only; the episode hybrid path "
-            "has built-in fact eviction and ignores this flag. "
-            "Ignored by keyword / vector / agentic."
+            "ignores this flag. Ignored by keyword / vector / agentic."
         ),
     )
     filters: FilterNode | None = None
@@ -149,16 +147,6 @@ class SearchRequest(BaseModel):
 # ── Item DTOs ────────────────────────────────────────────────────────────
 
 
-class SearchAtomicFactItem(BaseModel):
-    """A single atomic fact nested inside its parent episode."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    content: str
-    score: float
-
-
 class SearchEpisodeItem(BaseModel):
     """Episode hit — always user-scoped in the current emission contract.
 
@@ -184,7 +172,6 @@ class SearchEpisodeItem(BaseModel):
     episode: str
     type: Literal["Conversation"]
     score: float
-    atomic_facts: list[SearchAtomicFactItem] = Field(default_factory=list)
 
 
 class SearchProfileItem(BaseModel):

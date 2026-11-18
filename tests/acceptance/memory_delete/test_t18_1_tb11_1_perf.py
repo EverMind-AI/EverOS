@@ -1,10 +1,10 @@
 """T18.1, TB11.1: deletion latency and owner-lock numbers on a year of data.
 
 Two roots differ only in N, the owners unrelated to the deleted sessions (10 /
-100). Users u1 and u2 have a year of daily files (episode, atomic fact,
-foresight: ~1,100 per user); sessions S1..S7 name both users, each with
-entries on three days. Lock numbers come from the server's own histograms
-(spec 1 §5.1), read as deltas around each deletion.
+100). Users u1 and u2 have a year of daily episode files (~390 entries per
+user); sessions S1..S7 name both users, each with entries on three days. Lock
+numbers come from the server's own histograms (spec 1 §5.1), read as deltas
+around each deletion.
 
 Probe: only md writes take the owner lock, so a small /add that crosses no
 boundary never queues on it. The probe therefore drives the real /add path
@@ -51,24 +51,11 @@ _INF = math.inf
 
 async def _seed_async(root: Path, unrelated: int) -> list[str]:
     from everos.infra.persistence import MemoryRoot
-    from everos.infra.persistence.markdown import (
-        AtomicFactWriter,
-        EpisodeWriter,
-        ForesightWriter,
-    )
-    from everos.infra.persistence.markdown.stores import (
-        _atomic_fact_entry,
-        _episode_entry,
-        _foresight_entry,
-    )
-    from everos.memory.models import AtomicFact, Episode, Foresight
+    from everos.infra.persistence.markdown import EpisodeWriter
+    from everos.infra.persistence.markdown.stores import _episode_entry
+    from everos.memory.models import Episode
 
-    mr = MemoryRoot(root)
-    episodes, facts, foresights = (
-        EpisodeWriter(mr),
-        AtomicFactWriter(mr),
-        ForesightWriter(mr),
-    )
+    episodes = EpisodeWriter(MemoryRoot(root))
     days_of = {s: {k * 40 + j for j in range(3)} for k, s in enumerate(_SESSIONS, 1)}
     by_id: list[str] = []
     for d in range(365):
@@ -87,39 +74,6 @@ async def _seed_async(root: Path, unrelated: int) -> list[str]:
                             summary="s",
                             session_id=s,
                             sender_ids=["u1", "u2"],
-                            parent_id=f"mc_{s}",
-                        )
-                    )
-                    for s in sessions
-                ],
-                date=day,
-            )
-            await facts.append_entries(
-                owner,
-                [
-                    _atomic_fact_entry(
-                        AtomicFact(
-                            owner_id=owner,
-                            content=f"fact {s} {d}",
-                            timestamp=ts,
-                            session_id=s,
-                            parent_id=eid.format(),
-                        )
-                    )
-                    for s, eid in zip(sessions, eids, strict=True)
-                ],
-                date=day,
-            )
-            await foresights.append_entries(
-                owner,
-                [
-                    _foresight_entry(
-                        Foresight(
-                            owner_id=owner,
-                            foresight=f"foresight {s} {d}",
-                            evidence="said so",
-                            timestamp=ts,
-                            session_id=s,
                             parent_id=f"mc_{s}",
                         )
                     )

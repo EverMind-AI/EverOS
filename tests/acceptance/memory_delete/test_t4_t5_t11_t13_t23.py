@@ -227,9 +227,10 @@ def test_t23_1_add_in_flight_when_its_session_is_deleted(server: Any) -> None:
     run starts from one. 20 rounds; a round counts only if the call was held."""
     srv = server
     ome = srv.root / ".index" / "sqlite" / "ome.db"
+    # The OME run an episode starts (it clusters the episode for the profile).
     count_sql = (
-        "SELECT COUNT(*) FROM run_record WHERE strategy_name IN"
-        " ('extract_atomic_facts', 'trigger_profile_clustering')"
+        "SELECT COUNT(*) FROM run_record"
+        " WHERE strategy_name = 'trigger_profile_clustering'"
     )
     hits = 0
     for r in range(20):

@@ -17,7 +17,7 @@ import pytest
 
 from everos.infra.persistence.lancedb import (
     BUSINESS_SCHEMAS_WITH_VECTOR,
-    AtomicFact,
+    AgentCase,
     Episode,
     LanceDBMigrationError,
 )
@@ -131,9 +131,9 @@ async def test_migrate_table_schemas_raises_on_alter_failure(
     marker = lancedb_dir / ".table_schema_version"
     assert not marker.exists()
 
-    # Sibling tables reached in the loop before the failure keep the
-    # per-table alter that already succeeded — only the marker write
+    # The loop goes on past the failed table: the sibling tables keep the
+    # per-table alter that succeeded — only the marker write
     # (i.e. "the migration as a whole is done") is gated.
-    atomic_fact_table = await storage.lance.table(AtomicFact.TABLE_NAME, AtomicFact)
-    atomic_fact_schema = await atomic_fact_table.schema()
-    assert atomic_fact_schema.field("vector").nullable is True
+    agent_case_table = await storage.lance.table(AgentCase.TABLE_NAME, AgentCase)
+    agent_case_schema = await agent_case_table.schema()
+    assert agent_case_schema.field("vector").nullable is True

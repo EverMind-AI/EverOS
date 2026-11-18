@@ -79,9 +79,9 @@ async def test_erase_failure_requeues_md_paths() -> None:
     """R36 / TLA+ Fence_SpecV2: a table that times out is logged once and its
     md files are queued again for the cascade."""
     ledger = _RecordingLedger()
-    fact_repo = _RecordingRepo()
+    case_repo = _RecordingRepo()
     eraser = FencedIndexEraser(
-        index_repositories(episode=_RecordingRepo(hang=True), atomic_fact=fact_repo),
+        index_repositories(episode=_RecordingRepo(hang=True), agent_case=case_repo),
         DeleteFence(),
         ledger,  # type: ignore[arg-type]
         timeout_s=0.05,
@@ -96,14 +96,14 @@ async def test_erase_failure_requeues_md_paths() -> None:
                     _ref("ep_2", "e2.md"),
                     _ref("ep_3", "e1.md"),
                 ],
-                "atomic_fact": [_ref("af_1", "f.md")],
+                "agent_case": [_ref("ac_1", "f.md")],
             },
         )
 
     failed = [e for e in logs if e["event"] == "memory_delete_index_erase_failed"]
     assert [(e["table"], e["rows"]) for e in failed] == [("episode", 3)]
     assert ledger.enqueued == [("e1.md", "episode"), ("e2.md", "episode")]
-    assert len(fact_repo.deletes) == 1  # the other table still erased
+    assert len(case_repo.deletes) == 1  # the other table still erased
 
 
 async def test_erase_owner_deletes_by_owner_and_never_raises() -> None:

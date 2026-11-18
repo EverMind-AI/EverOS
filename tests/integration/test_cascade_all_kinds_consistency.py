@@ -1,6 +1,6 @@
-"""Strict md <-> lancedb consistency across all 4 daily-log kinds.
+"""Strict md <-> lancedb consistency for the episode and agent-case logs.
 
-For each registered daily-log kind, seed N entries via the kind's
+For each of these daily-log kinds, seed N entries via the kind's
 writer, wait for the cascade to drain, then assert exact equality
 between md state and LanceDB state:
 
@@ -35,15 +35,11 @@ from everos.infra.cascade.registry import KIND_REGISTRY
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     AgentCaseWriter,
-    AtomicFactWriter,
     EpisodeWriter,
-    ForesightWriter,
     MarkdownReader,
 )
 from everos.infra.persistence.records.agent_case import AgentCase
-from everos.infra.persistence.records.atomic_fact import AtomicFact
 from everos.infra.persistence.records.episode import Episode
-from everos.infra.persistence.records.foresight import Foresight
 from tests._consistency_assertions import _daily_log_sha_for_entry
 from tests.fakes.storage import Storage
 
@@ -93,19 +89,6 @@ class _DailyLogKindCase:
     build_item: Callable[[str, int], tuple[Mapping[str, object], Mapping[str, str]]]
 
 
-def _af_item(scope_id: str, j: int):
-    return (
-        {
-            "owner_id": scope_id,
-            "session_id": f"s_{j}",
-            "timestamp": "2026-05-19T07:04:26+00:00",
-            "parent_id": f"mc_{j}",
-            "sender_ids": [scope_id],
-        },
-        {"Fact": f"af fact body {j}"},
-    )
-
-
 def _ep_item(scope_id: str, j: int):
     return (
         {
@@ -116,19 +99,6 @@ def _ep_item(scope_id: str, j: int):
             "sender_ids": [scope_id],
         },
         {"Subject": f"subj {j}", "Summary": f"sum {j}", "Content": f"content {j}"},
-    )
-
-
-def _fs_item(scope_id: str, j: int):
-    return (
-        {
-            "owner_id": scope_id,
-            "session_id": f"s_{j}",
-            "timestamp": "2026-05-19T07:04:26+00:00",
-            "parent_id": f"mc_{j}",
-            "sender_ids": [scope_id],
-        },
-        {"Foresight": f"foresight body {j}"},
     )
 
 
@@ -151,15 +121,6 @@ def _ac_item(scope_id: str, j: int):
 
 _KIND_CASES: list[_DailyLogKindCase] = [
     _DailyLogKindCase(
-        name="atomic_fact",
-        scope="users",
-        dir_name=".atomic_facts",
-        file_prefix="atomic_fact",
-        writer_factory=AtomicFactWriter,
-        table_cls=AtomicFact,
-        build_item=_af_item,
-    ),
-    _DailyLogKindCase(
         name="episode",
         scope="users",
         dir_name="episodes",
@@ -167,15 +128,6 @@ _KIND_CASES: list[_DailyLogKindCase] = [
         writer_factory=EpisodeWriter,
         table_cls=Episode,
         build_item=_ep_item,
-    ),
-    _DailyLogKindCase(
-        name="foresight",
-        scope="users",
-        dir_name=".foresights",
-        file_prefix="foresight",
-        writer_factory=ForesightWriter,
-        table_cls=Foresight,
-        build_item=_fs_item,
     ),
     _DailyLogKindCase(
         name="agent_case",

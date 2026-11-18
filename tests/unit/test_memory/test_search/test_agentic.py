@@ -25,15 +25,14 @@ from everos.memory.models import Cluster as DomainCluster
 from everos.memory.ports import Comparison, Scope
 from everos.memory.search.agentic import _with_doc_metadata, search_episodes_agentic
 from everos.memory.search.dto import SearchEpisodeItem
-from everos.memory.search.recall import AtomicFactRecaller, EpisodeRecaller
+from everos.memory.search.recall import EpisodeRecaller
 from everos.memory.search.recall.base import RecallerDeps
 
-from ._records import ScriptedIndex, hit, stored_episode, stored_fact
+from ._records import ScriptedIndex, hit, stored_episode
 
 # ── Stubs ────────────────────────────────────────────────────────────────
 
 _EPISODE = stored_episode("ep_1", parent_id="mc_1")
-_FACT = stored_fact("af_1", parent_id="ep_1")
 
 
 def _deps() -> RecallerDeps:
@@ -68,12 +67,6 @@ def ep_recaller() -> EpisodeRecaller:
     return EpisodeRecaller(_deps(), index)  # type: ignore[arg-type]
 
 
-@pytest.fixture()
-def fact_recaller() -> AtomicFactRecaller:
-    index = ScriptedIndex(sparse=[hit(_FACT, 2.0)], dense=[hit(_FACT, 0.9)])
-    return AtomicFactRecaller(_deps(), index)  # type: ignore[arg-type]
-
-
 class _StubClusterStore:
     """Serves a fixed cluster set for any owner."""
 
@@ -104,7 +97,6 @@ def clusters() -> list[Cluster]:
 
 async def test_agentic_search_wires_benchmark_hyperparams(
     ep_recaller: EpisodeRecaller,
-    fact_recaller: AtomicFactRecaller,
     clusters: list[Cluster],
 ) -> None:
     """aagentic_retrieve must be called with the exact benchmark hyperparams."""
@@ -152,7 +144,6 @@ async def test_agentic_search_wires_benchmark_hyperparams(
             app_id="test_app",
             project_id="test_proj",
             episode_recaller=ep_recaller,
-            atomic_fact_recaller=fact_recaller,
             cluster_store=_StubClusterStore(clusters),
             embed_query_fn=fake_embed,
             reranker=_StubReranker(),
@@ -173,7 +164,6 @@ async def test_agentic_search_wires_benchmark_hyperparams(
 
 async def test_agentic_search_shows_dates_in_the_given_zone(
     ep_recaller: EpisodeRecaller,
-    fact_recaller: AtomicFactRecaller,
     clusters: list[Cluster],
 ) -> None:
     """The sufficiency prompt renders candidate dates in the zone passed in."""
@@ -193,7 +183,6 @@ async def test_agentic_search_shows_dates_in_the_given_zone(
             owner_id="alice",
             where="owner_id = 'alice' AND owner_type = 'user'",
             episode_recaller=ep_recaller,
-            atomic_fact_recaller=fact_recaller,
             cluster_store=_StubClusterStore(clusters),
             embed_query_fn=fake_embed,
             reranker=_StubReranker(),
@@ -207,7 +196,6 @@ async def test_agentic_search_shows_dates_in_the_given_zone(
 
 async def test_agentic_search_loads_user_memory_clusters(
     ep_recaller: EpisodeRecaller,
-    fact_recaller: AtomicFactRecaller,
 ) -> None:
     """The cluster store is asked for the owner's user-memory clusters."""
     mock_list = AsyncMock(return_value=[])
@@ -228,7 +216,6 @@ async def test_agentic_search_loads_user_memory_clusters(
             app_id="bench_app",
             project_id="bench_proj",
             episode_recaller=ep_recaller,
-            atomic_fact_recaller=fact_recaller,
             cluster_store=MagicMock(list_for_owner=mock_list),
             embed_query_fn=fake_embed,
             reranker=_StubReranker(),
@@ -249,7 +236,6 @@ async def test_agentic_search_loads_user_memory_clusters(
 
 async def test_agentic_search_shapes_candidates_with_episode_id(
     ep_recaller: EpisodeRecaller,
-    fact_recaller: AtomicFactRecaller,
     clusters: list[Cluster],
 ) -> None:
     """The DTO id is the episode's global id, not the entry id it was keyed by."""
@@ -272,7 +258,6 @@ async def test_agentic_search_shapes_candidates_with_episode_id(
             app_id="test_app",
             project_id="test_proj",
             episode_recaller=ep_recaller,
-            atomic_fact_recaller=fact_recaller,
             cluster_store=_StubClusterStore(clusters),
             embed_query_fn=fake_embed,
             reranker=_StubReranker(),
@@ -314,7 +299,6 @@ def test_doc_metadata_bridge_wraps_the_episode_for_format_docs() -> None:
 
 async def test_agentic_emits_recall_and_rank_spans(
     ep_recaller: EpisodeRecaller,
-    fact_recaller: AtomicFactRecaller,
     clusters: list[Cluster],
 ) -> None:
     """The agentic recall closures (base_retrieve) and the cross-encoder
@@ -363,7 +347,6 @@ async def test_agentic_emits_recall_and_rank_spans(
                 app_id="test_app",
                 project_id="test_proj",
                 episode_recaller=ep_recaller,
-                atomic_fact_recaller=fact_recaller,
                 cluster_store=_StubClusterStore(clusters),
                 embed_query_fn=fake_embed,
                 reranker=_StubReranker(),
@@ -381,7 +364,6 @@ async def test_agentic_emits_recall_and_rank_spans(
 
 async def test_cross_encoder_scores_the_episode_text(
     ep_recaller: EpisodeRecaller,
-    fact_recaller: AtomicFactRecaller,
     clusters: list[Cluster],
 ) -> None:
     """The reranker sees the episode body, not the ``_format_docs`` dict."""
@@ -409,7 +391,6 @@ async def test_cross_encoder_scores_the_episode_text(
             owner_id="alice",
             where="owner_id = 'alice'",
             episode_recaller=ep_recaller,
-            atomic_fact_recaller=fact_recaller,
             cluster_store=_StubClusterStore(clusters),
             embed_query_fn=fake_embed,
             reranker=_SpyReranker(),
@@ -435,7 +416,7 @@ async def test_large_cluster_bounds_rerank_without_losing_top_recall(
     ranked = [hit(record, 1.0 / (i + 1)) for i, record in enumerate(reversed(records))]
     index = ScriptedIndex(
         sparse=ranked,
-        subject=ranked,
+        dense=ranked,
         found=[hit(record) for record in records],
         filter_found=True,
     )
@@ -477,7 +458,6 @@ async def test_large_cluster_bounds_rerank_without_losing_top_recall(
             owner_id="alice",
             where=Comparison("owner_id", "eq", "alice"),
             episode_recaller=EpisodeRecaller(_deps(), index),
-            atomic_fact_recaller=AtomicFactRecaller(_deps(), ScriptedIndex()),
             cluster_store=_StubClusterStore(
                 [
                     Cluster(

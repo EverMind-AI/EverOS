@@ -3,8 +3,7 @@
 Path: ``agents/<scope_id>/.cases/agent_case-<YYYY-MM-DD>.md``.
 
 The directory is dotfile-hidden (``.cases``) so users only see the
-curated ``agent_skills/`` view, not the raw per-task case log — same
-convention as ``.atomic_facts`` / ``.foresights``.
+curated ``agent_skills/`` view, not the raw per-task case log.
 
 Each entry records one task an agent worked on: intent, approach taken,
 quality score, and an optional pivotal insight. A MemCell extracted on

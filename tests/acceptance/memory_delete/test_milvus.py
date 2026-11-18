@@ -133,23 +133,20 @@ def test_t7_2_index_rows_go_with_the_response_on_milvus(
 
 
 def test_tb4_1_by_id_on_milvus(make_server: Any, milvus: dict[str, str]) -> None:
-    """B4 on Milvus: the episode's and its facts' rows go with the response."""
+    """B4 on Milvus: the episode's row goes with the response."""
     srv = make_server()
     srv.start(**_env(milvus))
     assert srv.add("s1", chat("u1", "genet52")).status_code == 200
     assert srv.flush("s1").status_code == 200
     wait_converged(srv.base)
     ids = _episode_ids(milvus, "u1")
-    assert len(ids) == 1, ids  # so every u1 fact is this episode's
-    facts = {i for i in _milvus_ids(milvus, "atomic_fact") if i.startswith("u1_")}
-    assert facts, "positive control: the facts are indexed in Milvus"
+    assert len(ids) == 1, ids
     assert srv.post("/cascade/quiesce", {}).status_code == 200
 
     (target,) = ids
     assert srv.delete_by_ids([target]).status_code == 200
 
     assert target not in _episode_ids(milvus, "u1")
-    assert not _milvus_ids(milvus, "atomic_fact") & facts
 
 
 class _Gate:
@@ -237,7 +234,7 @@ def test_t24_1_a_unreachable_index_still_200_and_caught_up(
         gate.unblock()
 
     assert resp.status_code == 200, resp.text
-    assert took <= 15 * 3 + 1, took  # episode, atomic_fact, foresight tables
+    assert took <= 15 * 1 + 1, took  # the episode table holds the session's rows
     deadline = time.monotonic() + 60
     left = ids
     while time.monotonic() < deadline:

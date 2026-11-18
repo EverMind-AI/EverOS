@@ -23,12 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Work on the episode runs once and is shared by its owners; work on one
   owner's state runs on `EpisodeExtractedForOwner`. Payloads persisted by
   1.7.0 still load, as one-copy events.
-- **Atomic facts are extracted once per memcell.** `extract_atomic_facts`
-  makes one model call per episode and writes the facts under every owner of
-  the memcell, each owner's facts parented to that owner's copy, so a memcell
-  with several user senders no longer pays one call per sender.
-  `trigger_profile_clustering` likewise embeds the episode once for all of its
-  owners.
+- `trigger_profile_clustering` embeds the episode once for all of its owners.
 - **Episode summaries are written offline, from the episode.** Adding a
   memcell now makes one model call, the episode. Every copy is stored with a
   placeholder summary: the episode's opening, cut at a word boundary to a
@@ -51,12 +46,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the ingest identity, so a store ingested with an earlier config is not
   reused.
 
+### Removed
+
+- **Atomic facts and foresight, end to end.** Nothing extracts, stores,
+  indexes or returns them any more: the `extract_atomic_facts` and
+  `extract_foresight` strategies and the `AtomicFactsExtracted` /
+  `UserPipelineStarted` events are gone, and so are the domain models
+  (`AtomicFact`, `Foresight`), their store and index ports,
+  `Stores.atomic_fact` / `.foresight`, `Indexes.atomic_fact`, the
+  `.atomic_facts/` and `.foresights/` daily logs (frontmatter, readers,
+  writers, stores, owner-directory deletion), the `atomic_fact` and
+  `foresight` index records and their LanceDB / Milvus repositories, the two
+  cascade kinds and their handlers, and the two `[llm.*]` task sections.
+  Search loses what only they fed: `episodes[].atomic_facts` in the
+  `/memory/search` response, the HYBRID heap-expand fact expansion (HYBRID
+  now fuses the two episode recall routes and ranks episodes), and the
+  atomic-fact MaxSim route behind `method="vector"` (VECTOR now runs ANN over
+  the episode vectors). A session or id deletion no longer removes facts, and
+  `finish_reflection` deprecates a merge's replaced members on the merged
+  episode's own `EpisodeExtracted`, waiting on nothing.
+- A store written by an earlier release keeps its leftover fact and
+  foresight files and tables: no cascade kind matches them, no index table is
+  opened, and nothing reads them. They stay on disk until the owner is
+  deleted or the store is purged.
+
 ### Upgrade
 
 | If you | Then |
 |---|---|
+| set `[strategies.extract_atomic_facts]` or `[strategies.extract_foresight]` in `ome.toml` | remove the section: no strategy answers to those names |
+| set `[llm.atomic_fact]` or `[llm.foresight]`, or `EVEROS_LLM__ATOMIC_FACT__*` / `EVEROS_LLM__FORESIGHT__*` | remove it: an unknown task fails startup |
+| read `atomic_facts` from a `/memory/search` response | read `episodes`: facts are no longer extracted or nesting |
 | disabled `extract_user_profile` in `ome.toml` | also disable `split_episode_by_owner`: it only feeds the profile |
 | want no summary call at all | disable `summarize_episode`; episodes keep their placeholder summary |
+| set `[strategies.extract_atomic_facts]` or `[strategies.extract_foresight]` in `ome.toml` | remove the section: no strategy answers to those names |
+| set `[llm.atomic_fact]` / `[llm.foresight]`, or `EVEROS_LLM__ATOMIC_FACT__*` / `EVEROS_LLM__FORESIGHT__*` | remove it: an unknown task fails startup |
+| read `atomic_facts` from a `/memory/search` response | read `episodes`: no facts are extracted or nested |
 | read `owner_id`, `episode_entry_id` or `owner_name` from `EpisodeExtracted` in your own strategy | read `copies` (one entry per owner), or subscribe to `EpisodeExtractedForOwner` |
 | build `UserMemoryPipeline` or implement `EpisodeStore` in Python | drop `summary_llm`; add `replace_summary` |
 
@@ -65,8 +90,9 @@ profile run still pending under the 1.7.0 event when the old server stopped
 fails on the new server (`AttributeError`) and is dead-lettered after its
 retries; that owner's profile catches up on their next episode, which also
 folds their newer episodes still waiting, up to `[profile]
-max_episodes_per_call`. Pending atomic-fact, clustering and Reflection runs
-resume as they are.
+max_episodes_per_call`. Pending clustering and Reflection runs resume as they
+are; a pending atomic-fact or foresight run has no strategy left to run and is
+dropped with a warning.
 
 ## [1.7.0] - 2026-11-13
 

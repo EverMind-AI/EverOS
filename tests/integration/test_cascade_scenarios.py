@@ -36,11 +36,11 @@ from everos.component.tokenizer import build_tokenizer
 from everos.infra.cascade import CascadeConfig, CascadeOrchestrator
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
-    AtomicFactWriter,
+    EpisodeWriter,
     MarkdownReader,
     MarkdownWriter,
 )
-from everos.infra.persistence.records.atomic_fact import AtomicFact
+from everos.infra.persistence.records.episode import Episode
 from tests.fakes.storage import Storage
 
 
@@ -202,7 +202,7 @@ async def _wait_drain(storage: Storage, deadline: float = 15.0) -> None:
 
 
 async def _count_lance_rows_md(storage: Storage, md_path: str) -> int:
-    table = await storage.lance.table(AtomicFact.TABLE_NAME, AtomicFact)
+    table = await storage.lance.table(Episode.TABLE_NAME, Episode)
     return await table.count_rows(filter=f"md_path = '{md_path}'")
 
 
@@ -213,20 +213,20 @@ async def _count_md_entries(absolute: Path) -> int:
     return len(parsed.entries)
 
 
-def _atomic_fact_md_path(owner_id: str, bucket: _dt.date) -> str:
+def _episode_md_path(owner_id: str, bucket: _dt.date) -> str:
     return (
-        f"default_app/default_project/users/{owner_id}/.atomic_facts/"
-        f"atomic_fact-{bucket.isoformat()}.md"
+        f"default_app/default_project/users/{owner_id}/episodes/"
+        f"episode-{bucket.isoformat()}.md"
     )
 
 
-async def _seed_atomic_facts(
-    writer: AtomicFactWriter,
+async def _seed_episodes(
+    writer: EpisodeWriter,
     *,
     owner_id: str,
     bucket: _dt.date,
     n_items: int,
-    text_prefix: str = "seed fact",
+    text_prefix: str = "seed episode",
 ) -> None:
     items = [
         (
@@ -237,7 +237,7 @@ async def _seed_atomic_facts(
                 "parent_id": f"mc_{j}",
                 "sender_ids": [owner_id],
             },
-            {"Fact": f"{text_prefix} {j}"},
+            {"Summary": "s", "Content": f"{text_prefix} {j}"},
         )
         for j in range(n_items)
     ]
@@ -250,7 +250,7 @@ async def _seed_atomic_facts(
 async def test_rename_same_owner_kind_in_bucket(
     cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
-    """``mv atomic_fact-D1.md atomic_fact-D2.md`` inside the same owner+kind.
+    """``mv episode-D1.md episode-D2.md`` inside the same owner+kind.
 
     Both paths match the kind glob. Expected: src lancedb rows cleared,
     dest md_path becomes the new home for the (entry_id, content) pairs.
@@ -261,15 +261,13 @@ async def test_rename_same_owner_kind_in_bucket(
     await asyncio.sleep(0.3)
 
     try:
-        writer = AtomicFactWriter(root=memory_root)
+        writer = EpisodeWriter(root=memory_root)
         owner_id = "u_rename_a"
         bucket_src = _dt.date(2026, 5, 18)
         bucket_dest = _dt.date(2026, 5, 20)
-        await _seed_atomic_facts(
-            writer, owner_id=owner_id, bucket=bucket_src, n_items=5
-        )
-        src_md_path = _atomic_fact_md_path(owner_id, bucket_src)
-        dest_md_path = _atomic_fact_md_path(owner_id, bucket_dest)
+        await _seed_episodes(writer, owner_id=owner_id, bucket=bucket_src, n_items=5)
+        src_md_path = _episode_md_path(owner_id, bucket_src)
+        dest_md_path = _episode_md_path(owner_id, bucket_dest)
         src_absolute = memory_root.root / src_md_path
         dest_absolute = memory_root.root / dest_md_path
 
@@ -313,11 +311,11 @@ async def test_rename_out_of_kind_glob_degrades_to_delete(
     await asyncio.sleep(0.3)
 
     try:
-        writer = AtomicFactWriter(root=memory_root)
+        writer = EpisodeWriter(root=memory_root)
         owner_id = "u_rename_oob"
         bucket = _dt.date(2026, 5, 18)
-        await _seed_atomic_facts(writer, owner_id=owner_id, bucket=bucket, n_items=4)
-        src_md_path = _atomic_fact_md_path(owner_id, bucket)
+        await _seed_episodes(writer, owner_id=owner_id, bucket=bucket, n_items=4)
+        src_md_path = _episode_md_path(owner_id, bucket)
         src_absolute = memory_root.root / src_md_path
         # An obviously-out-of-glob target: hide it under a plain dir
         # that no kind spec registers.
@@ -353,7 +351,7 @@ async def test_rename_out_of_kind_glob_degrades_to_delete(
 async def test_rename_cross_owner_keeps_frontmatter_owner(
     cascade_runtime: MemoryRoot, storage: Storage
 ) -> None:
-    """``mv users/u_a/.atomic_facts/X.md users/u_b/.atomic_facts/X.md``.
+    """``mv users/u_a/episodes/X.md users/u_b/episodes/X.md``.
 
     Frontmatter ``user_id`` stays as ``u_a`` (rename doesn't rewrite the
     file). resolve_owner pulls owner_id from frontmatter, so dest
@@ -367,13 +365,13 @@ async def test_rename_cross_owner_keeps_frontmatter_owner(
     await asyncio.sleep(0.3)
 
     try:
-        writer = AtomicFactWriter(root=memory_root)
+        writer = EpisodeWriter(root=memory_root)
         bucket = _dt.date(2026, 5, 18)
         owner_a = "u_a"
         owner_b = "u_b"
-        await _seed_atomic_facts(writer, owner_id=owner_a, bucket=bucket, n_items=3)
-        src_md_path = _atomic_fact_md_path(owner_a, bucket)
-        dest_md_path = _atomic_fact_md_path(owner_b, bucket)
+        await _seed_episodes(writer, owner_id=owner_a, bucket=bucket, n_items=3)
+        src_md_path = _episode_md_path(owner_a, bucket)
+        dest_md_path = _episode_md_path(owner_b, bucket)
         src_absolute = memory_root.root / src_md_path
         dest_absolute = memory_root.root / dest_md_path
         await anyio.Path(dest_absolute.parent).mkdir(parents=True, exist_ok=True)
@@ -391,7 +389,7 @@ async def test_rename_cross_owner_keeps_frontmatter_owner(
 
         # Inspect a row from dest to confirm owner_id stays as u_a
         # (current design: frontmatter wins over md_path for owner_id).
-        rows = await storage.repos.atomic_fact.find_where(
+        rows = await storage.repos.episode.find_where(
             f"md_path = '{dest_md_path}'", limit=10
         )
         assert rows, "dest md_path has no rows"
@@ -417,25 +415,25 @@ async def test_modify_existing_entry_content_reindexes(
     await asyncio.sleep(0.3)
 
     try:
-        writer = AtomicFactWriter(root=memory_root)
+        writer = EpisodeWriter(root=memory_root)
         owner_id = "u_modify"
         bucket = _dt.date(2026, 5, 18)
-        await _seed_atomic_facts(
+        await _seed_episodes(
             writer,
             owner_id=owner_id,
             bucket=bucket,
             n_items=3,
             text_prefix="ORIGINAL",
         )
-        md_path = _atomic_fact_md_path(owner_id, bucket)
+        md_path = _episode_md_path(owner_id, bucket)
         absolute = memory_root.root / md_path
         await _wait_path_done(storage, md_path)
-        rows_before = await storage.repos.atomic_fact.find_where(
+        rows_before = await storage.repos.episode.find_where(
             f"md_path = '{md_path}'", limit=10
         )
         assert len(rows_before) == 3
         sha_before = {r.entry_id: r.content_sha256 for r in rows_before}
-        fact_before = {r.entry_id: r.fact for r in rows_before}
+        episode_before = {r.entry_id: r.episode for r in rows_before}
 
         # Read, replace body text, atomic-write back through writer.write()
         text = await anyio.Path(absolute).read_text(encoding="utf-8")
@@ -450,13 +448,13 @@ async def test_modify_existing_entry_content_reindexes(
         async with asyncio.timeout(15.0):
             while True:
                 await _wait_drain(storage)
-                rows_after = await storage.repos.atomic_fact.find_where(
+                rows_after = await storage.repos.episode.find_where(
                     f"md_path = '{md_path}'", limit=10
                 )
                 if len(rows_after) == 3 and all(
                     r.content_sha256 != sha_before.get(r.entry_id)
-                    and "EDITED" in r.fact
-                    and "ORIGINAL" not in r.fact
+                    and "EDITED" in r.episode
+                    and "ORIGINAL" not in r.episode
                     for r in rows_after
                 ):
                     break
@@ -464,20 +462,20 @@ async def test_modify_existing_entry_content_reindexes(
 
         assert len(rows_after) == 3
         sha_after = {r.entry_id: r.content_sha256 for r in rows_after}
-        fact_after = {r.entry_id: r.fact for r in rows_after}
+        episode_after = {r.entry_id: r.episode for r in rows_after}
 
         # Every entry_id present in both, every content_sha256 changed,
-        # every fact text now reflects EDITED.
+        # every episode text now reflects EDITED.
         assert set(sha_after) == set(sha_before)
         for eid, sha in sha_after.items():
             assert sha != sha_before[eid], (
                 f"content_sha256 did not change for {eid}: stayed {sha}"
             )
-            assert "EDITED" in fact_after[eid], (
-                f"fact text not updated for {eid}: {fact_after[eid]!r}"
+            assert "EDITED" in episode_after[eid], (
+                f"episode text not updated for {eid}: {episode_after[eid]!r}"
             )
-            assert "ORIGINAL" not in fact_after[eid]
-            assert "ORIGINAL" in fact_before[eid]
+            assert "ORIGINAL" not in episode_after[eid]
+            assert "ORIGINAL" in episode_before[eid]
     finally:
         await orchestrator.stop()
 
@@ -493,14 +491,14 @@ async def test_concurrent_writes_different_owners_no_bleed(
     await asyncio.sleep(0.3)
 
     try:
-        writer = AtomicFactWriter(root=memory_root)
+        writer = EpisodeWriter(root=memory_root)
         bucket = _dt.date(2026, 5, 18)
         owners = [f"u_concur_{i}" for i in range(5)]
         per_owner = 4
 
         await asyncio.gather(
             *[
-                _seed_atomic_facts(
+                _seed_episodes(
                     writer,
                     owner_id=oid,
                     bucket=bucket,
@@ -510,12 +508,12 @@ async def test_concurrent_writes_different_owners_no_bleed(
                 for oid in owners
             ]
         )
-        md_paths = [_atomic_fact_md_path(oid, bucket) for oid in owners]
+        md_paths = [_episode_md_path(oid, bucket) for oid in owners]
         await _wait_paths_done(storage, *md_paths)
 
         for oid in owners:
-            md_path = _atomic_fact_md_path(oid, bucket)
-            rows = await storage.repos.atomic_fact.find_where(
+            md_path = _episode_md_path(oid, bucket)
+            rows = await storage.repos.episode.find_where(
                 f"md_path = '{md_path}'", limit=10
             )
             assert len(rows) == per_owner, (
@@ -524,7 +522,7 @@ async def test_concurrent_writes_different_owners_no_bleed(
             # Every row in this md_path must belong to this owner —
             # no bleed from another concurrent owner's writes.
             assert all(r.owner_id == oid for r in rows)
-            assert all(f"by-{oid}" in r.fact for r in rows)
+            assert all(f"by-{oid}" in r.episode for r in rows)
     finally:
         await orchestrator.stop()
 
@@ -566,7 +564,7 @@ async def test_lap_append_during_handler_no_loss(
     await asyncio.sleep(0.3)
 
     try:
-        writer = AtomicFactWriter(root=memory_root)
+        writer = EpisodeWriter(root=memory_root)
         owner_id = "u_lap"
         bucket = _dt.date(2026, 5, 18)
         total = 30
@@ -582,7 +580,7 @@ async def test_lap_append_during_handler_no_loss(
                             "parent_id": f"mc_{i}",
                             "sender_ids": [owner_id],
                         },
-                        {"Fact": f"fact body {i}"},
+                        {"Summary": "s", "Content": f"episode body {i}"},
                     )
                 ],
                 date=bucket,
@@ -592,7 +590,7 @@ async def test_lap_append_during_handler_no_loss(
             # that multiple writes accumulate during one handler.
             await asyncio.sleep(0.02)
 
-        md_path = _atomic_fact_md_path(owner_id, bucket)
+        md_path = _episode_md_path(owner_id, bucket)
         absolute = memory_root.root / md_path
         # Quiescence, not just a terminal row: the appends that landed during a
         # handler invocation are projected by a *later* filesystem event, so a
@@ -662,11 +660,11 @@ async def test_scanner_recovers_missed_delete(
     await asyncio.sleep(0.3)
 
     try:
-        writer = AtomicFactWriter(root=memory_root)
+        writer = EpisodeWriter(root=memory_root)
         owner_id = "u_scan_del"
         bucket = _dt.date(2026, 5, 18)
-        await _seed_atomic_facts(writer, owner_id=owner_id, bucket=bucket, n_items=3)
-        md_path = _atomic_fact_md_path(owner_id, bucket)
+        await _seed_episodes(writer, owner_id=owner_id, bucket=bucket, n_items=3)
+        md_path = _episode_md_path(owner_id, bucket)
         absolute = memory_root.root / md_path
         await _wait_path_done(storage, md_path)
         assert await _count_lance_rows_md(storage, md_path) == 3
@@ -709,9 +707,9 @@ async def test_scanner_indexes_preexisting_md(
     # Pre-seed: write the md directly to disk before any cascade is up.
     owner_id = "u_scan_pre"
     bucket = _dt.date(2026, 5, 18)
-    writer = AtomicFactWriter(root=memory_root)
-    await _seed_atomic_facts(writer, owner_id=owner_id, bucket=bucket, n_items=2)
-    md_path = _atomic_fact_md_path(owner_id, bucket)
+    writer = EpisodeWriter(root=memory_root)
+    await _seed_episodes(writer, owner_id=owner_id, bucket=bucket, n_items=2)
+    md_path = _episode_md_path(owner_id, bucket)
     assert (memory_root.root / md_path).is_file()
 
     # Now start cascade with the file already on disk. Belt-and-
@@ -752,11 +750,11 @@ async def test_scanner_recovers_missed_modify(
     await asyncio.sleep(0.3)
 
     try:
-        writer = AtomicFactWriter(root=memory_root)
+        writer = EpisodeWriter(root=memory_root)
         owner_id = "u_scan_mod"
         bucket = _dt.date(2026, 5, 18)
-        await _seed_atomic_facts(writer, owner_id=owner_id, bucket=bucket, n_items=3)
-        md_path = _atomic_fact_md_path(owner_id, bucket)
+        await _seed_episodes(writer, owner_id=owner_id, bucket=bucket, n_items=3)
+        md_path = _episode_md_path(owner_id, bucket)
 
         async def _lance_filled() -> bool:
             return await _count_lance_rows_md(storage, md_path) == 3

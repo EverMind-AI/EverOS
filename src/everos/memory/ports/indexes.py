@@ -12,7 +12,6 @@ from __future__ import annotations
 __all__ = [
     "AgentCaseIndex",
     "AgentSkillIndex",
-    "AtomicFactIndex",
     "EpisodeIndex",
     "IndexEraser",
     "KnowledgeTopicIndex",
@@ -25,7 +24,6 @@ from typing import Protocol, runtime_checkable
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
     EpisodeParentType,
     Profile,
@@ -88,21 +86,6 @@ class EpisodeIndex(Protocol):
         ...
 
     async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]: ...
-
-
-@runtime_checkable
-class AtomicFactIndex(Protocol):
-    async def sparse_search(
-        self, terms: Sequence[str], where: Filter, *, limit: int
-    ) -> list[SearchHit[AtomicFact]]: ...
-
-    async def dense_search(
-        self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[SearchHit[AtomicFact]]: ...
-
-    async def find(
-        self, where: Filter, *, limit: int | None = None
-    ) -> list[SearchHit[AtomicFact]]: ...
 
 
 @runtime_checkable
@@ -185,8 +168,7 @@ class IndexEraser(Protocol):
     ) -> None:
         """Remove the rows of ``removed`` entries, by daily-log table.
 
-        Keys are table names (``episode``, ``atomic_fact``, ``foresight``,
-        ``agent_case``).
+        Keys are table names (``episode``, ``agent_case``).
         """
         ...
 

@@ -78,7 +78,7 @@ class KindRecaller(Protocol):
     """One business kind, BM25 + vector recall over its index."""
 
     kind: ClassVar[str]
-    """``episode`` / ``atomic_fact`` / ``agent_case`` / ``agent_skill``."""
+    """``episode`` / ``agent_case`` / ``agent_skill``."""
 
     everalgo_memory_type: ClassVar[str]
     """``episodic`` / ``case`` / ``skill`` -- passed to ``RankInput.memory_type``."""

@@ -112,7 +112,7 @@ _OK_ID = "u1_ep_20250514_0001"
 @pytest.mark.parametrize(
     "body",
     [
-        {"memory_type": "atomic_fact", "memory_ids": [_OK_ID]},
+        {"memory_type": "atomic_fact", "memory_ids": [_OK_ID]},  # a removed kind
         {"memory_ids": [_OK_ID]},
         {"memory_type": "episode", "memory_ids": []},
         {"memory_type": "episode", "memory_ids": [_OK_ID] * 51},

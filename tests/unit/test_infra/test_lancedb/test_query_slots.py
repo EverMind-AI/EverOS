@@ -14,9 +14,9 @@ from pathlib import Path
 
 from everos.config import LanceDBSettings
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.lancedb._repos.atomic_fact import _AtomicFactRepo
+from everos.infra.persistence.lancedb._repos.agent_case import _AgentCaseRepo
 from everos.infra.persistence.lancedb.lancedb_manager import LanceDbConnection
-from everos.infra.persistence.records import AtomicFact
+from everos.infra.persistence.records import AgentCase
 
 _DIM = 8
 
@@ -46,20 +46,23 @@ async def test_no_more_queries_run_at_once_than_the_cap(tmp_path: Path) -> None:
 
 async def test_a_search_waits_for_a_free_slot(tmp_path: Path) -> None:
     conn = _connection(tmp_path, cap=1)
-    repo = _AtomicFactRepo(source=conn, dim=_DIM)
+    repo = _AgentCaseRepo(source=conn, dim=_DIM)
     await repo.upsert(
         [
-            AtomicFact(
-                id="u1_af_0",
-                entry_id="af_0",
-                owner_id="u1",
-                owner_type="user",
+            AgentCase(
+                id="a1_ac_0",
+                entry_id="ac_0",
+                owner_id="a1",
+                owner_type="agent",
+                session_id="s1",
                 timestamp=dt.datetime(2026, 11, 5, tzinfo=dt.UTC),
-                parent_id="ep_0",
-                sender_ids=["u1"],
-                fact="likes hiking",
-                fact_tokens="likes hiking",
-                md_path="users/u1/.atomic_facts/af.md",
+                parent_id="mc_0",
+                quality_score=0.5,
+                task_intent="plan a hike",
+                task_intent_tokens="plan a hike",
+                approach="check the weather",
+                approach_tokens="check the weather",
+                md_path="agents/a1/.cases/ac.md",
                 content_sha256="sha0",
                 vector=[0.1] * _DIM,
             )
@@ -71,4 +74,4 @@ async def test_a_search_waits_for_a_free_slot(tmp_path: Path) -> None:
         await asyncio.sleep(0.2)
         assert not search.done()
 
-    assert [row["id"] for row in await search] == ["u1_af_0"]
+    assert [row["id"] for row in await search] == ["a1_ac_0"]

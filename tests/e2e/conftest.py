@@ -82,9 +82,9 @@ def _strongly_consistent_lancedb(monkeypatch: pytest.MonkeyPatch) -> None:
 def search_seed() -> dict[str, list[dict]]:
     """Load the search seed slice produced by ``_dump_search_seed.py``.
 
-    Returns a dict with four keys (``episode`` / ``atomic_fact`` /
-    ``foresight`` / ``user_profile``); each value is a list of raw row
-    dicts ready to be fed into ``Model.model_validate`` for LanceDB.
+    Returns a dict with two keys (``episode`` / ``user_profile``); each
+    value is a list of raw row dicts ready to be fed into
+    ``Model.model_validate`` for LanceDB.
 
     Tests pick the subset they need and may mutate per-row fields
     (e.g. set distinct ``session_id`` values to exercise filter DSL)
@@ -92,7 +92,7 @@ def search_seed() -> dict[str, list[dict]]:
     """
     return {
         name: json.loads((_SEARCH_SEED_DIR / f"{name}.json").read_text())
-        for name in ("episode", "atomic_fact", "foresight", "user_profile")
+        for name in ("episode", "user_profile")
     }
 
 

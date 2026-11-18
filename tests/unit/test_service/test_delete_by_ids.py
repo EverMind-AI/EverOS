@@ -11,9 +11,9 @@ import structlog.testing
 from everos.config import MemorizeSettings
 from everos.core.errors import DeletionIncompleteError
 from everos.infra.persistence.factories import build_stores
-from everos.infra.persistence.markdown import MarkdownEpisodeStore, MarkdownReader
+from everos.infra.persistence.markdown import MarkdownEpisodeStore
 from everos.memory.deps import Stores
-from everos.memory.models import AtomicFact, Cluster, Episode
+from everos.memory.models import Cluster, Episode
 from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope
 from everos.service.memory._delete import Deleter
 from tests.fakes.storage import Storage
@@ -98,33 +98,20 @@ async def _left(stores: Stores, scope: Scope, refs: Sequence[MemoryRef]) -> set[
     return await stores.episode.exists(scope, [r.entry_id for r in refs])
 
 
-async def test_deletes_the_episode_its_merge_sources_and_their_facts(
-    stores: Stores,
-) -> None:
-    """B3 / B6: deleting M takes what was merged into it, and all facts."""
+async def test_deletes_the_episode_and_its_merge_sources(stores: Stores) -> None:
+    """B3 / B6: deleting M takes what was merged into it."""
     e1, e2, keep = await _episodes(stores, _U1, "e1", "e2", "keep")
     (m,) = await _episodes(stores, _U1, "merged")
     await _merge(stores, _U1, [e1, e2], m)
-    facts = await stores.atomic_fact.append_many(
-        _U1,
-        [
-            AtomicFact(owner_id="u1", content="f", timestamp=1, parent_id=p.entry_id)
-            for p in (e1, m, keep)
-        ],
-        only_if=NO_SOURCE_CHECK,
-    )
     eraser = _Eraser()
 
     await _by_ids(_deleter(stores, eraser), m.id)
 
     assert await _left(stores, _U1, [e1, e2, keep, m]) == {keep.entry_id}
-    fact_file = MarkdownReader
-    parsed = await fact_file.read(stores.atomic_fact._root.root / facts[0].md_path)  # type: ignore[attr-defined]
-    assert [e.id for e in parsed.entries] == [facts[2].entry_id]
     assert await stores.episode.merged_into(_U1, [m.entry_id]) == set()  # keys cleared
     (erased,) = eraser.erased
+    assert set(erased) == {"episode"}
     assert sorted(erased["episode"]) == sorted([m.entry_id, e1.entry_id, e2.entry_id])
-    assert len(erased["atomic_fact"]) == 2
 
 
 class _MarkDuringRemove(MarkdownEpisodeStore):
@@ -177,7 +164,7 @@ async def test_resend_after_step1_still_finds_sources(
     storage: Storage, stores: Stores
 ) -> None:
     """TLA+ MD_Abl_ClearKeysEarly / spec 2 R15: after a crash right after M
-    went, the resend finds M's sources through the marks kept until step 5."""
+    went, the resend finds M's sources through the marks kept until step 4."""
     e1, e2 = await _episodes(stores, _U1, "e1", "e2")
     (m,) = await _episodes(stores, _U1, "merged")
     await _merge(stores, _U1, [e1, e2], m)

@@ -19,7 +19,7 @@ from everalgo.types import ChatMessage, MemCell
 
 from everos.memory import IngestResult
 from everos.memory.episode_summary import placeholder_summary
-from everos.memory.events import EpisodeCopy, EpisodeExtracted, UserPipelineStarted
+from everos.memory.events import EpisodeCopy, EpisodeExtracted
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
 from everos.memory.extract.pipeline import PreparedCell, UserMemoryPipeline
 from everos.memory.ports import MemoryRef
@@ -81,26 +81,23 @@ def _pipeline(
 _INGESTED = IngestResult(session_id="s1", messages=[])
 
 
-async def test_pipeline_started_leads_the_cell_events() -> None:
-    """``UserPipelineStarted`` is the cell's first event, even when the cell
-    has no user sender to extract an Episode for."""
+async def test_a_cell_without_a_user_sender_extracts_and_announces_nothing() -> None:
+    """A cell with no user sender has no Episode to extract: no model call,
+    no md write and no event, but its messages still count."""
     llm = user_track_llm()
+    episode_store = MagicMock()
+    episode_store.append = AsyncMock(return_value=_REF)
     cell = MemCell(items=[_message("assistant", "agent")], timestamp=1_700_000_000_000)
-    ingested = IngestResult(
-        session_id="s1", app_id="claude_code", project_id="oss", messages=[]
-    )
 
-    outcome = await _pipeline(llm).run_cell(
-        ingested, PreparedCell(cell=cell, memcell_id="mc_a")
+    outcome = await _pipeline(llm, episode_store).run_cell(
+        _INGESTED, PreparedCell(cell=cell, memcell_id="mc_a")
     )
 
     assert outcome.message_count == 1
-    (started,) = outcome.events
-    assert isinstance(started, UserPipelineStarted)
-    assert (started.memcell_id, started.session_id) == ("mc_a", "s1")
-    assert (started.app_id, started.project_id) == ("claude_code", "oss")
-    assert started.memcell is cell
+    assert outcome.events == []
+    assert outcome.md_paths == []
     assert llm.call_count == 0
+    episode_store.append.assert_not_awaited()
 
 
 async def test_emit_episode_extracted_after_md_write() -> None:
@@ -113,8 +110,8 @@ async def test_emit_episode_extracted_after_md_write() -> None:
     )
 
     assert outcome.md_paths == [_REF.md_path]
-    assert isinstance(outcome.events[0], UserPipelineStarted)
-    (extracted,) = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]
+    (extracted,) = outcome.events
+    assert isinstance(extracted, EpisodeExtracted)
     assert extracted.memcell_id == "mc_a"
     assert extracted.copies == [
         EpisodeCopy(owner_id="u1", entry_id=_REF.entry_id, owner_name="u1")
@@ -299,7 +296,7 @@ async def test_add_returns_ok_and_emits_nothing_when_memcell_gone() -> None:
 
     assert episodes.records == []
     assert outcome.md_paths == []
-    assert [type(e) for e in outcome.events] == [UserPipelineStarted]
+    assert outcome.events == []
 
 
 async def test_episode_written_when_memcell_exists() -> None:
@@ -311,7 +308,7 @@ async def test_episode_written_when_memcell_exists() -> None:
     )
 
     assert len(episodes.records) == 1
-    assert [type(e) for e in outcome.events] == [UserPipelineStarted, EpisodeExtracted]
+    assert [type(e) for e in outcome.events] == [EpisodeExtracted]
 
 
 async def test_the_episode_request_shows_times_in_the_configured_zone() -> None:

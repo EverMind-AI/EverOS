@@ -83,8 +83,7 @@ def _state(srv: Any) -> tuple[str, Any, set[str]]:
     wait_converged(srv.base, timeout=_CONVERGE_S)
     dump = logical_dump(srv.root)
     dump.pop("memorize_inbox", None)
-    index = lance_ids(srv.root, "episode") | lance_ids(srv.root, "atomic_fact")
-    return md_tree_hash(srv.root), dump, index
+    return md_tree_hash(srv.root), dump, lance_ids(srv.root, "episode")
 
 
 def _crash_then_resend(
@@ -166,13 +165,13 @@ def test_t20_1_owner_deletion_finished_by_the_restart(
 
 
 @pytest.mark.parametrize(
-    "point", ["by_ids.after_step1", "by_ids.after_step3", "by_ids.after_step5"]
+    "point", ["by_ids.after_step1", "by_ids.after_step2", "by_ids.after_step4"]
 )
 def test_tb9_1_by_id_deletion_resent_after_a_crash(
     make_server: Any, point: str
 ) -> None:
     ref = make_server("reference")
-    m2 = seed_two_rounds(ref.root)["m2"]  # with facts and M2's cluster
+    m2 = seed_two_rounds(ref.root)["m2"]  # with M2's cluster
     test = make_server("crashed")
     shutil.copytree(ref.root, test.root, dirs_exist_ok=True)
     request = (

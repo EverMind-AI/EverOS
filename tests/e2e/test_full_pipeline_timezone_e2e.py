@@ -19,8 +19,9 @@ Pin: the **UTC instant** of every returned ``timestamp`` field is
 identical across all four renders. Only the offset / wall-clock
 changes. This is the user-facing contract of the storage-UTC discipline.
 
-Real LLM (boundary detection + episode extraction) + real embedder
-(LanceDB vector + FTS) — marked ``@slow`` ``@live_llm``.
+Real LLM (boundary detection + episode extraction + the multi-round
+search decider) + real embedder (LanceDB vector + FTS) — marked ``@slow``
+``@live_llm``.
 """
 
 from __future__ import annotations
@@ -110,8 +111,8 @@ async def test_full_pipeline_tz_switch_preserves_utc_instant(
     assert resp.status_code == 200, resp.text
 
     # ── Step 4: wait for OME strategies + cascade to fully drain ──
-    # 10-minute deadline: extract_episode + extract_atomic_facts run under
-    # real LLM and the cascade worker only fires after md lands. The
+    # 10-minute deadline: episode extraction and the profile strategies run
+    # under real LLM and the cascade worker only fires after md lands. The
     # `pipeline_done_poll` fixture covers both OME idle and cascade queue
     # empty.
     await pipeline_done_poll(deadline_seconds=600.0)
@@ -122,10 +123,10 @@ async def test_full_pipeline_tz_switch_preserves_utc_instant(
         json={
             "user_id": user_id,
             "query": "climbing",
-            "method": "keyword",  # no embedder cost; FTS index built by cascade
+            "method": "llm_multiround",
             "filters": {"session_id": session_id},
         },
-        timeout=60.0,
+        timeout=300.0,
     )
     assert resp_search_sh.status_code == 200, resp_search_sh.text
     eps_search_sh = resp_search_sh.json()["data"]["episodes"]
@@ -162,10 +163,10 @@ async def test_full_pipeline_tz_switch_preserves_utc_instant(
         json={
             "user_id": user_id,
             "query": "climbing",
-            "method": "keyword",
+            "method": "llm_multiround",
             "filters": {"session_id": session_id},
         },
-        timeout=60.0,
+        timeout=300.0,
     )
     assert resp_search_utc.status_code == 200, resp_search_utc.text
     eps_search_utc = resp_search_utc.json()["data"]["episodes"]

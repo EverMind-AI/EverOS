@@ -76,7 +76,7 @@ everos init --root /data/everos
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `timezone` | string | `"UTC"` | Effective timezone for date buckets and timestamps, and the zone message times are shown to the model in during extraction (boundary detection, episode, summary, atomic facts, foresight, profile) and agentic search. Validated against `zoneinfo.ZoneInfo`. |
+| `timezone` | string | `"UTC"` | Effective timezone for date buckets and timestamps, and the zone message times are shown to the model in during extraction (boundary detection, episode, summary, profile) and agentic search. Validated against `zoneinfo.ZoneInfo`. |
 
 ### `[api]`
 
@@ -188,8 +188,6 @@ inherits too, so a template's `api_key = ""` cannot mask `[llm]`'s key.
 | `boundary` | Cutting a session's messages into memcells (user and agent tracks) |
 | `episode` | Extracting each memcell's episode |
 | `summary` | The episode's display summary, written offline from the stored episode (`summarize_episode`) |
-| `atomic_fact` | Atomic-fact extraction |
-| `foresight` | Foresight extraction |
 | `profile` | User-profile extraction |
 | `reflection` | Episode reflection |
 | `agent_case` | Agent-case extraction, and the case gate when `[agent_memory] case_gate_enabled` |
@@ -271,10 +269,6 @@ model = "qwen3-32b"
 base_url = "http://localhost:8000/v1"
 api_key = "local"
 
-[llm.atomic_fact]
-model = "qwen3-32b"
-base_url = "http://localhost:8000/v1"
-api_key = "local"
 ```
 
 Force a request field on every task -- set it once in `[llm]`; each task

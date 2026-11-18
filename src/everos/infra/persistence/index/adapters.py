@@ -13,7 +13,6 @@ from __future__ import annotations
 __all__ = [
     "AgentCaseIndexAdapter",
     "AgentSkillIndexAdapter",
-    "AtomicFactIndexAdapter",
     "EpisodeIndexAdapter",
     "KnowledgeTopicIndexAdapter",
     "ProfileIndexAdapter",
@@ -30,7 +29,6 @@ from everos.core.utils.datetime import to_timestamp_ms
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
     EpisodeParentType,
     KnowledgeTopic,
@@ -171,17 +169,6 @@ class EpisodeIndexAdapter(_SearchableIndex[Episode]):
     async def orphans(self, where: Filter, *, limit: int) -> list[Stored[Episode]]:
         rows = await self._episodes.find_where(where, limit=limit, skip_vectors=True)
         return [_stored_episode(_fields(r)) for r in rows]
-
-
-class AtomicFactIndexAdapter(_SearchableIndex[AtomicFact]):
-    """Atomic-fact index reads.
-
-    Args:
-        repo: Atomic-fact derived-index repository.
-    """
-
-    def __init__(self, repo: IndexRepository[Any]) -> None:
-        super().__init__(repo, _stored_atomic_fact)
 
 
 class AgentCaseIndexAdapter(_SearchableIndex[AgentCase]):
@@ -368,20 +355,6 @@ def _stored_episode(fields: Row) -> Stored[Episode]:
             sender_ids=list(fields.get("sender_ids") or []),
             parent_id=fields["parent_id"],
             parent_type=fields.get("parent_type") or "memcell",
-        ),
-    )
-
-
-def _stored_atomic_fact(fields: Row) -> Stored[AtomicFact]:
-    return Stored(
-        ref=_daily_ref(fields),
-        scope=_scope(fields),
-        item=AtomicFact(
-            owner_id=fields["owner_id"],
-            content=fields["fact"],
-            timestamp=to_timestamp_ms(fields["timestamp"]),
-            session_id=fields.get("session_id"),
-            parent_id=fields["parent_id"],
         ),
     )
 

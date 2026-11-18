@@ -7,12 +7,9 @@ other DTO field comes from the stored domain record the recaller returned
 next to it (``stored_by_id``, keyed by ``Candidate.id``), so no column
 name of any index is read here.
 
-* Simple kinds -- :func:`shape_episodes`, :func:`shape_agent_cases`,
+* :func:`shape_episodes`, :func:`shape_agent_cases`,
   :func:`shape_agent_skills` (and their ``*_ranked`` twins for an everalgo
   ``RankOutput``) emit one DTO per candidate.
-* Hybrid output -- :func:`reshape_hybrid_output` collapses the mixed
-  ``episode`` + ``atomic_fact`` ``ScoredItem`` list into episodes with
-  their facts nested.
 
 A candidate whose record is missing or belongs to the wrong owner type is
 dropped with a warning rather than failing the request.
@@ -20,7 +17,6 @@ dropped with a warning rather than failing the request.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -28,13 +24,12 @@ from everalgo.types import Candidate, RankOutput, ScoredItem
 
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import from_timestamp_ms, to_display_tz
-from everos.memory.models import AgentCase, AgentSkill, AtomicFact, Episode
+from everos.memory.models import AgentCase, AgentSkill, Episode
 from everos.memory.ports import Stored
 
 from .dto import (
     SearchAgentCaseItem,
     SearchAgentSkillItem,
-    SearchAtomicFactItem,
     SearchEpisodeItem,
 )
 
@@ -57,61 +52,10 @@ def shape_episodes(
     ]
 
 
-def reshape_hybrid_output(
-    scored: Iterable[ScoredItem],
-    *,
-    episodes_by_id: Mapping[str, Stored[Episode]],
-    facts_by_id: Mapping[str, Stored[AtomicFact]],
-) -> list[SearchEpisodeItem]:
-    """Collapse the mixed episode + atomic_fact output into nested episodes.
-
-    Fact eviction can swap a parent episode for its top atomic fact. Facts
-    are re-attached to their parent so the response only surfaces episodes,
-    with their facts nested. A fact whose parent was evicted brings the
-    parent back from ``episodes_by_id`` (the whole recall pool), scored at
-    the fact's score so the eviction relevance signal survives; a fact whose
-    parent is not in the pool at all is dropped with a warning.
-    """
-    scored_items = list(scored)
-    episode_scores = {s.id: s.score for s in scored_items if s.item_type == "episode"}
-    facts_by_parent: dict[str, list[ScoredItem]] = defaultdict(list)
-    for s in scored_items:
-        if s.item_type == "atomic_fact" and s.parent_episode_id:
-            facts_by_parent[s.parent_episode_id].append(s)
-
-    out: list[SearchEpisodeItem] = []
-    for ep_id, score in episode_scores.items():
-        facts = _fact_items(facts_by_parent.get(ep_id, []), facts_by_id)
-        item = _episode(ep_id, score, episodes_by_id, atomic_facts=facts)
-        if item is not None:
-            out.append(item)
-
-    for parent_id, fact_scoreds in facts_by_parent.items():
-        if parent_id in episode_scores:
-            continue
-        if parent_id not in episodes_by_id:
-            logger.warning(
-                "orphan_fact_parent_missing",
-                parent_id=parent_id,
-                fact_count=len(fact_scoreds),
-            )
-            continue
-        top_score = max((f.score for f in fact_scoreds), default=0.0)
-        facts = _fact_items(fact_scoreds, facts_by_id)
-        item = _episode(parent_id, top_score, episodes_by_id, atomic_facts=facts)
-        if item is not None:
-            out.append(item)
-
-    out.sort(key=lambda e: e.score, reverse=True)
-    return out
-
-
 def _episode(
     candidate_id: str,
     score: float,
     stored_by_id: Mapping[str, Stored[Episode]],
-    *,
-    atomic_facts: list[SearchAtomicFactItem] | None = None,
 ) -> SearchEpisodeItem | None:
     stored = _lookup(candidate_id, stored_by_id, kind="episode", owner_type="user")
     if stored is None:
@@ -130,25 +74,14 @@ def _episode(
         episode=episode.episode,
         type="Conversation",
         score=float(score),
-        atomic_facts=atomic_facts or [],
     )
 
 
-def _fact_items(
-    scoreds: list[ScoredItem], facts_by_id: Mapping[str, Stored[AtomicFact]]
-) -> list[SearchAtomicFactItem]:
-    items: list[SearchAtomicFactItem] = []
-    for s in sorted(scoreds, key=lambda s: s.score, reverse=True):
-        stored = facts_by_id.get(s.id)
-        if stored is None:
-            logger.warning("shape_fact_missing_record", id=s.id)
-            continue
-        items.append(
-            SearchAtomicFactItem(
-                id=stored.ref.id, content=stored.item.content, score=float(s.score)
-            )
-        )
-    return items
+def shape_episodes_ranked(
+    output: RankOutput, stored_by_id: Mapping[str, Stored[Episode]]
+) -> list[SearchEpisodeItem]:
+    """:func:`shape_episodes` over an everalgo ``arank`` result."""
+    return shape_episodes(output.items, stored_by_id)
 
 
 # ── Agent cases / skills ─────────────────────────────────────────────────

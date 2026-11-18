@@ -1,7 +1,7 @@
 """T17.1 <- A17: an existing user journey has the same shape before and after.
 
 The same script runs against the base commit's real checkout and against this
-branch: sync and async /add, /flush, the four search methods, /get, a
+branch: sync and async /add, /flush, a multi-round search, /get, a
 Reflection trigger. Compared per step: the status code and the set of key
 paths of the response (values differ with a real model), and the frontmatter
 keys of the episode files. The baseline is the merge base with
@@ -24,8 +24,6 @@ from .conftest import chat
 from .observe import frontmatter, wait_idle
 
 pytestmark = pytest.mark.acceptance
-
-_METHODS = ("keyword", "vector", "hybrid", "agentic")
 
 
 def _paths(value: Any, prefix: str = "") -> set[str]:
@@ -76,14 +74,13 @@ def _journey(srv: Any) -> list[tuple[str, int, frozenset[str]]]:
         time.sleep(1)
     record("task", got)
     wait_idle(srv.base, srv.root)
-    for method in _METHODS:
-        record(
-            f"search_{method}",
-            srv.post(
-                "/memory/search",
-                {"user_id": "u1", "query": "ferret11", "method": method},
-            ),
-        )
+    record(
+        "search",
+        srv.post(
+            "/memory/search",
+            {"user_id": "u1", "query": "ferret11", "method": "llm_multiround"},
+        ),
+    )
     for kind in ("episode", "profile"):
         record(
             f"get_{kind}",
@@ -127,24 +124,20 @@ def _baseline(into: Path) -> Path:
     return into
 
 
-# agentic search reranks; without a key both sides answer 422 and compare equal.
-_RERANK = {"EVEROS_RERANK__API_KEY": os.environ.get("DEEPINFRA_API_KEY", "")}
-
-
 def test_t17_1_same_journey_same_shape(make_server: Any, tmp_path: Path) -> None:
     given = os.environ.get("EVEROS_ACC_BASELINE")
     checkout = Path(given) if given else _baseline(tmp_path / "base_tree")
     base = make_server("baseline")
     base.everos = checkout / ".venv" / "bin" / "everos"
     (base.root / "everos.toml").unlink(missing_ok=True)
-    base.start(**_RERANK)
+    base.start()
     before = _journey(base)
     gone = base.post("/memory/delete", {"session_id": "j1"}).status_code
     assert gone == 404, "positive control: the baseline is the old code"
     base.stop()
 
     branch = make_server("branch")
-    branch.start(**_RERANK)
+    branch.start()
     after = _journey(branch)
 
     for side, steps in (("baseline", before), ("branch", after)):
@@ -158,5 +151,5 @@ def test_t17_1_same_journey_same_shape(make_server: Any, tmp_path: Path) -> None
         a, b = _comparable(keys_a, keys_b)
         assert b == a, (name, sorted(a ^ b))
     for name, _, keys in before + after:  # positive control on both sides
-        if name in ("search_keyword", "get_episode"):
+        if name in ("search", "get_episode"):
             assert "data.episodes[]?" not in keys, f"{name} found no episode"

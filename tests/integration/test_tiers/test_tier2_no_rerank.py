@@ -15,10 +15,7 @@ from httpx import AsyncClient
 
 from everos.service import Application
 
-from .conftest import add_and_flush, episode_rows, seed_atomic_fact_for_episode
-
-_STUB_VECTOR = [0.1] * 1024
-
+from .conftest import add_and_flush, episode_rows
 
 # ---------------------------------------------------------------------------
 # 1. Memory add + KEYWORD / VECTOR / HYBRID (user) all succeed
@@ -39,10 +36,6 @@ async def test_user_search_methods_succeed(
     tier2_runtime: AsyncClient, method: str
 ) -> None:
     await add_and_flush(tier2_runtime, session_id=f"s_tier2_{method}")
-    # Seed a fact so VECTOR takes the atomic_fact MaxSim path rather than
-    # the episode-vector fallback -- see seed_atomic_fact_for_episode.
-    episode_row = (await episode_rows("u_alice"))[0]
-    await seed_atomic_fact_for_episode(episode_row, vector=_STUB_VECTOR)
 
     resp = await tier2_runtime.post(
         "/api/v1/memory/search",

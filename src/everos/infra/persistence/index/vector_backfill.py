@@ -475,7 +475,7 @@ async def _backfill_table(
             # disk from a prior pass) isn't counted as a gap; (2) gate
             # the subject-side arm on the SPEC having a subject_of
             # extractor at all — tables without a subject column
-            # (e.g. atomic_fact) intentionally leave every row absent
+            # (e.g. agent_case) intentionally leave every row absent
             # from ``subject_vectors`` and must not be flagged.
             spec_has_subject = backlog.spec.subject_of is not None
             row_has_subject = row.subject_text is not None

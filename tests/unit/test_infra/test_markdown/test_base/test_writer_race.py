@@ -24,23 +24,20 @@ from pathlib import Path
 import pytest
 
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.markdown import EntryId, MarkdownWriter
-from everos.infra.persistence.markdown._writers.atomic_fact_writer import (
-    AtomicFactWriter,
-)
+from everos.infra.persistence.markdown import EntryId, EpisodeWriter, MarkdownWriter
 
 
 def _scan_md(md_path: Path) -> tuple[int, int]:
     """Return ``(entry_tag_count, frontmatter_entry_count)``."""
     text = md_path.read_text(encoding="utf-8")
-    tag_count = len(re.findall(r"<!-- entry:af_", text))
+    tag_count = len(re.findall(r"<!-- entry:ep_", text))
     fm_match = re.search(r"^entry_count: (\d+)", text, re.MULTILINE)
     fm_count = int(fm_match.group(1)) if fm_match else -1
     return tag_count, fm_count
 
 
 async def _drive_concurrent_appends(
-    writer: AtomicFactWriter,
+    writer: EpisodeWriter,
     owner: str,
     n: int,
     concurrency: int,
@@ -59,7 +56,7 @@ async def _drive_concurrent_appends(
                     "parent_type": "memcell",
                     "parent_id": f"mc_{idx:04d}",
                 },
-                sections={"Fact": f"fact-{idx:04d}"},
+                sections={"Content": f"episode-{idx:04d}"},
             )
 
     await asyncio.gather(*(_guarded(i) for i in range(n)))
@@ -71,7 +68,7 @@ async def test_append_entry_no_lost_updates_under_concurrency(
 ) -> None:
     """``append_entry`` from N concurrent tasks must not drop any entry."""
     root = MemoryRoot(root=tmp_path)
-    writer = AtomicFactWriter(root=root)
+    writer = EpisodeWriter(root=root)
     owner = "race_user"
     n = 30
 
@@ -98,7 +95,7 @@ async def test_append_entries_batch_no_lost_updates_under_concurrency(
     """``append_entries`` (batched) from N concurrent tasks must not drop any
     entry."""
     root = MemoryRoot(root=tmp_path)
-    writer = AtomicFactWriter(root=root)
+    writer = EpisodeWriter(root=root)
     owner = "race_user_batched"
     batches = 6
     items_per_batch = 5
@@ -117,7 +114,7 @@ async def test_append_entries_batch_no_lost_updates_under_concurrency(
                         "parent_type": "memcell",
                         "parent_id": f"mc_b{batch_idx:02d}_i{i:02d}",
                     },
-                    {"Fact": f"batched-fact-b{batch_idx:02d}-{i:02d}"},
+                    {"Content": f"batched-episode-b{batch_idx:02d}-{i:02d}"},
                 )
                 for i in range(items_per_batch)
             ]
@@ -180,8 +177,8 @@ async def test_markdown_writer_append_entry_delegates_to_batch(
     asserting they produce identical file contents protects callers from
     drift between the two paths."""
     writer = MarkdownWriter(MemoryRoot(root=tmp_path))
-    eid = EntryId.next_for("af", __import__("datetime").date(2026, 5, 18), 0)
-    body = "**fact**: hello"
+    eid = EntryId.next_for("ep", __import__("datetime").date(2026, 5, 18), 0)
+    body = "**content**: hello"
 
     path_a = tmp_path / "a.md"
     path_b = tmp_path / "b.md"

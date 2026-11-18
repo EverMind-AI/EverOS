@@ -33,17 +33,14 @@ from .embedding import FakeEmbeddingProvider
 from .indexes import (
     InMemoryAgentCaseIndex,
     InMemoryAgentSkillIndex,
-    InMemoryAtomicFactIndex,
     InMemoryEpisodeIndex,
     InMemoryProfileIndex,
 )
 from .stores import (
     InMemoryAgentCaseStore,
     InMemoryAgentSkillStore,
-    InMemoryAtomicFactStore,
     InMemoryClusterStore,
     InMemoryEpisodeStore,
-    InMemoryForesightStore,
     InMemoryMemcellStore,
     InMemoryProfileStore,
     InMemoryReflectionReportStore,
@@ -93,8 +90,6 @@ def make_stores(**overrides: Any) -> Stores:
     """Fresh in-memory stores; keyword arguments replace single stores."""
     fields: dict[str, Any] = {
         "episode": InMemoryEpisodeStore(),
-        "atomic_fact": InMemoryAtomicFactStore(),
-        "foresight": InMemoryForesightStore(),
         "profile": InMemoryProfileStore(),
         "agent_case": InMemoryAgentCaseStore(),
         "agent_skill": InMemoryAgentSkillStore(),
@@ -114,7 +109,6 @@ def make_indexes(**overrides: Any) -> Indexes:
     """Fresh in-memory indexes; keyword arguments replace single indexes."""
     fields: dict[str, Any] = {
         "episode": InMemoryEpisodeIndex(),
-        "atomic_fact": InMemoryAtomicFactIndex(),
         "agent_case": InMemoryAgentCaseIndex(),
         "agent_skill": InMemoryAgentSkillIndex(),
         "profile": InMemoryProfileIndex(),

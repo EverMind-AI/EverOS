@@ -1,7 +1,7 @@
 """The LanceDB derived-index backend over one connection.
 
 :class:`LanceIndexBackend` owns the LanceDB side of the derived index: the
-seven business repositories built over the application's
+five business repositories built over the application's
 :class:`~.lancedb_manager.LanceDbConnection`, the one-time schema / FTS
 migrations, schema verification, and the embedding-model attestation.
 """
@@ -36,9 +36,7 @@ from ..records import (
     EMBEDDING_MODEL_KEY,
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
-    Foresight,
     IndexRecord,
     KnowledgeTopic,
 )
@@ -46,9 +44,7 @@ from ._base import indexes
 from ._base.arrow import arrow_schema_for
 from ._repos.agent_case import _AgentCaseRepo
 from ._repos.agent_skill import _AgentSkillRepo
-from ._repos.atomic_fact import _AtomicFactRepo
 from ._repos.episode import _EpisodeRepo
-from ._repos.foresight import _ForesightRepo
 from ._repos.knowledge_topic import _KnowledgeTopicRepo
 from ._repos.user_profile import _UserProfileRepo
 from .lancedb_manager import LanceDbConnection
@@ -83,7 +79,7 @@ indexes get rebuilt at startup. v2 = ``with_position=False`` (see
 _PROVENANCE_COLUMN = "vector"
 """Column the attestation hangs on.
 
-Six tables carry a vector column and ``Episode`` carries two, so writing all
+Several tables carry a vector column and ``Episode`` carries two, so writing all
 of them would raise "how many agreeing copies count as agreement" on the next
 schema change. ``episode.vector`` is the one column that exists in every
 deployment and is written first; ``subject_vector`` comes from the same model
@@ -92,8 +88,6 @@ and is not recorded separately.
 
 _TABLE_SCHEMA_VERSION = 2
 """Bump when column nullability or presence changes on business tables.
-v2 = ``vector: DenseVector | None`` on the 6 business tables that carry
-a vector column (see :data:`BUSINESS_SCHEMAS_WITH_VECTOR`).
 
 .. note::
 
@@ -118,8 +112,6 @@ a vector column (see :data:`BUSINESS_SCHEMAS_WITH_VECTOR`).
 
 BUSINESS_SCHEMAS_WITH_VECTOR: tuple[type[IndexRecord], ...] = (
     Episode,
-    AtomicFact,
-    Foresight,
     AgentCase,
     AgentSkill,
     KnowledgeTopic,
@@ -161,8 +153,6 @@ class LanceIndexBackend:
         self._schemas = tuple(schemas)
         self.repositories = IndexRepositories(
             episode=_EpisodeRepo(source=connection, dim=dim),
-            atomic_fact=_AtomicFactRepo(source=connection, dim=dim),
-            foresight=_ForesightRepo(source=connection, dim=dim),
             agent_case=_AgentCaseRepo(source=connection, dim=dim),
             agent_skill=_AgentSkillRepo(source=connection, dim=dim),
             user_profile=_UserProfileRepo(source=connection, dim=dim),

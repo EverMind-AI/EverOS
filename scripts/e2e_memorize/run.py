@@ -127,10 +127,11 @@ async def _run(args: argparse.Namespace) -> None:
         flush_result = await memory.flush(session_id=session_id, request_id="e2e-flush")
         print(f"flush  →  status={flush_result.status}")
 
-        # OME strategies are fire-and-forget; each cell fires 2 strategies
-        # (atomic_facts + foresight), each ~5-10s on a real LLM. Sleep long
-        # enough for ~8-10 invocations to finish before engine.stop() drains
-        # the scheduler — otherwise APS cancels in-flight LLM calls.
+        # OME strategies are fire-and-forget; each cell fires the profile
+        # strategies (and, in agent mode, the case and skill ones), each
+        # ~5-10s on a real LLM. Sleep long enough for ~8-10 invocations to
+        # finish before engine.stop() drains the scheduler — otherwise APS
+        # cancels in-flight LLM calls.
         await asyncio.sleep(30)
 
         _list_written_files(session_id, mode)

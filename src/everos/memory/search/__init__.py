@@ -36,7 +36,6 @@ External usage::
         FilterNode,
         SearchAgentCaseItem,
         SearchAgentSkillItem,
-        SearchAtomicFactItem,
         SearchData,
         SearchEpisodeItem,
         SearchMethod,
@@ -55,7 +54,6 @@ its flat-DSL variant without forking the field allow-list.
 from .dto import FilterNode as FilterNode
 from .dto import SearchAgentCaseItem as SearchAgentCaseItem
 from .dto import SearchAgentSkillItem as SearchAgentSkillItem
-from .dto import SearchAtomicFactItem as SearchAtomicFactItem
 from .dto import SearchData as SearchData
 from .dto import SearchEpisodeItem as SearchEpisodeItem
 from .dto import SearchMethod as SearchMethod
@@ -75,7 +73,6 @@ __all__ = [
     "FilterNode",
     "SearchAgentCaseItem",
     "SearchAgentSkillItem",
-    "SearchAtomicFactItem",
     "SearchData",
     "SearchEpisodeItem",
     "SearchMethod",

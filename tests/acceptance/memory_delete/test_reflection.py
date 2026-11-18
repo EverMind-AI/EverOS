@@ -1,10 +1,15 @@
 """Deletions racing Reflection and clustering (Reflection enabled).
 
-T22.1, T9.2, T15.1 (b), TB7.1 (four groups, main journey), T11.1 (b)(c).
+T9.2, T15.1 (b), TB7.1 (three groups, main journey), T11.1 (b)(c).
 Clusters are built through the real pipeline: two near-identical /adds of
 one owner, clustered by the real embedding. A round whose cluster did not
 form, or whose call was not held, does not count; each case needs 16 of 20
 rounds, or it is "not manufactured".
+
+The finish of a merge runs on the merged episode itself and first embeds it
+(the cluster's new centroid), under no lock: holding that embedding is the
+window between the merged episode being written and its sources being
+marked.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ import pytest
 
 from .conftest import chat
 from .observe import frontmatter, md_entries, rows, system_db, wait_idle
-from .proxy import FACTS, Rule, llm_call, single_embedding
+from .proxy import Rule, llm_call, single_embedding
 
 pytestmark = pytest.mark.acceptance
 
@@ -120,10 +125,9 @@ def _merged(srv: Any, owner: str) -> list[str]:
 
 
 def _gone(srv: Any, owner: str, target: str) -> None:
-    """``target``, its facts and its cluster membership are nowhere."""
+    """``target`` and its cluster membership are nowhere."""
     entries = md_entries(srv.root)
     assert not [e for e in entries if e["owner"] == owner and e["entry_id"] == target]
-    assert not [e for e in entries if e["owner"] == owner and e["parent_id"] == target]
     assert target not in _members(srv, owner)
 
 
@@ -150,28 +154,6 @@ def _send_held(srv: Any, owner: str, token: str, rule: Rule, target: str) -> str
         return None
     new = [e["entry_id"] for e in _episodes(srv, owner) if e["entry_id"] not in known]
     return new[0] if new else None
-
-
-def test_t22_1_merged_episode_gets_its_facts(refl: Any) -> None:
-    """A22: with nothing deleted, merged episodes get their facts."""
-    srv = refl
-    owners = [f"t22u{r}" for r in range(3)]
-    formed = sum(
-        _clustered_pair(srv, o, f"dugong{r}q") is not None for r, o in enumerate(owners)
-    )
-    assert formed >= 1, "no cluster formed: not manufactured"
-    _reflect(srv)
-    time.sleep(2)
-    wait_idle(srv.base, srv.root)
-    entries = md_entries(srv.root)
-    with_facts = sum(
-        any(e["kind"] == ".atomic_facts" and e["parent_id"] == m for e in entries)
-        for o in owners
-        for m in _merged(srv, o)
-    )
-    assert with_facts >= 1
-    srv.stop()
-    assert "memory_write_skipped_source_gone" not in srv.log_text()
 
 
 def test_t9_2_session_of_a_source_deleted_during_the_merge(refl: Any) -> None:
@@ -206,8 +188,9 @@ def test_t9_2_session_of_a_source_deleted_during_the_merge(refl: Any) -> None:
 
 
 def test_t15_1_b_finish_marks_only_sources_still_there(refl: Any) -> None:
-    """A15 (b): M's fact extraction is held; a source's session is deleted;
-    released, the finish succeeds and marks only the surviving source."""
+    """A15 (b): the finish's embedding of M is held; a source's session is
+    deleted; released, the finish succeeds and marks only the surviving
+    source."""
     srv = refl
     ome = srv.root / ".index" / "sqlite" / "ome.db"
     hits = 0
@@ -216,9 +199,9 @@ def test_t15_1_b_finish_marks_only_sources_still_there(refl: Any) -> None:
         ids = _clustered_pair(srv, owner, token)
         if ids is None:
             continue
-        rule = srv.proxy.add(Rule("llm", llm_call(FACTS, token), "hold", times=1))
+        rule = srv.proxy.add(Rule("emb", single_embedding(token), "hold", times=1))
         _reflect_in_background(srv)
-        if not srv.proxy.wait_held("llm", timeout=90) or not _merged(srv, owner):
+        if not srv.proxy.wait_held("emb", timeout=90) or not _merged(srv, owner):
             rule.release.set()
             srv.proxy.clear()
             continue
@@ -244,29 +227,9 @@ def test_t15_1_b_finish_marks_only_sources_still_there(refl: Any) -> None:
     _require(hits, "T15.1 (b)")
 
 
-# B7 (main journey, Reflection on): four windows, 20 rounds each, one test
+# B7 (main journey, Reflection on): three windows, 20 rounds each, one test
 # (and one server) per window -- together they outlast a server's lifetime cap.
-
-
-def test_tb7_1_1_fact_extraction_in_flight(refl: Any) -> None:
-    """(1) The episode's fact extraction is in flight."""
-    srv = refl
-    hits = 0
-    for r in range(ROUNDS):
-        owner, token = f"tb71u{r}", f"bison{r}q"
-        rule = srv.proxy.add(Rule("llm", llm_call(FACTS, token), "hold", times=1))
-        target = _send_held(srv, owner, token, rule, "llm")
-        if target is None:
-            continue
-        assert srv.delete_by_ids([f"{owner}_{target}"]).status_code == 200
-        if not _window_open(srv, rule):
-            srv.proxy.clear()
-            continue
-        hits += 1
-        rule.release.set()
-        _watch(lambda o=owner, t=target: _gone(srv, o, t))
-        srv.proxy.clear()
-    _require(hits, "TB7.1 (1)")
+# Window (1), the episode's fact extraction in flight, went with atomic facts.
 
 
 def test_tb7_1_2_clustering_in_its_embedding(refl: Any) -> None:
@@ -321,10 +284,10 @@ def test_tb7_1_3_merge_in_flight_a_source_goes(refl: Any) -> None:
     _require(hits, "TB7.1 (3)")
 
 
-def test_tb7_1_4_merged_facts_in_flight_merged_goes(refl: Any) -> None:
-    """(4) The merged episode's facts are in flight; M goes. The finish (which
-    marks the sources) comes after those facts, so it never ran: the merge is
-    undone and the sources stay, unmarked (spec 2 R6)."""
+def test_tb7_1_4_finish_in_flight_merged_goes(refl: Any) -> None:
+    """(4) The finish is in its embedding of the merged episode; M goes. The
+    finish marks the sources only while M is in md, so it marks nothing: the
+    merge is undone and the sources stay, unmarked (spec 2 R6)."""
     srv = refl
     hits = 0
     for r in range(ROUNDS):
@@ -332,9 +295,9 @@ def test_tb7_1_4_merged_facts_in_flight_merged_goes(refl: Any) -> None:
         ids = _clustered_pair(srv, owner, token)
         if ids is None:
             continue
-        rule = srv.proxy.add(Rule("llm", llm_call(FACTS, token), "hold", times=1))
+        rule = srv.proxy.add(Rule("emb", single_embedding(token), "hold", times=1))
         _reflect_in_background(srv)
-        if not srv.proxy.wait_held("llm", timeout=90) or not _merged(srv, owner):
+        if not srv.proxy.wait_held("emb", timeout=90) or not _merged(srv, owner):
             rule.release.set()
             srv.proxy.clear()
             continue
@@ -364,13 +327,14 @@ def test_t11_1_b_c_deletions_do_not_wait_on_held_embeddings(
 ) -> None:
     """A11 (b)(c): clustering stuck in its embedding, and a Reflection finish
     stuck in its embedding; deletions touching their owner answer within the
-    index bound (15 s x tables + 1 s) instead of waiting.
+    index bound (15 s x tables + 1 s; a user's tables are episode,
+    image_memory and user_profile) instead of waiting.
 
     The embedding timeout is raised past the bound: at the default 30 s an
     embedding held under a lock times out and retries well inside the bound,
     so a deletion waiting on it could never fail the bound."""
     srv = _start_refl(make_server, EVEROS_EMBEDDING__TIMEOUT_SECONDS="120")
-    bound = 15 * 4 + 1
+    bound = 15 * 3 + 1
     ids = _clustered_pair(srv, "t11u", "manatee1q")
     assert ids is not None, "no cluster formed: not manufactured"
     rule = srv.proxy.add(Rule("emb", single_embedding("manatee2q"), "hold", times=1))

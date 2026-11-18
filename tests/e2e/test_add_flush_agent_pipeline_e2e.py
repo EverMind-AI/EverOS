@@ -1,7 +1,7 @@
 """Agent pipeline e2e — a hermetic canned run and a real-LLM SWE-bench drive.
 
-``test_add_flush_search_get_on_canned_agent_track`` runs anywhere: every
-model call is answered from the canned scripts and the embedder is
+``test_add_flush_get_on_canned_agent_track`` runs anywhere: every model
+call is answered from the canned scripts and the embedder is
 :class:`tests.fakes.FakeEmbeddingProvider`.
 
 The rest: 5 SWE-bench trajectories drive /add + /flush.
@@ -333,16 +333,18 @@ async def _poll_until(
             await asyncio.sleep(0.2)
 
 
-async def test_add_flush_search_get_on_canned_agent_track(
+async def test_add_flush_get_on_canned_agent_track(
     core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``/add`` -> ``/flush`` -> ``/get`` -> ``/search`` on the canned agent track.
+    """``/add`` -> ``/flush`` -> ``/get`` on the canned agent track.
 
     Real application in agent mode (boundary, both pipelines, OME strategies,
     cascade, LanceDB), every model call answered from the canned scripts, a
     1024-wide fake embedder (the skill chain needs one), no rerank. The flush
     cuts the trajectory into one cell; the case, its cluster and the skill it
-    drives all become readable through the API for ``agent_id``.
+    drives all become readable through the API for ``agent_id``. An agent's
+    memory is listed by ``/get``, not searched: multi-round retrieval covers
+    user and group memory only.
     """
     from everos.config import load_settings
     from everos.entrypoints.api.app import create_app

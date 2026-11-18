@@ -20,7 +20,7 @@ from .seed import seed_world
 pytestmark = pytest.mark.acceptance
 
 _SPACE = "default_app/default_project"
-_DAILY = ("episode", "atomic_fact", "foresight", "agent_case")
+_DAILY = ("episode", "agent_case")
 
 
 def _skill_dirs(root: Path) -> list[str]:
@@ -83,7 +83,7 @@ def test_t1_1_each_scope_deletes_exactly_its_row(
     before = md_entries(srv.root)
     kinds = {e["kind"] for e in before}
     # Precondition: every kind exists before (a 0 would make the check vacuous).
-    assert {"episodes", ".atomic_facts", ".foresights", ".cases"} <= kinds, kinds
+    assert {"episodes", ".cases"} <= kinds, kinds
     assert (srv.root / "default_app/default_project/users/u1/user.md").exists()
     tables_before = logical_dump(srv.root)
     assert tables_before["cluster"] and tables_before["reflection_report"]

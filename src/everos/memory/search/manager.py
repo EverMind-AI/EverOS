@@ -12,15 +12,9 @@ guards (embedding / cross-encoder / LLM) raise early when a method is
 selected without its prerequisites.
 
 ``HYBRID`` defaults to **no LLM rerank** — the response comes back
-straight after the heap-expand pipeline (RRF-ordered expansion → LR-calibrated
-global top-N competition with fact eviction). ``enable_llm_rerank`` is
-**ignored** for the hierarchy path. ``AGENTIC`` keeps its own
-internal cross-encoder rerank loop; the flag is ignored there.
-
-``SearchEpisodeItem.atomic_facts`` is populated **only** when the HYBRID
-pipeline runs over episodes. The other methods leave it empty: there is
-no query-relevance score we can assign to a fact pulled by parent_id
-alone, and emitting ``score=0.0`` facts would muddy the contract.
+straight after the two recall routes are fused into one ranked episode
+list. ``AGENTIC`` keeps its own internal cross-encoder rerank loop; the
+flag is ignored there.
 
 The manager never writes to storage; it only reads LanceDB + markdown.
 """
@@ -33,7 +27,6 @@ from datetime import UTC, tzinfo
 from typing import TYPE_CHECKING, Any
 
 from everalgo.rank import DEFAULT_RANK_CONFIG, RankConfig, arank
-from everalgo.rank.fusion import rrf
 
 from everos.config import load_settings
 from everos.config.settings import DeciderSettings
@@ -67,23 +60,21 @@ from .dto import (
     UnprocessedMessageDTO,
 )
 from .filters import compile_filters
-from .hierarchy import build_ep_to_fact_parents, heap_expand
 from .llm_multiround import RoundDecider, search_episodes_llm_multiround
 from .recall import (
     KindRecaller,
     RecallResult,
-    maxsim_episode_recall,
     merge_by_id_max,
     merge_stored,
     rank_input,
 )
 from .shaper import (
-    reshape_hybrid_output,
     shape_agent_cases,
     shape_agent_cases_ranked,
     shape_agent_skills,
     shape_agent_skills_ranked,
     shape_episodes,
+    shape_episodes_ranked,
 )
 from .skill_hybrid import search_agent_skills_hybrid
 
@@ -97,7 +88,6 @@ if TYPE_CHECKING:
     from .recall import (
         AgentCaseRecaller,
         AgentSkillRecaller,
-        AtomicFactRecaller,
         EpisodeRecaller,
         ProfileRecaller,
     )
@@ -126,14 +116,6 @@ _AGENT_TOP_K_CAP = 10
 # distributions can drift a bit on the same model).
 _DEFAULT_UNLIMITED_RADIUS = 0.5
 
-# ``maxsim_atomic`` recall pool sizing — atomic facts are ~28× denser than
-# episodes (one memcell → 1 episode + ~28 atomic facts), so the fact pool
-# is sized as ``top_k_episode * 20`` to consistently cover enough distinct
-# parent memcells before the max-pool reduction. Capped to keep the ANN
-# scan bounded on very large top_k requests.
-_MAXSIM_FACT_MULTIPLIER = 20
-_MAXSIM_FACT_POOL_CAP = 2000
-
 # The unprocessed buffer (``memorize`` track) is a single
 # shared track because boundary detection is single-pass — switching mode
 # requires a fresh process. Hard-coded here (instead of importing) to keep
@@ -150,12 +132,13 @@ def _top_score(data: SearchData) -> float:
 
 
 # Methods whose top score is calibrated to a comparable [0, 1] scale
-# (HYBRID → LR sigmoid, AGENTIC → cross-encoder), so the recall_hit
-# threshold is meaningful. KEYWORD (unbounded BM25) and single-route
-# VECTOR are excluded — a fixed threshold there yields a misleading
-# near-constant "hit" that inflates cross-method dashboards. Their top
-# score is also reported under a separate score name (see ``scores``).
-_CALIBRATED_METHODS = frozenset({SearchMethod.HYBRID, SearchMethod.AGENTIC})
+# (AGENTIC → cross-encoder), so the recall_hit threshold is meaningful.
+# KEYWORD (unbounded BM25), single-route VECTOR (cosine, no fusion) and
+# HYBRID (an RRF sum, ``k``-bounded and not a probability) are excluded — a
+# fixed threshold there yields a misleading near-constant "hit" that inflates
+# cross-method dashboards. Their top score is still reported as
+# ``top_score``; the hit verdict is simply unset.
+_CALIBRATED_METHODS = frozenset({SearchMethod.AGENTIC})
 
 
 class SearchManager:
@@ -165,7 +148,6 @@ class SearchManager:
         self,
         *,
         episode_recaller: EpisodeRecaller,
-        atomic_fact_recaller: AtomicFactRecaller,
         agent_case_recaller: AgentCaseRecaller,
         agent_skill_recaller: AgentSkillRecaller,
         profile_recaller: ProfileRecaller,
@@ -183,7 +165,6 @@ class SearchManager:
         self._tuning_source = tuning_source
         self._trace_path_source = trace_path_source
         self._ep = episode_recaller
-        self._fact = atomic_fact_recaller
         self._case = agent_case_recaller
         self._skill = agent_skill_recaller
         self._profile = profile_recaller
@@ -382,7 +363,6 @@ class SearchManager:
                 app_id=req.app_id,
                 project_id=req.project_id,
                 episode_recaller=self._ep,
-                atomic_fact_recaller=self._fact,
                 cluster_store=self._clusters,
                 embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
@@ -400,7 +380,6 @@ class SearchManager:
                 app_id=req.app_id,
                 project_id=req.project_id,
                 episode_recaller=self._ep,
-                atomic_fact_recaller=self._fact,
                 embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 llm=self._decider_llm,  # type: ignore[arg-type]
                 top_k=self._top_k(req.top_k),
@@ -425,44 +404,37 @@ class SearchManager:
                         req.query, where, limit=self._recall_limit(req.top_k)
                     )
                 else:
-                    recalled = await self._maxsim_atomic_recall(req, where, top_k)
-            # ``atomic_facts`` stays empty: facts come back only when the HYBRID
-            # pipeline surfaces them with a score (see ``reshape_hybrid_output``).
-            # Single-route recall has no per-fact score against the query, so
-            # we do not back-fill — that would emit ``score=0.0`` facts whose
-            # semantics are ambiguous.
+                    recalled = await self._ep.dense_recall(
+                        await self._embed_query(req.query),
+                        where,
+                        limit=self._recall_limit(req.top_k),
+                    )
+                    recalled = recalled.within_radius(_effective_radius(req))
             return shape_episodes(recalled.candidates[:top_k], recalled.stored_by_id)
 
-        # ── HYBRID: heap-expand hierarchy over parallel sparse + dense recall ──
-        sparse, dense, query_vector = await self._recall_sparse_dense(
-            self._ep, req, where, top_k
-        )
+        # ── HYBRID: everalgo fusion over parallel sparse + dense recall ──
+        sparse, dense, _ = await self._recall_sparse_dense(self._ep, req, where, top_k)
         with memory_span(
             "everos.search.rank",
             observation_type="span",
             metadata={"phase": fusion_mode},
         ):
-            rrf_candidates = rrf(sparse.candidates, dense.candidates)
-            facts = await self._fact.facts_for_episodes(
-                build_ep_to_fact_parents(rrf_candidates),
-                where,
-                per_episode=max(top_k * 2, 20),
-                query_vector=query_vector,
+            output = await arank(
+                rank_input(
+                    req.query,
+                    memory_type=self._ep.everalgo_memory_type,
+                    sparse=sparse,
+                    dense=dense,
+                    top_k=top_k,
+                ),
+                config=DEFAULT_RANK_CONFIG,
+                llm=self._llm,
+                enable_rerank=False,
             )
-            scored = heap_expand(
-                sparse=sparse.candidates,
-                dense=dense.candidates,
-                episode_to_facts=facts.buckets,
-                top_k=top_k,
-            )
-            shaped = reshape_hybrid_output(
-                scored,
-                episodes_by_id=merge_stored(sparse, dense),
-                facts_by_id=facts.stored_by_id,
-            )
-            if req.min_score is not None:
-                shaped = [s for s in shaped if s.score >= req.min_score]
-            return shaped
+        shaped = shape_episodes_ranked(output, merge_stored(sparse, dense))
+        if req.min_score is not None:
+            shaped = [s for s in shaped if s.score >= req.min_score]
+        return shaped
 
     # ── Agent cases ─────────────────────────────────────────────────
 
@@ -671,26 +643,6 @@ class SearchManager:
             )
             return sparse, dense.within_radius(_effective_radius(req)), vector
 
-    async def _maxsim_atomic_recall(
-        self, req: SearchRequest, where: Filter, top_k: int
-    ) -> RecallResult[Any]:
-        """MaxSim recall: atomic-fact ANN max-pooled onto parent episodes.
-
-        The fact pool is sized ``top_k * 20`` (facts are ~28x denser than
-        episodes), capped to keep the ANN bounded on large ``top_k``.
-        """
-        recalled = await maxsim_episode_recall(
-            await self._embed_query(req.query),
-            where,
-            facts=self._fact,
-            episodes=self._ep,
-            top_k=top_k,
-            fact_limit=min(top_k * _MAXSIM_FACT_MULTIPLIER, _MAXSIM_FACT_POOL_CAP),
-            fallback_limit=self._recall_limit(req.top_k),
-            owner_id=req.owner_id,
-        )
-        return recalled.within_radius(_effective_radius(req))
-
     async def _embed_query(self, query: str) -> list[float]:
         if self._embedding is None:
             return []
@@ -721,7 +673,7 @@ class SearchManager:
     def _top_k(top_k: int, *, cap: int = _DEFAULT_TOP_K_CAP) -> int:
         """Resolve ``-1`` to ``cap``; pass others through unchanged.
 
-        ``cap`` defaults to the episode/atomic_fact upper bound; agent
+        ``cap`` defaults to the episode upper bound; agent
         cases / skills pass :data:`_AGENT_TOP_K_CAP` so an unbounded
         request still returns a tight, rerank-friendly result set.
         """

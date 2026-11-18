@@ -17,8 +17,7 @@ Two modes:
   --mode readonly             Bypass the lifespan stack, open LanceDB with
                               a fresh read connection, read md directly.
                               Safe even on an active corpus, but only
-                              covers the three daily-log kinds (episode /
-                              atomic_fact / foresight).
+                              covers the user daily-log kind (episode).
 
 Examples:
   scripts/check_consistency.py ~/.everos-locomo-all-kv-fast
@@ -84,7 +83,7 @@ async def _scan_monotonicity(corpus: Path) -> list[MonotonicityReport]:
     """Walk all daily-log md files; report id-counter monotonicity per file."""
     from everos.infra.persistence.markdown import MarkdownReader
 
-    daily_dirs = ("/episodes/", "/.atomic_facts/", "/.foresights/", "/.agent_cases/")
+    daily_dirs = ("/episodes/", "/.agent_cases/")
     reports: list[MonotonicityReport] = []
     for md in sorted(corpus.rglob("*.md")):
         rel = md.relative_to(corpus).as_posix()
@@ -208,15 +207,13 @@ async def run_lifespan_mode(corpus: Path) -> int:
 async def run_readonly_mode(corpus: Path, owners_filter: list[str] | None) -> int:
     """Direct LanceDB read + md read; no lifespan / cascade / ome started.
 
-    Covers the three daily-log kinds; agent_case + user_profile + agent_skill
-    are NOT checked in this mode (use --mode lifespan on an idle corpus
-    snapshot for full coverage).
+    Covers the episode kind; agent_case + user_profile + agent_skill are NOT
+    checked in this mode (use --mode lifespan on an idle corpus snapshot for
+    full coverage).
     """
     import lancedb
 
-    from everos.infra.cascade._projections.atomic_fact import AtomicFactHandler
     from everos.infra.cascade._projections.episode import EpisodeHandler
-    from everos.infra.cascade._projections.foresight import ForesightHandler
     from everos.infra.persistence.markdown import MarkdownReader
     from tests._consistency_assertions import _daily_log_sha_for_entry
 
@@ -224,8 +221,6 @@ async def run_readonly_mode(corpus: Path, owners_filter: list[str] | None) -> in
 
     kinds = [
         ("episode", "episodes", "episode-", EpisodeHandler),
-        ("atomic_fact", ".atomic_facts", "atomic_fact-", AtomicFactHandler),
-        ("foresight", ".foresights", "foresight-", ForesightHandler),
     ]
 
     # Pick owners
@@ -243,7 +238,7 @@ async def run_readonly_mode(corpus: Path, owners_filter: list[str] | None) -> in
     for table_name, dir_name, prefix, handler_cls in kinds:
         try:
             table = db.open_table(table_name)
-        except FileNotFoundError:
+        except (ValueError, FileNotFoundError):  # lancedb raises ValueError now
             print(f"  {table_name}: table not in lancedb (skip)")
             continue
         for owner in owners:

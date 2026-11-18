@@ -22,7 +22,7 @@ _DELETE = [
 def _by_ids(ok: str) -> list[dict[str, object]]:
     """Each invalid request carries ``ok``, the id of a stored episode."""
     return [
-        {"memory_type": "atomic_fact", "memory_ids": [ok]},
+        {"memory_type": "agent_case", "memory_ids": [ok]},
         {"memory_type": "episode", "memory_ids": []},
         {"memory_type": "episode", "memory_ids": [ok] * 51},
         {

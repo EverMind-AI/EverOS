@@ -20,15 +20,10 @@ def test_vector_skips_everalgo() -> None:
     assert cfg is None
 
 
-def test_hybrid_episode_picks_hierarchy() -> None:
+def test_hybrid_episode_picks_fused() -> None:
     fm, cfg = resolve_pipeline(SearchMethod.HYBRID, "episode")
-    assert fm == "hierarchy"
+    assert fm == "fused"
     assert cfg is None
-
-
-def test_hybrid_atomic_fact_picks_hierarchy() -> None:
-    fm, _cfg = resolve_pipeline(SearchMethod.HYBRID, "atomic_fact")
-    assert fm == "hierarchy"
 
 
 def test_hybrid_case_picks_vector_anchored() -> None:

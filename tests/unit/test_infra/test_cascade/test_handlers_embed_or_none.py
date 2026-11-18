@@ -20,8 +20,6 @@ from everos.component.tokenizer import Tokenizer
 from everos.infra.cascade._projections import (
     AgentCaseHandler,
     AgentSkillHandler,
-    AtomicFactHandler,
-    ForesightHandler,
     HandlerDeps,
 )
 from everos.infra.cascade._projections._daily_log_base import ParsedEntry
@@ -93,55 +91,6 @@ async def _embed_one(handler, **kw):  # type: ignore[no-untyped-def]
         kw["md_path"],
     )
     return row
-
-
-async def test_atomic_fact_handler_writes_null_vector_when_embed_unavailable(
-    memory_root: MemoryRoot,
-) -> None:
-    handler = AtomicFactHandler(_deps(memory_root))
-    row = await _embed_one(
-        handler,
-        owner_id="u1",
-        owner_type="user",
-        md_path="x.md",
-        entry=_entry(
-            "af_20260514_0001",
-            inline={
-                "owner_id": "u1",
-                "session_id": "s1",
-                "timestamp": "2026-05-14T10:00:00+00:00",
-                "parent_id": "mc_1",
-            },
-            sections={"Fact": "the user prefers dark mode"},
-        ),
-    )
-    assert row.vector is None
-    # BM25 tokenization still runs — the row stays keyword-searchable.
-    assert row.fact_tokens == "the user prefers dark mode"
-
-
-async def test_foresight_handler_writes_null_vector_when_embed_unavailable(
-    memory_root: MemoryRoot,
-) -> None:
-    handler = ForesightHandler(_deps(memory_root))
-    row = await _embed_one(
-        handler,
-        owner_id="u1",
-        owner_type="user",
-        md_path="x.md",
-        entry=_entry(
-            "fs_20260514_0001",
-            inline={
-                "owner_id": "u1",
-                "session_id": "s1",
-                "timestamp": "2026-05-14T10:00:00+00:00",
-                "parent_id": "mc_1",
-            },
-            sections={"Foresight": "user will book lunch"},
-        ),
-    )
-    assert row.vector is None
-    assert row.foresight_tokens == "user will book lunch"
 
 
 async def test_agent_case_handler_writes_null_vector_when_embed_unavailable(

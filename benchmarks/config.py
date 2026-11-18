@@ -156,8 +156,8 @@ class BenchmarkConfig(BaseModel):
 
     EverOS has a single `[llm]` setting, so this ONE model does both jobs: it extracts
     memories during ADD and it is the decider inside the multi-round retrieval loop
-    (`extract_agent_case`, `extract_user_profile`, `extract_atomic_facts`,
-    `reflect_episodes` and the search loop all share the one `[llm]` provider).
+    (`extract_agent_case`, `extract_user_profile`, `reflect_episodes` and the
+    search loop all share the one `[llm]` provider).
     There is no separate decider knob to set.
 
     Empty means "leave EVEROS_LLM__MODEL as the environment already has it" -- which is

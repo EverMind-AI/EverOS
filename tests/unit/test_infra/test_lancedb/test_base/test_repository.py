@@ -10,7 +10,7 @@ verified.
 
 Uses a tmp LanceDB connection + a locally-defined daily-log-shaped
 table so the chassis can be exercised without depending on any
-specific business schema (episode / atomic_fact / …).
+specific business schema (episode / agent_case / …).
 """
 
 from __future__ import annotations

@@ -10,7 +10,7 @@ import pytest
 
 from .conftest import chat
 from .observe import lance_ids, metric_value, metrics, rows, wait_converged
-from .proxy import FACTS, Rule, cascade_embedding, llm_call
+from .proxy import Rule, cascade_embedding, single_embedding
 
 pytestmark = pytest.mark.acceptance
 
@@ -21,7 +21,8 @@ def _episode_ids(srv: Any, user: str) -> set[str]:
 
 def _search(srv: Any, user: str, query: str) -> list[str]:
     resp = srv.post(
-        "/memory/search", {"user_id": user, "query": query, "method": "keyword"}
+        "/memory/search",
+        {"user_id": user, "query": query, "method": "llm_multiround"},
     )
     assert resp.status_code == 200, resp.text
     return [e["id"] for e in resp.json()["data"].get("episodes", [])]
@@ -49,16 +50,14 @@ def test_t7_1_index_rows_go_with_the_response(server: Any) -> None:
 
 def test_tb4_1_by_id_on_lancedb(server: Any) -> None:
     """B4 on LanceDB (the Milvus half is in test_milvus.py): with the
-    projection stopped, a by-id deletion removes the episode's and its facts'
-    rows before the 200; /search and /get stop returning it."""
+    projection stopped, a by-id deletion removes the episode's row before the
+    200; /search and /get stop returning it."""
     srv = server
     assert srv.add("s1", chat("u1", "tapir52")).status_code == 200
     assert srv.flush("s1").status_code == 200
     wait_converged(srv.base)
     ids = _episode_ids(srv, "u1")
-    assert len(ids) == 1, ids  # so every u1 fact is this episode's
-    facts = {i for i in lance_ids(srv.root, "atomic_fact") if i.startswith("u1_")}
-    assert facts, "positive control: the facts are indexed"
+    assert len(ids) == 1, ids
     assert set(_search(srv, "u1", "tapir52")) & ids, "positive control: searchable"
     assert srv.post("/cascade/quiesce", {}).status_code == 200
 
@@ -66,7 +65,6 @@ def test_tb4_1_by_id_on_lancedb(server: Any) -> None:
     assert srv.delete_by_ids([target]).status_code == 200
 
     assert target not in _episode_ids(srv, "u1")
-    assert not lance_ids(srv.root, "atomic_fact") & facts
     assert target not in set(_search(srv, "u1", "tapir52"))
     listed = srv.post("/memory/get", {"user_id": "u1", "memory_type": "episode"}).json()
     assert target not in {e["id"] for e in listed["data"]["episodes"]}
@@ -74,7 +72,10 @@ def test_tb4_1_by_id_on_lancedb(server: Any) -> None:
 
 def test_t16_1_succeeded_runs_keep_no_conversation_text(server: Any) -> None:
     """A16: every success row of ome.db has an empty event_payload; a run
-    killed while RUNNING is replayed after the restart and also ends empty."""
+    killed while RUNNING is replayed after the restart and also ends empty.
+
+    The run killed is the new episode's ``trigger_profile_clustering``, held
+    in its embedding of the episode."""
     srv = server
     assert srv.add("s1", chat("u1", "heron77")).status_code == 200
     assert srv.flush("s1").status_code == 200
@@ -88,11 +89,11 @@ def test_t16_1_succeeded_runs_keep_no_conversation_text(server: Any) -> None:
     success = rows(ome, "SELECT event_payload FROM run_record WHERE status='success'")
     assert success and all(p == "" for (p,) in success), success[:3]
 
-    hold = srv.proxy.add(Rule("llm", llm_call(FACTS, "heron88"), "hold"))
+    hold = srv.proxy.add(Rule("emb", single_embedding("heron88"), "hold"))
     assert srv.add("s2", chat("u1", "heron88")).status_code == 200
     flush = threading.Thread(target=lambda: srv.flush("s2"), daemon=True)
     flush.start()
-    assert srv.proxy.wait_held("llm", timeout=120)
+    assert srv.proxy.wait_held("emb", timeout=120)
     srv.kill()
     hold.release.set()
     srv.proxy.clear()
@@ -110,13 +111,13 @@ def test_t16_1_succeeded_runs_keep_no_conversation_text(server: Any) -> None:
     crashed = rows(
         ome,
         "SELECT strategy_name FROM run_record WHERE status='crashed'"
-        " AND strategy_name='extract_atomic_facts'",
+        " AND strategy_name='trigger_profile_clustering'",
     )
     assert crashed, "the run killed in flight is recorded as crashed"
     replayed = rows(
         ome,
         "SELECT COUNT(*) FROM run_record WHERE status='success'"
-        " AND strategy_name='extract_atomic_facts'",
+        " AND strategy_name='trigger_profile_clustering'",
     )
     assert replayed[0][0] >= 2  # the first add's and the replay
 

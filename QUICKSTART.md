@@ -205,9 +205,8 @@ Cap. If the first search is empty, wait a moment for cascade indexing and retry.
 > Keep `"method": "keyword"` when only the LLM is configured. The API default
 > is hybrid, which requires embedding and returns HTTP 422 in the one-key tier.
 
-Keyword retrieval returns matching episodes from the local BM25 index. Atomic
-facts are created by an embedding-dependent strategy, so they are not expected
-in the OpenRouter Tier 1 response.
+Keyword retrieval returns matching episodes from the local BM25 index, and
+needs no embedding provider.
 
 ## 9. Read the Markdown source of truth
 
@@ -220,8 +219,6 @@ Your extracted memory is a normal Markdown file under the memory root:
 │       ├── users/alice/
 │       │   ├── user.md
 │       │   ├── episodes/
-│       │   ├── .atomic_facts/
-│       │   └── .foresights/
 │       ├── agents/<agent_id>/
 │       │   ├── agent.md
 │       │   ├── .cases/

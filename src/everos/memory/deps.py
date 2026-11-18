@@ -33,12 +33,9 @@ from everos.memory.ports import (
     AgentCaseStore,
     AgentSkillIndex,
     AgentSkillStore,
-    AtomicFactIndex,
-    AtomicFactStore,
     ClusterStore,
     EpisodeIndex,
     EpisodeStore,
-    ForesightStore,
     KnowledgeTopicIndex,
     MemcellStore,
     MemorizeInboxStore,
@@ -61,8 +58,6 @@ class Stores:
     """Every write-side store, typed by its port."""
 
     episode: EpisodeStore
-    atomic_fact: AtomicFactStore
-    foresight: ForesightStore
     profile: ProfileStore
     agent_case: AgentCaseStore
     agent_skill: AgentSkillStore
@@ -81,7 +76,6 @@ class Indexes:
     """Every read-side index of the configured engine, typed by its port."""
 
     episode: EpisodeIndex
-    atomic_fact: AtomicFactIndex
     agent_case: AgentCaseIndex
     agent_skill: AgentSkillIndex
     profile: ProfileIndex
@@ -99,8 +93,6 @@ class LLMClients:
         boundary: Cuts a session's messages into memcells.
         episode: Extracts each memcell's episode.
         summary: Writes the episode's display summary.
-        atomic_fact: Extracts atomic facts.
-        foresight: Extracts foresight.
         profile: Extracts the user profile.
         reflection: Reflects over episodes.
         agent_case: Extracts agent cases and answers the case gate.
@@ -113,8 +105,6 @@ class LLMClients:
     boundary: LLMClient
     episode: LLMClient
     summary: LLMClient
-    atomic_fact: LLMClient
-    foresight: LLMClient
     profile: LLMClient
     reflection: LLMClient
     agent_case: LLMClient

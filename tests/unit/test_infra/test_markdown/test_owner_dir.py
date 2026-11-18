@@ -16,14 +16,13 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     MarkdownAgentCaseStore,
     MarkdownAgentSkillStore,
-    MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
     MarkdownOwnerDirStore,
     MarkdownProfileStore,
     MarkdownReader,
 )
 from everos.infra.persistence.markdown import owner_dir as owner_dir_module
-from everos.memory.models import AgentCase, AgentSkill, AtomicFact, Episode, Profile
+from everos.memory.models import AgentCase, AgentSkill, Episode, Profile
 from everos.memory.ports import NO_SOURCE_CHECK, Scope
 
 _TS = 1_747_216_800_000
@@ -57,18 +56,6 @@ async def _seed_user(root: MemoryRoot, scope: Scope) -> list[str]:
     refs = await episodes.append_many(
         scope, [_episode(f"e{i}") for i in range(3)], only_if=NO_SOURCE_CHECK
     )
-    await MarkdownAtomicFactStore(root).append_many(
-        scope,
-        [
-            AtomicFact(
-                owner_id=scope.owner_id,
-                content="f",
-                timestamp=_TS,
-                parent_id=refs[0].entry_id,
-            )
-        ],
-        only_if=NO_SOURCE_CHECK,
-    )
     await MarkdownProfileStore(root).write(
         scope, Profile(owner_id=scope.owner_id, summary="p", timestamp=_TS)
     )
@@ -84,9 +71,7 @@ async def test_owner_delete_counts_and_keeps_today_counter(root: MemoryRoot) -> 
     deletion = await owners.delete(_user())
 
     assert [r.entry_id for r in deletion.refs["episode"]] == old
-    assert len(deletion.refs["atomic_fact"]) == 1
-    assert deletion.refs["foresight"] == []
-    assert deletion.count == 3 + 1 + 1
+    assert deletion.count == 3 + 1
     owner_dir = root.users_dir("app", "p") / "u1"
     assert sorted(p.name for p in owner_dir.rglob("*") if p.is_file()) == [
         path.name for path in sorted(owner_dir.rglob("*.md"))
@@ -184,7 +169,7 @@ async def test_resend_finishes_a_deletion_that_failed_after_the_rename(
     deletion = await owners.delete(_user())
 
     assert [r.entry_id for r in deletion.refs["episode"]] == old
-    assert deletion.count == 3 + 1 + 1
+    assert deletion.count == 3 + 1
     assert not list(root.tmp_dir.glob("delete-*"))
     (new,) = await MarkdownEpisodeStore(root).append_many(
         _user(), [_episode("after")], only_if=NO_SOURCE_CHECK
@@ -229,7 +214,7 @@ async def test_owner_ids_with_lookalike_separators_stay_literal(
 
     deletion = await MarkdownOwnerDirStore(root).delete(_user(owner))
 
-    assert deletion.count == 5
+    assert deletion.count == 4
     assert (root.users_dir("app", "p") / "a" / "user.md").exists()
 
 

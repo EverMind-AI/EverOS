@@ -15,9 +15,7 @@ import pytest
 from everos.infra.persistence.lancedb import (
     AgentCase,
     AgentSkill,
-    AtomicFact,
     Episode,
-    Foresight,
 )
 
 _VEC = [0.0] * 1024
@@ -39,44 +37,6 @@ def _episode() -> Episode:
         episode="hello world",
         episode_tokens="hello world",
         md_path="users/u1/episodes/episode-2026-05-14.md",
-        content_sha256=_SHA,
-        vector=_VEC,
-    )
-
-
-def _atomic_fact() -> AtomicFact:
-    return AtomicFact(
-        id="u1_af_1",
-        entry_id="af_20260514_0001",
-        owner_id="u1",
-        owner_type="user",
-        session_id="s1",
-        timestamp=_NOW,
-        parent_type="memcell",
-        parent_id="mc_1",
-        sender_ids=["u1"],
-        fact="x is y",
-        fact_tokens="x is y",
-        md_path="users/u1/.atomic_facts/atomic_fact-2026-05-14.md",
-        content_sha256=_SHA,
-        vector=_VEC,
-    )
-
-
-def _foresight() -> Foresight:
-    return Foresight(
-        id="u1_fs_1",
-        entry_id="fs_20260514_0001",
-        owner_id="u1",
-        owner_type="user",
-        session_id="s1",
-        timestamp=_NOW,
-        parent_type="memcell",
-        parent_id="mc_1",
-        sender_ids=["u1"],
-        foresight="user plans X",
-        foresight_tokens="user plans X",
-        md_path="users/u1/.foresights/foresight-2026-05-14.md",
         content_sha256=_SHA,
         vector=_VEC,
     )
@@ -124,8 +84,8 @@ def _agent_skill() -> AgentSkill:
 
 @pytest.mark.parametrize(
     "factory",
-    [_episode, _atomic_fact, _foresight, _agent_case, _agent_skill],
-    ids=["episode", "atomic_fact", "foresight", "agent_case", "agent_skill"],
+    [_episode, _agent_case, _agent_skill],
+    ids=["episode", "agent_case", "agent_skill"],
 )
 def test_content_sha256_round_trip(factory) -> None:  # type: ignore[no-untyped-def]
     row = factory()
@@ -138,8 +98,8 @@ def test_content_sha256_round_trip(factory) -> None:  # type: ignore[no-untyped-
 
 @pytest.mark.parametrize(
     "factory",
-    [_episode, _atomic_fact, _foresight, _agent_case, _agent_skill],
-    ids=["episode", "atomic_fact", "foresight", "agent_case", "agent_skill"],
+    [_episode, _agent_case, _agent_skill],
+    ids=["episode", "agent_case", "agent_skill"],
 )
 def test_content_sha256_required(factory) -> None:  # type: ignore[no-untyped-def]
     """Dropping content_sha256 from the kwargs surfaces a ValidationError."""

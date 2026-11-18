@@ -16,7 +16,7 @@ def config_root(tmp_path: Path) -> Path:
     tmp_path/
       prompt_slots/
         episode.yaml
-        atomic_fact.yaml
+        agent_case.yaml
       custom_dir/
         alpha.yaml
     """
@@ -25,8 +25,8 @@ def config_root(tmp_path: Path) -> Path:
         "template: extract episode\nvariables:\n  memcell: input memcell\n",
         encoding="utf-8",
     )
-    (tmp_path / "prompt_slots" / "atomic_fact.yaml").write_text(
-        "template: extract atomic fact\n", encoding="utf-8"
+    (tmp_path / "prompt_slots" / "agent_case.yaml").write_text(
+        "template: extract agent case\n", encoding="utf-8"
     )
     (tmp_path / "custom_dir").mkdir()
     (tmp_path / "custom_dir" / "alpha.yaml").write_text(
@@ -97,7 +97,7 @@ def test_find_empty_file_yields_empty_dict(tmp_path: Path) -> None:
 def test_list_returns_sorted_stems(config_root: Path) -> None:
     loader = YamlConfigLoader(root=config_root)
     loader.register_category("prompt_slots")
-    assert loader.list("prompt_slots") == ["atomic_fact", "episode"]
+    assert loader.list("prompt_slots") == ["agent_case", "episode"]
 
 
 def test_list_unregistered_category_raises(config_root: Path) -> None:
@@ -143,7 +143,7 @@ def test_refresh_specific_entry(config_root: Path) -> None:
     loader = YamlConfigLoader(root=config_root)
     loader.register_category("prompt_slots")
     e = loader.find("prompt_slots", "episode")
-    a = loader.find("prompt_slots", "atomic_fact")
+    a = loader.find("prompt_slots", "agent_case")
 
     (config_root / "prompt_slots" / "episode.yaml").write_text(
         "template: NEW\n", encoding="utf-8"
@@ -151,7 +151,7 @@ def test_refresh_specific_entry(config_root: Path) -> None:
     loader.refresh("prompt_slots", "episode")
 
     assert loader.find("prompt_slots", "episode") != e  # reloaded
-    assert loader.find("prompt_slots", "atomic_fact") is a  # untouched
+    assert loader.find("prompt_slots", "agent_case") is a  # untouched
 
 
 def test_refresh_full_category(config_root: Path) -> None:
