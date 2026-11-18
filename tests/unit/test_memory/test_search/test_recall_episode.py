@@ -61,7 +61,6 @@ async def test_empty_query_and_empty_vector_skip_the_index() -> None:
 
     assert (await recaller.sparse_recall("", _ALICE, limit=5)).candidates == []
     assert (await recaller.dense_recall([], _ALICE, limit=5)).candidates == []
-    assert (await recaller.dense_recall_subject([], _ALICE, limit=5)).candidates == []
     assert index.calls == []
 
 
@@ -70,14 +69,11 @@ async def test_empty_query_and_empty_vector_skip_the_index() -> None:
     [
         "sparse_recall_as_child",
         "dense_recall_as_child",
-        "dense_recall_subject_as_child",
     ],
 )
 async def test_child_recalls_tag_parent_id_with_the_entry_id(method: str) -> None:
     ep = stored_episode("ep_7", parent_id="mc_9")
-    index = ScriptedIndex(
-        sparse=[hit(ep, 1.0)], dense=[hit(ep, 0.5)], subject=[hit(ep, 0.4)]
-    )
+    index = ScriptedIndex(sparse=[hit(ep, 1.0)], dense=[hit(ep, 0.5)])
     recaller = _recaller(index)
     query: object = "hi" if method.startswith("sparse") else [0.1]
 
@@ -86,17 +82,6 @@ async def test_child_recalls_tag_parent_id_with_the_entry_id(method: str) -> Non
     (cand,) = result.candidates
     assert cand.metadata["parent_id"] == "ep_7"
     assert result.stored_by_id[cand.id] is ep
-
-
-async def test_dense_recall_subject_uses_the_subject_search() -> None:
-    ep = stored_episode("ep_1")
-    index = ScriptedIndex(subject=[hit(ep, 0.8)])
-
-    result = await _recaller(index).dense_recall_subject([0.1], _ALICE, limit=3)
-
-    assert [c.score for c in result.candidates] == [pytest.approx(0.8)]
-    assert result.candidates[0].source == "vector"
-    assert [c[0] for c in index.calls] == ["subject"]
 
 
 async def test_fetch_all_for_owner_keys_by_entry_id() -> None:

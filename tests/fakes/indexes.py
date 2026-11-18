@@ -62,11 +62,6 @@ class InMemoryEpisodeIndex(_Unsearchable):
             "deprecated_by": self.deprecated_by.get(row.ref.entry_id),
         }
 
-    async def dense_search_subject(
-        self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[SearchHit[Episode]]:
-        raise NotImplementedError
-
     async def find(
         self, where: Filter, *, limit: int | None = None
     ) -> list[SearchHit[Episode]]:

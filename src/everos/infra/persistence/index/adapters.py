@@ -126,14 +126,6 @@ class EpisodeIndexAdapter(_SearchableIndex[Episode]):
         super().__init__(repo, _stored_episode)
         self._episodes = repo
 
-    async def dense_search_subject(
-        self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[SearchHit[Episode]]:
-        rows = await self._episodes.dense_search(
-            vector, where, limit=limit, vector_field="subject_vector"
-        )
-        return [self._hit(row, _cosine_similarity(row)) for row in rows]
-
     async def find_by_entry_ids(
         self, scope: Scope, entry_ids: Sequence[str]
     ) -> list[Stored[Episode]]:

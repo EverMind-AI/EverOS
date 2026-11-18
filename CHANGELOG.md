@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hybrid fallback for scopes over 1,000 episodes. When the cluster scope comes
   back empty (no cluster yet, or no base hit in one), Round 1 runs on the
   un-scoped hybrid instead of returning nothing.
+- **Episodes embed their body only.** Indexing and `everos backfill` no
+  longer embed an episode's subject, one embedding call fewer per episode,
+  and nothing searches the subject vector. The `subject_vector` column stays
+  in the index schema, left empty, so existing stores open with no migration
+  or rebuild.
 - **Episode `vector` search reads 200 atomic facts** whatever the `top_k`, and
   returns at most 50 episodes when `top_k` is `-1`.
 - **Agent case and skill `hybrid` search recall `top_k * 2` per lane**, and 50

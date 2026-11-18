@@ -1,18 +1,17 @@
 """Round-2 finding M8: per-row fallback for embed batch failures.
 
 Before M8, a single poison row (text over provider context limit, etc.)
-would 400 the whole ``embed_batch`` call. ``_embed_primary_batch``
-caught the exception and returned ``None``, and ``_backfill_table``
-tallied every row in the batch as failed — 31 healthy rows would
-re-enter the next scan and hit the same batch layout, failing the same
-way. Infinite retry loop until an operator manually identified the
-poison row.
+would 400 the whole ``embed_batch`` call. ``_embed_batch`` caught the
+exception and returned ``None``, and ``_backfill_table`` tallied every
+row in the batch as failed — 31 healthy rows would re-enter the next scan
+and hit the same batch layout, failing the same way. Infinite retry loop
+until an operator manually identified the poison row.
 
-Round-2 rewires ``_embed_primary_batch`` and ``_embed_subject_batch``
-to fall back to per-row ``provider.embed(...)`` when the batch call
-raises. Only rows whose per-row retry also fails count as failed —
-31 rows recover, 1 poison row logs its ``row_id`` + truncated
-``text_prefix`` so an operator can quarantine it.
+Round-2 rewires ``_embed_batch`` to fall back to per-row
+``provider.embed(...)`` when the batch call raises. Only rows whose
+per-row retry also fails count as failed — 31 rows recover, 1 poison
+row logs its ``row_id`` + truncated ``text_prefix`` so an operator can
+quarantine it.
 
 This file pins the fallback contract:
 
@@ -29,8 +28,7 @@ import pytest
 
 from everos.core.observability.logging import configure_logging
 from everos.infra.persistence.index.vector_backfill import (
-    _embed_primary_batch,
-    _embed_subject_batch,
+    _embed_batch,
     _NullVectorRow,
     _truncated_text_prefix,
 )
@@ -44,15 +42,8 @@ def _wire_structlog_to_stdlib() -> None:
     configure_logging(level="WARNING")
 
 
-def _row(row_id: str, text: str, subject_text: str | None = None) -> _NullVectorRow:
-    return _NullVectorRow(
-        id=row_id,
-        text=text,
-        subject_text=subject_text,
-        tokens=len(text.split()),
-        needs_primary=True,
-        needs_subject=subject_text is not None,
-    )
+def _row(row_id: str, text: str) -> _NullVectorRow:
+    return _NullVectorRow(id=row_id, text=text, tokens=len(text.split()))
 
 
 class _HappyProvider:
@@ -109,12 +100,12 @@ class _PoisonRowProvider:
         return [7.0, 7.0, 7.0]
 
 
-async def test_embed_primary_batch_returns_all_vectors_when_batch_succeeds() -> None:
+async def test_embed_batch_returns_all_vectors_when_batch_succeeds() -> None:
     """Sanity: happy path stays on the fast lane, no per-row calls."""
     provider = _HappyProvider()
     batch = [_row(f"r{i}", f"text {i}") for i in range(5)]
 
-    result = await _embed_primary_batch(provider, batch, "episode")  # type: ignore[arg-type]
+    result = await _embed_batch(provider, batch, "episode")  # type: ignore[arg-type]
 
     assert len(result) == len(batch)
     assert all(vec is not None for vec in result)
@@ -122,7 +113,7 @@ async def test_embed_primary_batch_returns_all_vectors_when_batch_succeeds() -> 
     assert provider.per_row_calls == 0
 
 
-async def test_embed_primary_batch_falls_back_per_row_when_batch_fails(
+async def test_embed_batch_falls_back_per_row_when_batch_fails(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Batch fails → per-row fallback fires, every row gets a vector,
@@ -132,7 +123,7 @@ async def test_embed_primary_batch_falls_back_per_row_when_batch_fails(
     batch = [_row(f"r{i}", f"text {i}") for i in range(4)]
 
     with caplog.at_level("WARNING"):
-        result = await _embed_primary_batch(provider, batch, "episode")  # type: ignore[arg-type]
+        result = await _embed_batch(provider, batch, "episode")  # type: ignore[arg-type]
 
     assert len(result) == len(batch)
     assert all(vec == [1.0, 2.0, 3.0] for vec in result)
@@ -142,7 +133,7 @@ async def test_embed_primary_batch_falls_back_per_row_when_batch_fails(
     assert "cascade_backfill_batch_embed_failed_falling_back_per_row" in caplog.text
 
 
-async def test_embed_primary_batch_isolates_poison_row_in_per_row(
+async def test_embed_batch_isolates_poison_row_in_per_row(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Poison row scenario: 5 rows, row index 2 fails per-row. The
@@ -160,7 +151,7 @@ async def test_embed_primary_batch_isolates_poison_row_in_per_row(
     ]
 
     with caplog.at_level("WARNING"):
-        result = await _embed_primary_batch(provider, batch, "episode")  # type: ignore[arg-type]
+        result = await _embed_batch(provider, batch, "episode")  # type: ignore[arg-type]
 
     assert result[0] == [7.0, 7.0, 7.0]
     assert result[1] == [7.0, 7.0, 7.0]
@@ -179,53 +170,6 @@ async def test_embed_primary_batch_isolates_poison_row_in_per_row(
     assert "POISON body" in caplog.text
     # And only ONE per-row event fires — the four healthy rows don't log.
     assert caplog.text.count("cascade_backfill_row_embed_failed") == 1
-
-
-async def test_embed_subject_batch_isolates_poison_row(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Mirror of the poison-row assertion for ``_embed_subject_batch``.
-    Rows without a subject skip the call entirely; rows with a subject
-    whose per-row retry fails are absent from the returned map (so
-    their ``subject_vector`` stays NULL and the widened NULL-scan filter
-    picks them up next run)."""
-    provider = _PoisonRowProvider()
-    batch = [
-        _row("r0", "primary 0", subject_text="healthy subject 0"),
-        _row("r1", "primary 1", subject_text=None),  # no subject work
-        _row("r2", "primary 2", subject_text="POISON subject text"),
-        _row("r3", "primary 3", subject_text="healthy subject 3"),
-    ]
-
-    with caplog.at_level("WARNING"):
-        result = await _embed_subject_batch(provider, batch, "episode")  # type: ignore[arg-type]
-
-    # Only rows with a subject and a successful per-row retry appear.
-    # The map is keyed by the row's full key, (app_id, project_id, id).
-    key = lambda rid: ("default", "default", rid)  # noqa: E731
-    assert set(result) == {key("r0"), key("r3")}
-    assert result[key("r0")] == [7.0, 7.0, 7.0]
-    assert result[key("r3")] == [7.0, 7.0, 7.0]
-    # r1 has no subject, r2 is the poison — neither in the map.
-    assert key("r1") not in result
-    assert key("r2") not in result
-
-    # The subject-specific per-row event carries r2's id + prefix.
-    assert "cascade_backfill_row_subject_embed_failed" in caplog.text
-    assert "r2" in caplog.text
-    assert "POISON subject" in caplog.text
-
-
-async def test_embed_subject_batch_happy_path_skips_fallback() -> None:
-    """Sanity for the subject side: batch succeeds → no per-row calls."""
-    provider = _HappyProvider()
-    batch = [_row("r0", "primary 0", subject_text="subject 0")]
-
-    result = await _embed_subject_batch(provider, batch, "episode")  # type: ignore[arg-type]
-
-    assert set(result) == {("default", "default", "r0")}
-    assert provider.batch_calls == 1
-    assert provider.per_row_calls == 0
 
 
 def test_truncated_text_prefix_ellipsizes_at_100_chars() -> None:

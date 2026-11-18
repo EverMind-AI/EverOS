@@ -143,7 +143,6 @@ async def test_episode_round_trips_through_markdown_and_the_cascade(
     after = await index.list_after(_USER, _TS - 1, parent_type="memcell")
     hits = await index.sparse_search(["trip"], _USER.to_filter(), limit=5)
     dense = await index.dense_search([0.1] * _DIM, _USER.to_filter(), limit=5)
-    subject = await index.dense_search_subject([0.1] * _DIM, _USER.to_filter(), limit=5)
     every = await index.find(_USER.to_filter())
 
     assert stored.item == episode
@@ -155,7 +154,6 @@ async def test_episode_round_trips_through_markdown_and_the_cascade(
     assert [h.stored.item for h in hits] == [episode]
     assert [h.stored.ref.id for h in dense] == [ref.id]
     assert dense[0].score is not None and 0.0 <= dense[0].score <= 1.0
-    assert [h.stored.ref.id for h in subject] == [ref.id]
     assert [(h.stored.ref.entry_id, h.score) for h in every] == [(ref.entry_id, None)]
     orphans = await index.orphans(
         all_of(_USER.to_filter(), eq("parent_type", "cluster")), limit=10

@@ -140,7 +140,6 @@ class IndexRepository(Protocol[T]):
         where: Filter | None,
         *,
         limit: int,
-        vector_field: str = "vector",
         with_vectors: bool = False,
     ) -> list[dict[str, Any]]: ...
 

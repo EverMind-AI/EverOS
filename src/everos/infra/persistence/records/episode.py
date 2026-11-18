@@ -80,3 +80,6 @@ class Episode(IndexRecord):
 
     vector: DenseVector | None = None
     subject_vector: DenseVector | None = None
+    """Retired: nothing writes or searches it any more. Kept in the schema so
+    stores built while it was filled still pass the startup schema check;
+    rows indexed since then leave it ``None``."""

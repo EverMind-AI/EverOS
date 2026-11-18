@@ -63,21 +63,6 @@ class EpisodeRecaller:
         """Dense recall (body vector ANN) returning as MaxSim children."""
         return _as_children(await self.dense_recall(vector, where, limit=limit))
 
-    async def dense_recall_subject(
-        self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> RecallResult[Episode]:
-        """ANN over the subject embedding; episodes without one never match."""
-        if not vector:
-            return RecallResult.empty()
-        hits = await self._index.dense_search_subject(vector, where, limit=limit)
-        return from_hits(hits, source="vector")
-
-    async def dense_recall_subject_as_child(
-        self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> RecallResult[Episode]:
-        """Subject-vector ANN returning as MaxSim children."""
-        return _as_children(await self.dense_recall_subject(vector, where, limit=limit))
-
     async def fetch_all_for_owner(self, where: Filter) -> RecallResult[Episode]:
         """Every episode in ``where``, keyed by ``entry_id``.
 

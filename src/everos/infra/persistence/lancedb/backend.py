@@ -86,8 +86,8 @@ _PROVENANCE_COLUMN = "vector"
 Six tables carry a vector column and ``Episode`` carries two, so writing all
 of them would raise "how many agreeing copies count as agreement" on the next
 schema change. ``episode.vector`` is the one column that exists in every
-deployment and is written first; ``subject_vector`` comes from the same model
-and is not recorded separately.
+deployment and is written first; ``subject_vector`` is retired and no longer
+written.
 """
 
 _TABLE_SCHEMA_VERSION = 2

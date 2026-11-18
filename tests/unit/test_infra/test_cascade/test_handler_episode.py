@@ -165,8 +165,8 @@ async def test_added_entry_upserts_typed_row(
     assert outcome.upserted == 1
     assert outcome.deleted == 0
     assert outcome.skipped == 0
-    # Subject "Test" is present → two texts embedded (content + subject).
-    assert embedder.calls == 2
+    # Only the content is embedded; the subject is tokenized, not embedded.
+    assert embedder.calls == 1
     assert len(fake_repo.upserts) == 1
     row = fake_repo.upserts[0][0]
     assert row.owner_id == "u1"
@@ -185,8 +185,7 @@ async def test_added_entry_upserts_typed_row(
     assert row.entry_id.startswith("ep_")
     assert row.id == f"u1_{row.entry_id}"
     assert len(row.vector) == 1024
-    assert row.subject_vector is not None
-    assert len(row.subject_vector) == 1024
+    assert row.subject_vector is None
 
 
 async def test_existing_row_lookup_projects_vectors_away(
@@ -253,16 +252,16 @@ async def test_modified_entry_reembeds(
     outcome = await handler.handle_added_or_modified(rel)
     assert outcome.upserted == 1
     assert outcome.skipped == 0
-    # Subject "Test" is present → two texts embedded (content + subject).
-    assert embedder.calls == 2
+    # Only the content is embedded; the subject is tokenized, not embedded.
+    assert embedder.calls == 1
 
 
-async def test_no_subject_skips_subject_embed(
+async def test_entry_without_subject_tokenizes_content_only(
     memory_root: MemoryRoot,
     fake_repo: _FakeEpisodeRepo,
     stub_embedder: _StubEmbedder,
 ) -> None:
-    """When Subject is absent, subject_vector is None; only content is embedded."""
+    """Without a Subject the BM25 source is the content alone."""
     today = _dt.date(2026, 5, 14)
     writer = EpisodeWriter(memory_root)
     await writer.append_entry(
@@ -285,11 +284,8 @@ async def test_no_subject_skips_subject_embed(
     outcome = await handler.handle_added_or_modified(rel)
 
     assert outcome.upserted == 1
-    # No Subject → only the content text is embedded.
     assert embedder.calls == 1
-    row = fake_repo.upserts[0][0]
-    assert row.subject_vector is None
-    assert row.episode_tokens == "content only"
+    assert fake_repo.upserts[0][0].episode_tokens == "content only"
 
 
 # ── deletion paths ───────────────────────────────────────────────────────
