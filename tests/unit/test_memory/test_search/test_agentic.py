@@ -420,24 +420,26 @@ async def test_cross_encoder_scores_the_episode_text(
     assert passages == ["body ep_1"]
 
 
-@pytest.mark.parametrize("size", [999, 1000, 1001])
+@pytest.mark.parametrize("size", [99, 100, 101, 300])
 @pytest.mark.parametrize("sufficient", [True, False])
-async def test_large_cluster_bounds_rerank_without_losing_top_recall(
+async def test_cluster_scope_keeps_the_100_members_closest_to_the_query(
     size: int,
     sufficient: bool,
 ) -> None:
     """Run real cluster/agentic algorithms; fake only storage and model ports.
 
-    The best recall is stored last, so slicing the expanded storage order
-    would lose it. Ordinary clusters retain every member, including at the cap.
+    Episodes are stored worst-first, so a cut in storage order would keep the
+    wrong ones. A scope over 100 keeps the base hits, then the members closest
+    to the query by body vector; a scope within 100 keeps every member.
     """
     records = [stored_episode(f"ep_{i}") for i in range(size)]
-    ranked = [hit(record, 1.0 / (i + 1)) for i, record in enumerate(reversed(records))]
+    best_first = list(reversed(records))
+    ranked = [hit(record, 1.0 / (i + 1)) for i, record in enumerate(best_first)]
     index = ScriptedIndex(
-        sparse=ranked,
-        subject=ranked,
+        dense=ranked,
         found=[hit(record) for record in records],
         filter_found=True,
+        filter_dense=True,
     )
     target = records[-1].item.episode
     batches: list[list[str]] = []
@@ -469,40 +471,35 @@ async def test_large_cluster_bounds_rerank_without_losing_top_recall(
     async def embed(query: str) -> list[float]:
         return [0.1] * 4
 
-    from structlog.testing import capture_logs
-
-    with capture_logs() as logs:
-        result = await search_episodes_agentic(
-            "find relevant episode",
-            owner_id="alice",
-            where=Comparison("owner_id", "eq", "alice"),
-            episode_recaller=EpisodeRecaller(_deps(), index),
-            atomic_fact_recaller=AtomicFactRecaller(_deps(), ScriptedIndex()),
-            cluster_store=_StubClusterStore(
-                [
-                    Cluster(
-                        id="large",
-                        members=[record.ref.entry_id for record in records],
-                        centroid=np.zeros(4, dtype=np.float32),
-                        last_ts=0,
-                    )
-                ]
-            ),
-            embed_query_fn=embed,
-            reranker=Reranker(),
-            llm=FakeLLMClient(responses=replies),
-            top_k=5,
-        )
+    result = await search_episodes_agentic(
+        "find relevant episode",
+        owner_id="alice",
+        where=Comparison("owner_id", "eq", "alice"),
+        episode_recaller=EpisodeRecaller(_deps(), index),
+        atomic_fact_recaller=AtomicFactRecaller(_deps(), ScriptedIndex()),
+        cluster_store=_StubClusterStore(
+            [
+                Cluster(
+                    id="large",
+                    members=[record.ref.entry_id for record in records],
+                    centroid=np.zeros(4, dtype=np.float32),
+                    last_ts=0,
+                )
+            ]
+        ),
+        embed_query_fn=embed,
+        reranker=Reranker(),
+        llm=FakeLLMClient(responses=replies),
+        top_k=5,
+    )
 
     assert len(result) == 5 and result[0].id == records[-1].ref.id
     assert len(batches) == (1 if sufficient else 2)
-    assert len(batches[0]) == (size if size <= 1000 else 50)
-    assert target in batches[0]
+    assert sorted(batches[0]) == sorted(r.item.episode for r in best_first[:100])
     if not sufficient:
         assert len(batches[1]) == 40
-    assert any(log["event"] == "agentic_cluster_expansion_capped" for log in logs) == (
-        size > 1000
-    )
+    member_rankings = [c for c in index.calls if c[0] == "dense" and c[3] != 500]
+    assert len(member_rankings) == (1 if size > 100 else 0)
 
 
 _SUFFICIENT = json.dumps(
@@ -532,7 +529,7 @@ async def _search_three_episodes(
             _deps(),
             ScriptedIndex(
                 sparse=ranked,
-                subject=ranked,
+                dense=ranked,
                 found=[hit(r) for r in records],
                 filter_found=True,
             ),
@@ -574,3 +571,29 @@ async def test_fact_lanes_read_at_most_500_facts() -> None:
         ("dense", 500),
         ("sparse", 500),
     }
+
+
+async def test_an_episode_without_facts_is_recalled_by_its_body_vector() -> None:
+    """The episode's own dense child is its body vector, not its subject."""
+    records = [stored_episode(f"ep_{i}") for i in range(3)]
+    index = ScriptedIndex(
+        dense=[hit(r, 0.9 - i / 10) for i, r in enumerate(records)],
+        found=[hit(r) for r in records],
+        filter_found=True,
+    )
+
+    result = await search_episodes_agentic(
+        "q",
+        owner_id="alice",
+        where=Comparison("owner_id", "eq", "alice"),
+        episode_recaller=EpisodeRecaller(_deps(), index),
+        atomic_fact_recaller=AtomicFactRecaller(_deps(), ScriptedIndex()),
+        cluster_store=_StubClusterStore([]),
+        embed_query_fn=_embed,
+        reranker=_StubReranker(),
+        llm=FakeLLMClient(responses=[_SUFFICIENT]),
+        top_k=5,
+    )
+
+    assert [item.id for item in result] == [r.ref.id for r in records]
+    assert "subject" not in {kind for kind, *_ in index.calls}

@@ -234,7 +234,6 @@ class LanceIndexContract[T]:
         where: Filter | str | None,
         *,
         limit: int,
-        vector_field: str = "vector",
         with_vectors: bool = False,
     ) -> list[dict[str, Any]]:
         if not vector:
@@ -243,7 +242,7 @@ class LanceIndexContract[T]:
         builder = (
             table.query()
             .nearest_to(list(vector))
-            .column(vector_field)
+            .column("vector")
             .distance_type("cosine")
             .nprobes(VECTOR_QUERY_NPROBES)
         )

@@ -117,6 +117,10 @@ _DEFAULT_TOP_K_CAP = 100
 # bounded. Positive ``top_k`` from the caller bypasses this.
 _AGENT_TOP_K_CAP = 10
 
+# Agent HYBRID lane size in unlimited mode: each lane recalls 50 so the
+# rerank has a pool to pick the 10 from. ``top_k > 0`` recalls ``top_k * 2``.
+_AGENT_HYBRID_LANE_CAP = 50
+
 # Vector ``radius`` (cosine similarity threshold) default for **unlimited
 # mode only**. In ``top_k > 0`` mode we trust the truncation cap to ditch
 # low-quality tail; in ``top_k = -1`` mode we would otherwise return up to
@@ -126,13 +130,10 @@ _AGENT_TOP_K_CAP = 10
 # distributions can drift a bit on the same model).
 _DEFAULT_UNLIMITED_RADIUS = 0.5
 
-# ``maxsim_atomic`` recall pool sizing — atomic facts are ~28× denser than
-# episodes (one memcell → 1 episode + ~28 atomic facts), so the fact pool
-# is sized as ``top_k_episode * 20`` to consistently cover enough distinct
-# parent memcells before the max-pool reduction. Capped to keep the ANN
-# scan bounded on very large top_k requests.
-_MAXSIM_FACT_MULTIPLIER = 20
-_MAXSIM_FACT_POOL_CAP = 2000
+# ``maxsim_atomic`` (VECTOR) sizing: 200 atomic facts max-pooled onto at most
+# ``top_k`` episodes, 50 in unlimited mode.
+_MAXSIM_FACT_POOL = 200
+_MAXSIM_TOP_K_CAP = 50
 
 # Episode HYBRID lane sizes. Each episode lane recalls ``max(top_k * 2, 50)``;
 # the atomic-fact lane max-pools 200 facts onto at most 50 episodes; scoring
@@ -419,7 +420,12 @@ class SearchManager:
             )
 
         fusion_mode, _ = resolve_pipeline(req.method, "episode")
-        top_k = self._top_k(req.top_k)
+        top_k = self._top_k(
+            req.top_k,
+            cap=_MAXSIM_TOP_K_CAP
+            if req.method == SearchMethod.VECTOR
+            else _DEFAULT_TOP_K_CAP,
+        )
 
         # ── KEYWORD / VECTOR: single-route recall ──
         if fusion_mode is None:
@@ -540,7 +546,7 @@ class SearchManager:
                 embed_query_fn=self._embedding.embed_query,  # type: ignore[union-attr]
                 reranker=self._reranker,  # type: ignore[arg-type]
                 llm=self._llm,  # type: ignore[arg-type]
-                top_k=self._top_k(req.top_k),
+                top_k=self._top_k(req.top_k, cap=_AGENT_TOP_K_CAP),
                 radius=_effective_radius(req),
                 tz=self._tz,
             )
@@ -555,7 +561,7 @@ class SearchManager:
             return shape_agent_cases(recalled.candidates[:top_k], recalled.stored_by_id)
 
         sparse, dense = await self._recall_sparse_dense(
-            self._case, req, where, top_k, cap=_AGENT_TOP_K_CAP
+            self._case, req, where, top_k, cap=_AGENT_HYBRID_LANE_CAP
         )
         with memory_span(
             "everos.search.rank",
@@ -617,7 +623,7 @@ class SearchManager:
             )
 
         sparse, dense = await self._recall_sparse_dense(
-            self._skill, req, where, top_k, cap=_AGENT_TOP_K_CAP
+            self._skill, req, where, top_k, cap=_AGENT_HYBRID_LANE_CAP
         )
 
         # Case→skill bridge: union skills surfaced via lineage cases into
@@ -665,6 +671,7 @@ class SearchManager:
             dense=dense,
             reranker=self._reranker,  # type: ignore[arg-type]
             top_k=top_k,
+            rerank_pool=self._recall_limit(req.top_k, cap=_AGENT_HYBRID_LANE_CAP),
         )
 
     # ── Profile ─────────────────────────────────────────────────────
@@ -733,18 +740,14 @@ class SearchManager:
     async def _maxsim_atomic_recall(
         self, req: SearchRequest, where: Filter, top_k: int
     ) -> RecallResult[Any]:
-        """MaxSim recall: atomic-fact ANN max-pooled onto parent episodes.
-
-        The fact pool is sized ``top_k * 20`` (facts are ~28x denser than
-        episodes), capped to keep the ANN bounded on large ``top_k``.
-        """
+        """MaxSim recall: atomic-fact ANN max-pooled onto parent episodes."""
         recalled = await maxsim_episode_recall(
             await self._embed_query(req.query),
             where,
             facts=self._fact,
             episodes=self._ep,
             top_k=top_k,
-            fact_limit=min(top_k * _MAXSIM_FACT_MULTIPLIER, _MAXSIM_FACT_POOL_CAP),
+            fact_limit=_MAXSIM_FACT_POOL,
             fallback_limit=self._recall_limit(req.top_k),
             owner_id=req.owner_id,
         )

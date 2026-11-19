@@ -89,9 +89,7 @@ async def test_scan_leaves_vectors_behind_unless_asked(repo: _AtomicFactRepo) ->
     assert all(f.vector is not None for f in full)
 
 
-@pytest.mark.parametrize(
-    "method", ["base_search", "dense", "subject", "sparse", "scan"]
-)
+@pytest.mark.parametrize("method", ["base_search", "dense", "sparse", "scan"])
 async def test_query_result_omits_vectors_before_materialization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, method: str
 ) -> None:
@@ -151,12 +149,7 @@ async def test_query_result_omits_vectors_before_materialization(
             )
         if method == "sparse":
             return await repo.sparse_search(["hiking"], limit=2, **kwargs)
-        return await repo.dense_search(
-            vector,
-            vector_field="subject_vector" if method == "subject" else "vector",
-            limit=2,
-            **kwargs,
-        )
+        return await repo.dense_search(vector, limit=2, **kwargs)
 
     full = await read(True)
     vectors = {"vector", "subject_vector"}
@@ -166,7 +159,7 @@ async def test_query_result_omits_vectors_before_materialization(
     bare = await read(False)
     assert len(bare) == (3 if method == "scan" else 2)
     assert all(row["owner_id"] == "u1" for row in bare)
-    if method in {"dense", "subject", "sparse"}:
+    if method in {"dense", "sparse"}:
         assert [row["id"] for row in bare] == ["ep_0", "ep_1"]
         score = "_score" if method == "sparse" else "_distance"
         assert bare[0][score] != bare[1][score]

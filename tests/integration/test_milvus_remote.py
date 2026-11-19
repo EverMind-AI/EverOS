@@ -125,7 +125,6 @@ async def test_remote_milvus_matches_derived_index_contract(
     from everos.memory.search.filters import compile_filters
 
     first_vector = [1.0] + [0.0] * 1023
-    first_subject = [0.0, 1.0] + [0.0] * 1022
     now = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
     await storage_view.repos.episode.upsert(
         [
@@ -180,15 +179,6 @@ async def test_remote_milvus_matches_derived_index_contract(
     dense = await storage_view.repos.episode.dense_search(first_vector, where, limit=5)
     assert dense[0]["id"] == "u1_ep1"
     assert dense[0]["_distance"] == pytest.approx(0.0, abs=1e-5)
-
-    by_subject = await storage_view.repos.episode.dense_search(
-        first_subject,
-        where,
-        limit=5,
-        vector_field="subject_vector",
-    )
-    assert by_subject[0]["id"] == "u1_ep1"
-    assert by_subject[0]["_distance"] == pytest.approx(0.0, abs=1e-5)
 
     page, total = await storage_view.repos.episode.find_where_paginated(
         where,

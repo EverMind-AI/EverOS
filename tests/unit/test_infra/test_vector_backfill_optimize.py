@@ -1,7 +1,7 @@
 """Round-2 finding M9: optimize() after Phase 1 backfill loop.
 
-Phase 1 writes each row's ``vector`` (and Episode's ``subject_vector``)
-through a partial-column ``update`` — one LanceDB transaction, one
+Phase 1 writes each row's ``vector`` through a partial-column
+``update`` — one LanceDB transaction, one
 manifest version per row. A 50k-row backfill therefore opens 50k
 fragments; without a compaction pass the on-disk directory grows
 unbounded. Same failure mode as v1.1.3's FTS optimize gap
@@ -126,22 +126,11 @@ class _AlwaysFailProvider:
 
 
 def _row(row_id: str, text: str) -> _NullVectorRow:
-    return _NullVectorRow(
-        id=row_id,
-        text=text,
-        subject_text=None,
-        tokens=len(text.split()),
-        needs_primary=True,
-        needs_subject=False,
-    )
+    return _NullVectorRow(id=row_id, text=text, tokens=len(text.split()))
 
 
 def _backlog(repo: _FakeRepo, rows: list[_NullVectorRow]) -> _TableBacklog:
-    spec = VectorProjection(
-        table="fake_table",
-        text_of=lambda r: r["text"],
-        subject_of=None,
-    )
+    spec = VectorProjection(table="fake_table", text_of=lambda r: r["text"])
     return _TableBacklog(spec=spec, index=repo, rows=rows)  # type: ignore[arg-type]
 
 

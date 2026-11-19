@@ -1,10 +1,9 @@
 """Backfill phase ``vectors``: re-embed index rows written without a vector.
 
 Rows written while no embedding provider was configured carry
-``vector IS NULL`` (and an episode may lack only its ``subject_vector``).
-This phase preflights, shows the estimate of what the injected
-:class:`~everos.infra.persistence.index.VectorBackfill` found, asks once,
-and lets it write each row's missing side(s) back; the row-level work and
+``vector IS NULL``. This phase preflights, shows the estimate of what the
+injected :class:`~everos.infra.persistence.index.VectorBackfill` found, asks
+once, and lets it write each row's vector back; the row-level work and
 its failure isolation live with the index.
 """
 
@@ -28,8 +27,8 @@ from ._deps import (
 async def run_vectors_phase(
     deps: BackfillDeps, *, auto_yes: bool, presenter: BackfillPresenter
 ) -> VectorsPhaseResult:
-    """Re-embed rows with a NULL primary vector (and, for Episode, a
-    NULL subject vector) across the vector-carrying index tables.
+    """Re-embed rows with a NULL vector across the vector-carrying index
+    tables.
 
     Preflight capability → scan + tokenize → surface the estimate via
     ``presenter`` → confirm once → embed and write back in batches. Per-row

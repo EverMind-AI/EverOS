@@ -77,6 +77,7 @@ class TestSearchAgentSkillsHybridRerank:
             dense=recalled(c1, c2, c3),
             reranker=reranker,
             top_k=2,
+            rerank_pool=6,
         )
 
         assert len(result) == 2
@@ -102,6 +103,7 @@ class TestSearchAgentSkillsHybridRerank:
             dense=recalled(c1, c2),
             reranker=reranker,
             top_k=10,
+            rerank_pool=20,
         )
 
         reranker.rerank.assert_awaited_once()
@@ -118,6 +120,25 @@ class TestSearchAgentSkillsHybridRerank:
         ]
         assert kw["instruction"] == _SKILL_RERANK_INSTRUCTION
 
+    async def test_cross_encoder_scores_only_the_best_fused_rerank_pool(
+        self,
+    ) -> None:
+        """Both lanes bring 4 skills; the cross-encoder sees the best 3 fused."""
+        hits = [_skill(f"s{i}", score=1.0 - i / 10) for i in range(4)]
+        reranker = _make_reranker(hits[:3])
+
+        await search_agent_skills_hybrid(
+            "q",
+            sparse=recalled(*hits),
+            dense=recalled(*hits),
+            reranker=reranker,
+            top_k=2,
+            rerank_pool=3,
+        )
+
+        (_, passages), _ = reranker.rerank.await_args
+        assert passages == [f"Agent Skill: skill_s{i} - desc s{i}" for i in range(3)]
+
 
 class TestSearchAgentSkillsHybridEmpty:
     """Empty input / degenerate cases."""
@@ -133,6 +154,7 @@ class TestSearchAgentSkillsHybridEmpty:
             dense=recalled(),
             reranker=reranker,
             top_k=10,
+            rerank_pool=20,
         )
 
         assert result == []
