@@ -201,9 +201,12 @@ query_max_concurrent = 16
 # Rerank provider. Override via env:
 #   EVEROS_RERANK__PROVIDER, EVEROS_RERANK__MODEL, EVEROS_RERANK__API_KEY,
 #   EVEROS_RERANK__BASE_URL
-# `provider` picks the request-shape:
+# Rerank endpoints share no request format, so `provider` picks the one
+# base_url speaks:
 #   - "deepinfra" -> POST {base_url}/{model} (DeepInfra inference API)
 #   - "vllm"      -> POST {base_url}/rerank (OpenAI-compat rerank endpoint)
+#   - "dashscope" -> POST {base_url}/api/v1/services/rerank/text-rerank/text-rerank
+#                    (DashScope native API, gte-rerank-v2; base_url is the host)
 provider = "deepinfra"
 model     = "Qwen/Qwen3-Reranker-4B"
 api_key   = ""
