@@ -3664,7 +3664,7 @@
           "slot"
         ],
         "title": "DeviceSpeaker",
-        "description": "One person the device can recognize, resolved upstream.\n\nAttributes:\n    slot: The device's stable per-person id (voiceprint slot, roster\n        index). Never a name: names change, slots do not.\n    display_name: How the person is called in the room; ``None`` when the\n        device has not been told. Only ever a label — it never selects\n        which memory directory an utterance lands in.\n    consented: Whether this person agreed to the device keeping their\n        memory. ``False`` means their utterances are not written at all."
+        "description": "One person the device can recognize, resolved upstream.\n\nAttributes:\n    slot: The device's stable per-person id (voiceprint slot, roster\n        index). Never a name: names change, slots do not.\n    display_name: How the person is called in the room; ``None`` when the\n        device has not been told, and the slot is the label then. Only\n        ever a label — it never selects which memory directory an\n        utterance lands in.\n    consented: Whether this person agreed to the device keeping their\n        memory. ``False`` means their utterances are not written at all."
       },
       "DeviceUtterance": {
         "properties": {

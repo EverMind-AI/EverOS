@@ -81,7 +81,7 @@ async def test_each_speaker_reaches_add_as_their_own_sender(
         (m["sender_id"], m["sender_name"], m["role"]) for m in payload["messages"]
     ] == [
         ("xiaoai01@spk_a", "Zhang San", "user"),
-        ("xiaoai01@spk_b", None, "user"),
+        ("xiaoai01@spk_b", "spk_b", "user"),
         ("xiaoai01", None, "user"),
     ]
 

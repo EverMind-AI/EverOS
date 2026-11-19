@@ -151,10 +151,19 @@ so the memory, storage, search and delete code is unchanged.
 | Errors | `422` — no utterances, a slot or device id outside its charset, an owner id over 128 characters; `409` `SESSION_BUSY` / `500` `PAYLOAD_TOO_LARGE`, inherited from `/memory/add` |
 | Projection | `DeviceAddRequest.projected_messages()` → the `messages[]` the pipeline consumes: `sender_id` = `D@S` (or `D`), `sender_name` = label, `role` = `"user"` |
 
-`sender_name` missing: the episode copy's `owner_name` falls back to the
-**sender id** (existing `_sender_label` behaviour), so the narrative says
-`D@S` — ugly but unambiguous. Devices should always send a
-`display_name` they know; the profile is not affected either way.
+`display_name` missing: the route sends the **slot** as `sender_name`,
+so the narrative calls the person `S`. Leaving it empty made the owner id
+the label, and on a real model (gpt-4.1-mini, 2026-11-19) the narrative
+shortened `D@S` to `D` -- the device's own id -- so the person's profile
+skipped that episode (it must name the owner). Devices should still send a
+`display_name` when they know one.
+
+Keep slots of one device from being prefixes of each other (`spk_01`, `spk_10`,
+not `spk_1`, `spk_10`): the profile picks a person's episodes by whether the
+narrative mentions their label as a substring, so `spk_1` would also match
+`spk_10`. The same rule is why the owner id cannot be the label: the device id
+is a prefix of every `D@S`, so the device's own profile took the speakers'
+facts (2 of 2 runs, gone with the slot as label).
 
 ### 3.2 Flush — `POST /api/v2/memory/flush`
 

@@ -182,3 +182,14 @@ def test_a_batch_needs_at_least_one_utterance() -> None:
 def test_an_unknown_field_is_refused() -> None:
     with pytest.raises(ValidationError):
         DeviceUtterance(text="hi", timestamp=_TS, owner_id="u1")  # type: ignore[call-arg]
+
+
+def test_an_unnamed_speaker_is_labelled_by_the_slot_not_the_owner_id() -> None:
+    """The label is what the narrative calls the person; the owner id
+    ("dev@slot") gets shortened to the device id by the model."""
+    request = _request(_says("spk_1"), _says("spk_2", name="Bob"), _says(None))
+    assert [m["sender_name"] for m in request.projected_messages()] == [
+        "spk_1",
+        "Bob",
+        None,
+    ]

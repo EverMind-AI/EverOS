@@ -684,7 +684,7 @@ device's own records (utterances nobody was identified for) are under
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `slot` | `string` | yes | — | the device's stable per-person id (voiceprint slot, roster index), `^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,62}$` |
-| `display_name` | `string \| null` | no | `null` | label only (`sender_name`); never selects whose memory |
+| `display_name` | `string \| null` | no | `null` | label only (`sender_name`); without it the `slot` is the label. Never selects whose memory |
 | `consented` | `boolean` | no | `true` | `false`: this utterance is dropped, not written anywhere |
 
 `device_id` + `@` + `slot` longer than 128 characters is a `422` for the

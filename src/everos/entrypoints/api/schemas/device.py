@@ -71,8 +71,9 @@ class DeviceSpeaker(BaseModel):
         slot: The device's stable per-person id (voiceprint slot, roster
             index). Never a name: names change, slots do not.
         display_name: How the person is called in the room; ``None`` when the
-            device has not been told. Only ever a label — it never selects
-            which memory directory an utterance lands in.
+            device has not been told, and the slot is the label then. Only
+            ever a label — it never selects which memory directory an
+            utterance lands in.
         consented: Whether this person agreed to the device keeping their
             memory. ``False`` means their utterances are not written at all.
     """
@@ -158,7 +159,8 @@ class DeviceAddRequest(BaseModel):
         """The batch as ``/memory/add`` message rows.
 
         ``sender_id`` is the device-qualified owner (the device id alone for
-        an unidentified speaker), ``sender_name`` the speaker's label,
+        an unidentified speaker), ``sender_name`` the speaker's label (the
+        slot when the device sent no ``display_name``),
         ``role`` always ``"user"`` — the device is a human-facing surface, so
         nothing it hears is an assistant or tool turn. A non-consenting
         speaker's utterances are dropped, not filed under the device.
@@ -172,7 +174,10 @@ class DeviceAddRequest(BaseModel):
                 continue
             else:
                 sender = speaker_owner_id(self.device_id, speaker.slot)
-                name = speaker.display_name
+                # Never let the owner id be the label: a model writing the
+                # narrative shortens "dev@spk_b" to "dev" -- the device's own
+                # id -- and the person's profile then misses the episode.
+                name = speaker.display_name or speaker.slot
             rows.append(
                 {
                     "sender_id": sender,
