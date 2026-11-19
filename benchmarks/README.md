@@ -32,11 +32,14 @@ so a failed first attempt costs nothing.
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
 - `bash` and `curl` (macOS or Linux; on Windows use WSL2, see
   [docs/windows.md](../docs/windows.md))
-- An [OpenRouter](https://openrouter.ai) key (extraction, answer and judge models).
-  With it alone you can run `--methods keyword`.
-- A [DeepInfra](https://deepinfra.com) key for EverOS's default embedding and rerank
-  models. LoCoMo searches with `agentic`, which needs both; the other three benchmarks
-  search with `llm_multiround`, which needs embedding only.
+- An [OpenRouter](https://openrouter.ai) key for the LLMs: extraction, answer and judge,
+  and the search-time calls of `agentic` and `llm_multiround`. With it alone you can run
+  `--methods keyword`.
+- A [DeepInfra](https://deepinfra.com) key, when the retrieval methods you run need
+  EverOS's default embedding (`Qwen/Qwen3-Embedding-4B`) or rerank
+  (`Qwen/Qwen3-Reranker-4B`) model: `vector`, `hybrid` and `llm_multiround` need
+  embedding, `agentic` needs both, `keyword` needs neither. See
+  [Which keys you need](#which-keys-you-need).
 
 ---
 
@@ -94,7 +97,7 @@ works as shipped.
 |---|---|---|
 | `EVEROS_LLM__API_KEY` | OpenRouter key | the EverOS servers: extraction (ADD) and the retrieval decider |
 | `EVEROS_EMBEDDING__API_KEY` | DeepInfra key | the EverOS servers: embedding (Qwen3-Embedding-4B by default) -- every retrieval method except `keyword` |
-| `EVEROS_RERANK__API_KEY` | DeepInfra key | the EverOS servers: rerank (Qwen3-Reranker-4B by default) -- `agentic`, LoCoMo's method; without it every agentic search fails |
+| `EVEROS_RERANK__API_KEY` | DeepInfra key | the EverOS servers: rerank (Qwen3-Reranker-4B by default) -- `agentic` only; without it every `agentic` search fails |
 | `ANSWER_API_KEY` | OpenRouter key | ANSWER |
 | `JUDGE_API_KEY` | OpenRouter key | JUDGE |
 
@@ -106,12 +109,15 @@ A benchmark therefore needs what its retrieval method needs -- `methods` in
 `configs/<dataset>.toml` (`agentic` for LoCoMo, `llm_multiround` for the other three),
 or `--methods` for one run:
 
-| Retrieval method | OpenRouter key | DeepInfra key: embedding | DeepInfra key: rerank |
+| Retrieval method | OpenRouter key: LLMs | DeepInfra key: embedding, `Qwen/Qwen3-Embedding-4B` | DeepInfra key: rerank, `Qwen/Qwen3-Reranker-4B` |
 |---|---|---|---|
-| `agentic` (LoCoMo) | yes | yes | yes |
-| `llm_multiround` (the other three) | yes | yes | -- |
-| `vector`, `hybrid` | yes | yes | -- |
 | `keyword` (BM25 only) | yes | -- | -- |
+| `vector`, `hybrid` | yes | yes | -- |
+| `llm_multiround` | yes | yes | -- |
+| `agentic` | yes | yes | yes |
+
+Every method needs the LLMs for extraction, answers and judging; `agentic` and
+`llm_multiround` also call one while they search.
 
 Without an embedding provider EverOS also skips reflection and skill extraction during
 ADD, so a `keyword` run measures a smaller pipeline, and its score is not comparable

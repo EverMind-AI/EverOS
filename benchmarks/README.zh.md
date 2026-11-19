@@ -30,10 +30,12 @@ key，一次列出所有缺项，所以第一次失败不会花一分钱。
 - Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)
 - `bash` 和 `curl`（macOS 或 Linux；Windows 请用 WSL2，见
   [docs/windows.zh.md](../docs/windows.zh.md)）
-- 一个 [OpenRouter](https://openrouter.ai) key（抽取、答题、判分模型）。只有它就能跑
-  `--methods keyword`。
-- 一个 [DeepInfra](https://deepinfra.com) key，用于 EverOS 默认的 embedding 和 rerank 模型。
-  LoCoMo 用 `agentic` 检索，两者都要；另外三个评测用 `llm_multiround` 检索，只要 embedding。
+- 一个 [OpenRouter](https://openrouter.ai) key，用于各个 LLM：抽取、答题、判分，以及 `agentic` 和
+  `llm_multiround` 检索时的 LLM 调用。只有它就能跑 `--methods keyword`。
+- 一个 [DeepInfra](https://deepinfra.com) key，要不要取决于你测的检索方式是否用到 EverOS 默认的
+  embedding 模型（`Qwen/Qwen3-Embedding-4B`）或 rerank 模型（`Qwen/Qwen3-Reranker-4B`）：
+  `vector`、`hybrid`、`llm_multiround` 要 embedding，`agentic` 两个都要，`keyword` 都不要。见
+  [需要哪些 key](#需要哪些-key)。
 
 ---
 
@@ -86,7 +88,7 @@ cp benchmarks/.env.example benchmarks/.env
 |---|---|---|
 | `EVEROS_LLM__API_KEY` | OpenRouter key | EverOS server：抽取（ADD）和检索 decider |
 | `EVEROS_EMBEDDING__API_KEY` | DeepInfra key | EverOS server：embedding（默认 Qwen3-Embedding-4B）——除 `keyword` 外的所有检索方法 |
-| `EVEROS_RERANK__API_KEY` | DeepInfra key | EverOS server：rerank（默认 Qwen3-Reranker-4B）——LoCoMo 用的 `agentic`；没有它，每次 agentic 检索都会失败 |
+| `EVEROS_RERANK__API_KEY` | DeepInfra key | EverOS server：rerank（默认 Qwen3-Reranker-4B）——只有 `agentic` 用；没有它，每次 `agentic` 检索都会失败 |
 | `ANSWER_API_KEY` | OpenRouter key | ANSWER |
 | `JUDGE_API_KEY` | OpenRouter key | JUDGE |
 
@@ -97,12 +99,14 @@ EverOS 本身只强依赖 LLM；embedding 和 rerank 是可选能力，配上之
 什么，取决于它的检索方法——`configs/<dataset>.toml` 里的 `methods`（LoCoMo 是 `agentic`，
 另外三个是 `llm_multiround`），或单次运行的 `--methods`：
 
-| 检索方法 | OpenRouter key | DeepInfra key：embedding | DeepInfra key：rerank |
+| 检索方法 | OpenRouter key：LLM | DeepInfra key：embedding，`Qwen/Qwen3-Embedding-4B` | DeepInfra key：rerank，`Qwen/Qwen3-Reranker-4B` |
 |---|---|---|---|
-| `agentic`（LoCoMo） | 要 | 要 | 要 |
-| `llm_multiround`（另外三个） | 要 | 要 | — |
-| `vector`、`hybrid` | 要 | 要 | — |
 | `keyword`（仅 BM25） | 要 | — | — |
+| `vector`、`hybrid` | 要 | 要 | — |
+| `llm_multiround` | 要 | 要 | — |
+| `agentic` | 要 | 要 | 要 |
+
+每种方法都要用 LLM 抽取、答题和判分；`agentic` 和 `llm_multiround` 检索时还会调用 LLM。
 
 没有 embedding 时，EverOS 在 ADD 阶段也会跳过反思（reflection）和技能抽取，所以 `keyword` 运行
 测的是一条更短的流水线，分数不能和 [6. 结果](#6-结果) 对比。运行会在启动任何东西之前，按你选的
