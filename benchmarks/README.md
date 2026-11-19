@@ -135,7 +135,7 @@ refused for datasets whose sessions carry their own ids.
 
 **Optional -- a separate retrieval decider** (`llm_multiround` only). Each config comes
 pre-filled with the decider behind its published number (the Decider column in
-[6. Results](#6-results); for LoCoMo, [its methods table](#by-retrieval-method)).
+[6. Results](#6-results); for LoCoMo, [its methods table](locomo.md#by-retrieval-method)).
 To use it, set `BENCH_DECIDER_BASE_URL` to an OpenAI-compatible endpoint that serves it
 and `BENCH_DECIDER_API_KEY` to its key; set `BENCH_DECIDER_MODEL` only to run another
 model. LoCoMo's decider is on OpenRouter: `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`
@@ -220,7 +220,7 @@ starts, so two runs never share a store.
 
 `locomo-step` is LoCoMo with step boundary detection and prompt-only replies on every
 EverOS call: `configs/locomo-step.toml` is `locomo.toml` with those two server settings
-changed. See [Batch or step](#batch-or-step) for what each one costs and scores.
+changed. See [Batch or step](locomo.md#batch-or-step) for what each one costs and scores.
 
 Without the wrapper, the same smoke test is:
 
@@ -353,15 +353,17 @@ ps -eo pid,command | grep "[e]veros server start"    # stray servers, if any
 
 ## 6. Results
 
-Each benchmark's published number. LoCoMo's comes from `benchmarks/configs/locomo-step.toml`, the
-others from `benchmarks/configs/<dataset>.toml`.
+Each benchmark's published number, from its config in `benchmarks/configs/`.
 
 | Benchmark | Questions | Accuracy | Decider | Answer model |
 |---|---|---|---|---|
-| LoCoMo | 1,540 | **94.61\*** | -- (`agentic` uses none) | `openai/gpt-4.1-mini` |
+| [LoCoMo](locomo.md) | 1,540 | **94.61\*** | -- (`agentic` uses none) | `openai/gpt-4.1-mini` |
 | LongMemEval | 500 | **94.00** | `qwen3.6-27B` | `google/gemini-3.6-flash` |
 | EverMemBench | 2,400 | **66.67** | `qwen3.6-27B` | `google/gemini-3-flash-preview` |
 | SubtleMemory | 1,522 | **71.75** | `qwen3.6-27B` | `openai/gpt-5.4` |
+
+\* Re-judged: the 99 questions whose gold answer the LoCoMo audit disputes are graded against
+its corrected answers.
 
 > **Accuracy** is a micro accuracy for every benchmark in this table:
 > `sum(correct) / sum(total)` over all graded questions. The per-category lines in
@@ -374,56 +376,10 @@ others from `benchmarks/configs/<dataset>.toml`.
 > **SubtleMemory** — routes each question between two answer contracts on whether
 > fact extraction found a conflict; the adapter does this automatically.
 
-### LoCoMo
+### More results
 
-**EverOS scores 94.61%\* on LoCoMo.**
-
-#### By retrieval method
-
-| Retrieval method | Step boundary detection (`locomo-step`) | Batch boundary detection (`locomo`, default) |
-|---|---|---|
-| `agentic` | **94.61\*** | 94.35\* |
-| `llm_multiround` | 94.29\* | 94.29\* |
-| `hybrid` | 93.64\* | 93.38\* |
-| `vector` | 92.73\* | 92.08\* |
-| `keyword` | 91.04\* | 92.27\* |
-
-\* Re-judged: the 99 questions whose gold answer the LoCoMo audit disputes are graded against
-its corrected answers.
-
-Best of three `agentic` runs per config; every other method searched that run's stores once.
-Extraction and answers by `openai/gpt-4.1-mini`, judging by `openai/gpt-4o-mini` three times,
-`llm_multiround`'s decider `deepseek/deepseek-v4-flash-0731` with thinking off; everalgo-core
-0.7.0, everalgo-boundary 0.5.0.
-
-### Batch or step
-
-The two LoCoMo configs differ in two EverOS settings, and EverOS ships the first pair as its
-defaults:
-
-| | `locomo` (default) | `locomo-step` |
-|---|---|---|
-| Boundary detection, `[boundary_detection] strategy` | `batch`: one call per add | `step`: one call per message |
-| Reply format, `[llm] response_format_mode` | `json_schema`: the provider holds each reply to its schema | `prompt_only`: the prompt asks for the schema |
-| `agentic`, best of three runs | 94.35\* | **94.61\*** |
-| Boundary calls per run | 544 | about 5,250 |
-| ADD with 10 servers | about 4 minutes | about 17–22 minutes |
-| Episodes stored | about 320 | about 550 |
-| Agent conversations (tool calls) | supported | chat messages only |
-
-- **`locomo` is faster and more stable.** Batch needs a tenth of step's boundary calls and
-  ingests about five times faster. Strict replies always match the schema they were asked for;
-  they need a provider that supports `json_schema`.
-- **`locomo-step` scores higher.** Its best `agentic` run is 0.26 points above batch's, within
-  LoCoMo's run-to-run spread of about one point. A prompt-only reply that does not parse is
-  asked for again.
-
-Choose step for chat memory when slower ingest is acceptable; keep the defaults for agents and
-for fast ingest. In an EverOS deployment, see
-[`[boundary_detection]`](../docs/configuration.md#boundary_detection) and
-[`[llm]`](../docs/configuration.md#llm).
-
-\* Re-judged, as above.
+- [LoCoMo](locomo.md): the score by retrieval method and by batch or step boundary detection,
+  and accuracy and write / search latency across models per stage.
 
 
 ---

@@ -277,7 +277,9 @@ OpenAI-compatible model can replace them.
 
 The extraction model and the deciders above produced our published benchmark
 results; [benchmarks/README.md](benchmarks/README.md#6-results) lists which
-model ran in which role for each benchmark, and how to reproduce them.
+model ran in which role for each benchmark, and how to reproduce them. To choose
+other models, [Model configurations](benchmarks/locomo.md#model-configurations)
+compares LoCoMo accuracy and write / search latency across models and per stage.
 
 ### Optional: Ingest Multimodal Files
 

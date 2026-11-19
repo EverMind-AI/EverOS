@@ -197,6 +197,9 @@ inherits too, so a template's `api_key = ""` cannot mask `[llm]`'s key.
 | `search` | Search-time calls: agentic retrieval and the LLM rerank lane |
 | `decider` | The multi-round retrieval decider (`llm_multiround`) |
 
+LoCoMo scores and write / search latency for several models per stage are in
+[benchmarks/locomo.md](../benchmarks/locomo.md#model-configurations).
+
 The task names are a stable interface. Environment variables nest one more
 level: `EVEROS_LLM__<TASK>__<FIELD>`, e.g. `EVEROS_LLM__BOUNDARY__MODEL`.
 `everos config show` prints what every task resolves to -- model, endpoint host
@@ -427,7 +430,7 @@ The two scores are within LoCoMo's run-to-run spread of about one point. They
 were measured with the reply format of each benchmark config: `batch` with the
 default `[llm] response_format_mode = "json_schema"`, which keeps every reply to
 its schema, and `step` with `"prompt_only"` for every call
-([benchmarks/README.md](../benchmarks/README.md#batch-or-step)).
+([benchmarks/locomo.md](../benchmarks/locomo.md#batch-or-step)).
 
 \* Graded against the corrected answers of the LoCoMo gold audit for the 99
 questions it disputes.
