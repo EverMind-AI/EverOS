@@ -74,7 +74,7 @@ lines of `$ROOT.log` (usually a missing key).
 
 | Fact | Read it from |
 |---|---|
-| A memory exists | the markdown: `$ROOT/<app>/<project>/users/<id>/episodes/episode-<day>.md`, `.atomic_facts/`, `.foresights/`, `user.md`; agents under `agents/<id>/` (`tests/acceptance/memory_delete/observe.py` `md_entries` parses them) |
+| A memory exists | the markdown: `$ROOT/<app>/<project>/users/<id>/episodes/episode-<day>.md`, `.atomic_facts/`, `user.md`; agents under `agents/<id>/` (`tests/acceptance/memory_delete/observe.py` `md_entries` parses them) |
 | Session, cluster, queue state | `$ROOT/.index/sqlite/system.db` (`memcell`, `cluster`, `cluster_member`, `memorize_inbox`, ...); OME runs in `ome.db` beside it |
 | Index rows | LanceDB under `$ROOT/.index/lancedb/` (`observe.py` `lance_ids`); on Milvus read with `consistency_level="Strong"`, or you may see rows from before a deletion |
 | Lock waits and holds | `GET /metrics`: `everos_lock_wait_seconds`, `everos_lock_hold_seconds` (label `kind`: `session`, `owner`, `partition:<strategy>`); compare before/after deltas |

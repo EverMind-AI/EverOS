@@ -38,7 +38,7 @@ slots collides across devices in the same app/project.
 | Conversation | `DeviceAddRequest.session_id` | As `/memory/add` takes it: the utterances accumulate under one session, and boundary detection cuts memcells over all speakers |
 | Speaker | `DeviceUtterance.speaker.slot` | The device's stable per-person id — voiceprint slot, roster index. **Not** a name |
 | Speaker label | `DeviceUtterance.speaker.display_name` | How the person is called in the room. A label only: it never selects a directory |
-| Consent | `DeviceUtterance.speaker.consented` | `false` means their utterances are not written at all |
+| Consent | `DeviceUtterance.speaker.consented` | `false` on any utterance means none of that slot's utterances in the batch is written |
 | Per-person memory owner | derived: `speaker_owner_id(device_id, slot)` = `"<device_id>@<slot>"` | The `user_id` / `sender_id` of that person's episodes, profile and clusters **on that device** |
 
 **The rule, in one line:** the device is the scope, the speaker is the
@@ -70,7 +70,7 @@ Rules at the edges:
 |---|---|---|
 | `speaker` is `None` (nobody identified) | The utterance is filed under the **device** (`sender_id = device_id`). Never guessed onto a person | `DeviceAddRequest.projected_messages()` |
 | Speaker known, `consented = false` | Not written; no owner is produced for them | `projected_messages()`, `speaker_owners()` |
-| `slot` is a name, contains `/`, `..`, `@`, or is longer than 63 | 422 at validation | `DeviceSpeaker.slot` pattern |
+| `slot` does not start with a letter, holds no digit or `_`, contains `/`, `..`, `@`, or is longer than 63 | 422 at validation | `DeviceSpeaker.slot` pattern + validator |
 | `device_id` has a path separator or `@`, or is `.` / `..` | 422 at validation | `DeviceAddRequest.device_id` pattern, `PathSafeId` |
 | `device_id` + `@` + `slot` would exceed 128 characters | 422 for the whole batch, before any write | `DeviceAddRequest` after-validator |
 | Two utterances by one speaker in a batch | One owner (`speaker_owners()` de-duplicates, first-spoken order) | `speaker_owners()` |
@@ -147,8 +147,8 @@ so the memory, storage, search and delete code is unchanged.
 | Request | `DeviceAddRequest` (section 1 table) |
 | Success | `200` `{"request_id": ..., "data": {"message_count": N, "status": "accumulated" \| "extracted", "owners": ["D@S", ...]}}` (`DeviceAddResponseData`) |
 | Queued | `202` with `async_mode: true`, or when the session already has queued batches: `/memory/add`'s body plus `owners` (`DeviceAcceptedResponseData`) |
-| All declined | `200` with `message_count: 0`, `status: "accumulated"`, `owners: []`; nothing is written |
-| Errors | `422` — no utterances, a slot or device id outside its charset, an owner id over 128 characters; `409` `SESSION_BUSY` / `500` `PAYLOAD_TOO_LARGE`, inherited from `/memory/add` |
+| All declined | `200` with `message_count: 0`, `status: "accumulated"`, `owners: []`; nothing is written or queued, even with `async_mode` |
+| Errors | `422` — no utterances, a slot or device id outside its rules, an owner id over 128 characters. Inherited from `/memory/add`: `413` body over the queue's payload cap, `429` queue at its per-session or global cap, `409` `PURGE_IN_PROGRESS` while a purge clears the app / project |
 | Projection | `DeviceAddRequest.projected_messages()` → the `messages[]` the pipeline consumes: `sender_id` = `D@S` (or `D`), `sender_name` = label, `role` = `"user"` |
 
 `display_name` missing: the route sends the **slot** as `sender_name`,

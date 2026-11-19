@@ -3629,7 +3629,7 @@
           "status"
         ],
         "title": "DeviceAddResponseData",
-        "description": "What one device batch wrote.\n\nAttributes:\n    message_count: Utterances written, unattributed ones included and\n        non-consenting speakers' left out.\n    status: As ``/memory/add`` returns it.\n    owners: The per-person owners the batch wrote to; empty when every\n        utterance was unattributed or unconsented."
+        "description": "What one device batch wrote: ``/memory/add``'s body plus ``owners``.\n\n``message_count`` counts utterances written, unattributed ones included\nand non-consenting speakers' left out; ``owners`` is empty when every\nutterance was unattributed or unconsented."
       },
       "DeviceSpeaker": {
         "properties": {
@@ -3637,7 +3637,7 @@
             "type": "string",
             "maxLength": 63,
             "minLength": 1,
-            "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,62}$",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_.-]{0,62}$",
             "title": "Slot"
           },
           "display_name": {
@@ -3664,7 +3664,7 @@
           "slot"
         ],
         "title": "DeviceSpeaker",
-        "description": "One person the device can recognize, resolved upstream.\n\nAttributes:\n    slot: The device's stable per-person id (voiceprint slot, roster\n        index). Never a name: names change, slots do not.\n    display_name: How the person is called in the room; ``None`` when the\n        device has not been told, and the slot is the label then. Only\n        ever a label — it never selects which memory directory an\n        utterance lands in.\n    consented: Whether this person agreed to the device keeping their\n        memory. ``False`` means their utterances are not written at all."
+        "description": "One person the device can recognize, resolved upstream.\n\nAttributes:\n    slot: The device's stable per-person id (voiceprint slot, roster\n        index). Never a name: names change, slots do not.\n    display_name: How the person is called in the room; ``None`` when the\n        device has not been told, and the slot is the label then. Only\n        ever a label — it never selects which memory directory an\n        utterance lands in.\n    consented: Whether this person agreed to the device keeping their\n        memory. ``False`` on any utterance of a batch means none of that\n        slot's utterances in the batch is written."
       },
       "DeviceUtterance": {
         "properties": {

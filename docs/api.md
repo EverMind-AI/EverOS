@@ -683,9 +683,9 @@ device's own records (utterances nobody was identified for) are under
 
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `slot` | `string` | yes | — | the device's stable per-person id (voiceprint slot, roster index), `^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,62}$` |
-| `display_name` | `string \| null` | no | `null` | label only (`sender_name`); without it the `slot` is the label. Never selects whose memory |
-| `consented` | `boolean` | no | `true` | `false`: this utterance is dropped, not written anywhere |
+| `slot` | `string` | yes | — | the device's stable per-person id (voiceprint slot, roster index), `^[a-zA-Z][a-zA-Z0-9_.-]{0,62}$` and holding a digit or `_` (`spk_01`). Keep one device's slots from being prefixes of each other (`spk_01` / `spk_10`, not `spk_1` / `spk_10`): a profile picks its episodes by the label as a substring |
+| `display_name` | `string \| null` | no | `null` | label only (`sender_name`); without it (or blank) the `slot` is the label. Never selects whose memory |
+| `consented` | `boolean` | no | `true` | `false` on any utterance drops all of that slot's utterances in the batch; none is written anywhere |
 
 `device_id` + `@` + `slot` longer than 128 characters is a `422` for the
 whole batch.
@@ -701,7 +701,7 @@ whole batch.
 | `owners` | `array<string>` | Per-person owner ids this batch wrote to, first-spoken order |
 
 A batch in which every speaker declined writes nothing and returns
-`message_count: 0`, `status: "accumulated"`, `owners: []`.
+`message_count: 0`, `status: "accumulated"`, `owners: []`. This holds with `async_mode` too: nothing is queued, so there is no task to poll.
 
 `202 Accepted` — with `async_mode`, or when the session already has queued
 batches — is `/memory/add`'s `202` body (`status: "queued"`, `message_count`,

@@ -20,8 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gets their own episodes and profile, read, searched and deleted by that id
   as `user_id` on the existing routes. Utterances nobody was identified for
   are filed under the device id; a speaker with `consented: false` is not
-  written at all; a speaker sent without `display_name` is labelled by the
-  slot. `async_mode` queues the batch as on `/memory/add` (`202`,
+  written at all (one decline in a batch drops all of that slot's lines); a
+  speaker sent without `display_name` is labelled by the slot, which starts
+  with a letter and holds a digit or `_`. `async_mode` queues the batch as on `/memory/add` (`202`,
   with the same `owners`). Existing request bodies are unchanged. See
   `docs/device-assistant.md` and `docs/api.md`.
 
@@ -97,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   index table and cascade kind, `[llm.foresight]`, and the
   `UserPipelineStarted` event it was the only subscriber of. A queued
   foresight run left by an earlier release is dropped with an
-  `ome_run_dropped_unknown_strategy` warning.
+  `ome_run_dropped_unknown_strategy` warning. The cascade settles an older store's
+  leftover `.foresights/` logs once instead of re-queuing them on every scan.
 
 ### Upgrade
 

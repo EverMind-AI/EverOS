@@ -91,10 +91,13 @@ def test_the_composed_owner_fits_the_owner_limit() -> None:
 
 def test_a_batch_whose_owner_would_not_fit_is_refused() -> None:
     with pytest.raises(ValidationError):
-        _request(_says("s" * 63), device="d" * 120)
+        _request(_says("s" * 61 + "_1"), device="d" * 120)
 
 
-@pytest.mark.parametrize("slot", ["", "a/b", "../x", ".hidden", "-x", "a" * 64])
+@pytest.mark.parametrize(
+    "slot",
+    ["", "a/b", "../x", ".hidden", "-x", "a" * 64, "1", "007", "_x", "alice"],
+)
 def test_a_slot_must_be_a_safe_roster_id(slot: str) -> None:
     with pytest.raises(ValidationError):
         DeviceSpeaker(slot=slot)
@@ -193,3 +196,19 @@ def test_an_unnamed_speaker_is_labelled_by_the_slot_not_the_owner_id() -> None:
         "Bob",
         None,
     ]
+
+
+def test_a_blank_display_name_is_no_name() -> None:
+    """Whitespace would otherwise label the person by the owner id again."""
+    (row,) = _request(_says("spk_1", name="   ")).projected_messages()
+    assert row["sender_name"] == "spk_1"
+
+
+def test_one_decline_drops_all_of_that_speakers_batch() -> None:
+    request = _request(
+        _says("spk_1", text="keep this?"),
+        _says("spk_1", consented=False, text="no, do not keep me"),
+        _says("spk_2", text="fine for me"),
+    )
+    assert [m["content"] for m in request.projected_messages()] == ["fine for me"]
+    assert request.speaker_owners() == ["dev_kitchen@spk_2"]

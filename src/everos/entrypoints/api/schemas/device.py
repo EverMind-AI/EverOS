@@ -23,12 +23,10 @@ route knows about devices.
 
 from __future__ import annotations
 
-from typing import Literal
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .ids import PATH_SAFE_CHARSET, AppScopeId, PathSafeId, ProjectScopeId, SessionId
-from .memorize import AcceptedResponseData
+from .memorize import AcceptedResponseData, AddResponseData
 
 __all__ = [
     "DEVICE_ID_CHARSET",
@@ -60,8 +58,14 @@ MAX_OWNER_ID_LENGTH = 128
 DEVICE_ID_CHARSET = r"^[a-zA-Z0-9_.+-]+$"
 """:data:`~.ids.PATH_SAFE_CHARSET` without the separator."""
 
-SPEAKER_SLOT_CHARSET = r"^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,62}$"
-"""A roster slot id: filesystem-safe, no separator, no leading ``.``/``-``."""
+SPEAKER_SLOT_CHARSET = r"^[a-zA-Z][a-zA-Z0-9_.-]{0,62}$"
+"""A roster slot id: filesystem-safe, no separator, starts with a letter.
+
+The slot is the person's label when no ``display_name`` is sent, and a profile
+picks its episodes by whether the narrative contains the label: a numeric slot
+would match every date, a plain word every sentence using it. So a slot must
+also hold a digit or ``_`` (``spk_01``, ``guest2``).
+"""
 
 
 class DeviceSpeaker(BaseModel):
@@ -75,7 +79,8 @@ class DeviceSpeaker(BaseModel):
             ever a label — it never selects which memory directory an
             utterance lands in.
         consented: Whether this person agreed to the device keeping their
-            memory. ``False`` means their utterances are not written at all.
+            memory. ``False`` on any utterance of a batch means none of that
+            slot's utterances in the batch is written.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -83,6 +88,19 @@ class DeviceSpeaker(BaseModel):
     slot: str = Field(..., min_length=1, max_length=63, pattern=SPEAKER_SLOT_CHARSET)
     display_name: str | None = Field(default=None, max_length=128)
     consented: bool = True
+
+    @field_validator("slot")
+    @classmethod
+    def _slot_is_a_distinct_label(cls, value: str) -> str:
+        if not any(ch.isdigit() or ch == "_" for ch in value):
+            raise ValueError("a slot must contain a digit or '_' (e.g. spk_01)")
+        return value
+
+    @field_validator("display_name")
+    @classmethod
+    def _blank_name_is_none(cls, value: str | None) -> str | None:
+        # A blank name would label the person by the owner id again.
+        return value.strip() or None if value is not None else None
 
 
 class DeviceUtterance(BaseModel):
@@ -142,18 +160,23 @@ class DeviceAddRequest(BaseModel):
     def speaker_owners(self) -> list[str]:
         """The per-person owners this batch writes to, in first-spoken order.
 
-        Unknown and non-consenting speakers are left out: they produce no
-        owner of their own.
+        Read off :meth:`projected_messages`, so the two cannot disagree:
+        unknown and non-consenting speakers produce no owner of their own.
         """
-        owners: list[str] = []
-        for utterance in self.utterances:
-            speaker = utterance.speaker
-            if speaker is None or not speaker.consented:
-                continue
-            owner = speaker_owner_id(self.device_id, speaker.slot)
-            if owner not in owners:
-                owners.append(owner)
-        return owners
+        return list(
+            dict.fromkeys(
+                str(m["sender_id"])
+                for m in self.projected_messages()
+                if m["sender_id"] != self.device_id
+            )
+        )
+
+    def _declined_slots(self) -> set[str]:
+        return {
+            u.speaker.slot
+            for u in self.utterances
+            if u.speaker is not None and not u.speaker.consented
+        }
 
     def projected_messages(self) -> list[dict[str, object]]:
         """The batch as ``/memory/add`` message rows.
@@ -162,15 +185,17 @@ class DeviceAddRequest(BaseModel):
         an unidentified speaker), ``sender_name`` the speaker's label (the
         slot when the device sent no ``display_name``),
         ``role`` always ``"user"`` — the device is a human-facing surface, so
-        nothing it hears is an assistant or tool turn. A non-consenting
-        speaker's utterances are dropped, not filed under the device.
+        nothing it hears is an assistant or tool turn. A slot that declined
+        anywhere in the batch has all of its utterances dropped, not filed
+        under the device.
         """
+        declined = self._declined_slots()
         rows: list[dict[str, object]] = []
         for utterance in self.utterances:
             speaker = utterance.speaker
             if speaker is None:
                 sender, name = self.device_id, None
-            elif not speaker.consented:
+            elif speaker.slot in declined:
                 continue
             else:
                 sender = speaker_owner_id(self.device_id, speaker.slot)
@@ -199,19 +224,14 @@ class DeviceAddRequest(BaseModel):
         return self
 
 
-class DeviceAddResponseData(BaseModel):
-    """What one device batch wrote.
+class DeviceAddResponseData(AddResponseData):
+    """What one device batch wrote: ``/memory/add``'s body plus ``owners``.
 
-    Attributes:
-        message_count: Utterances written, unattributed ones included and
-            non-consenting speakers' left out.
-        status: As ``/memory/add`` returns it.
-        owners: The per-person owners the batch wrote to; empty when every
-            utterance was unattributed or unconsented.
+    ``message_count`` counts utterances written, unattributed ones included
+    and non-consenting speakers' left out; ``owners`` is empty when every
+    utterance was unattributed or unconsented.
     """
 
-    message_count: int
-    status: Literal["accumulated", "extracted"]
     owners: list[str] = Field(default_factory=list)
 
 
