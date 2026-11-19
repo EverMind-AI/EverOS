@@ -22,6 +22,7 @@
 <br>
 
 - [Why EverOS](#why-ever-os)
+- [Benchmarks](#benchmarks)
 - [Ecosystem Integrations](#ecosystem-integrations)
 - [Quick Start](#quick-start)
 - [Use Cases](#use-cases)
@@ -84,6 +85,25 @@ for fast retrieval and self-evolving reuse.
 <td>❌ Usually retrieval-only memory with little background consolidation or long-horizon improvement</td>
 </tr>
 </table>
+
+<br>
+
+## Benchmarks
+
+| Benchmark | Questions | Accuracy | Answer model |
+|---|---|---|---|
+| [LoCoMo](benchmarks/locomo.md) | 1,540 | **94.61%**\* | `openai/gpt-4.1-mini` |
+| LongMemEval | 500 | **94.00%** | `google/gemini-3.6-flash` |
+| EverMemBench | 2,400 | **66.67%** | `google/gemini-3-flash-preview` |
+| SubtleMemory | 1,522 | **71.75%** | `openai/gpt-5.4` |
+
+\* Re-judged: the 99 questions whose gold answer the LoCoMo audit disputes are graded
+against its corrected answers.
+
+On LoCoMo, `hybrid` search, which calls no LLM, returns in 0.27 s at the median.
+Accuracy and search time across models and retrieval methods are in
+[benchmarks/locomo.md](benchmarks/locomo.md); how to reproduce every number is in
+[benchmarks/README.md](benchmarks/README.md).
 
 <br>
 
@@ -276,7 +296,7 @@ OpenAI-compatible model can replace them.
 | Multimodal parsing | `[multimodal]` | `google/gemini-3.8-flash` |
 
 The extraction model and the deciders above produced our published benchmark
-results; [benchmarks/README.md](benchmarks/README.md#6-results) lists which
+results; [benchmarks/README.md](benchmarks/README.md#results) lists which
 model ran in which role for each benchmark, and how to reproduce them. To choose
 other models, the [LoCoMo results table](benchmarks/locomo.md#results-by-model-and-retrieval-method)
 compares accuracy and search time across models and retrieval methods.

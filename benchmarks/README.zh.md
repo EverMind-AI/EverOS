@@ -1,9 +1,37 @@
-# 评测运行指南
+# 评测
 
 一个运行器，四个评测，四个阶段：ADD、SEARCH、ANSWER、JUDGE。
 各评测自己的规则在 `benchmarks/adapters/<name>.py`。
 
 > English version: [README.md](README.md).
+
+## 结果
+
+各评测的已发表数字，由 `benchmarks/configs/` 里各自的配置产出。
+
+| 评测 | 题量 | 准确率 | decider | 答题模型 |
+|---|---|---|---|---|
+| [LoCoMo](locomo.zh.md) | 1,540 | **94.61\*** | --（`agentic` 不用） | `openai/gpt-4.1-mini` |
+| LongMemEval | 500 | **94.00** | `qwen3.6-27B` | `google/gemini-3.6-flash` |
+| EverMemBench | 2,400 | **66.67** | `qwen3.6-27B` | `google/gemini-3-flash-preview` |
+| SubtleMemory | 1,522 | **71.75** | `qwen3.6-27B` | `openai/gpt-5.4` |
+
+\* 重判口径：LoCoMo 审计认为标准答案有误的 99 道题，按审计修正后的答案判分。
+
+> **准确率**——表中每个评测都是微平均准确率：所有已判分题目的 `sum(correct) / sum(total)`。
+> `report.txt` 里的分类目各行只做报告，从不平均进总分，所以题量少的类目对总分的影响小于
+> 题量大的类目。
+>
+> **EverMemBench**——它已发表的对比表里，大多数行是各类目列的宏平均，和这里的微平均是两种
+> 不同的统计量。
+>
+> **SubtleMemory**——按事实抽取是否发现冲突，在两套答题契约之间逐题路由，
+> 适配器自动完成。
+
+### 更多结果
+
+- [LoCoMo](locomo.zh.md)：不同模型、不同检索方式的分数和检索耗时，批量和逐条边界检测的对比，
+  以及各环节的写入耗时。
 
 ## 快速开始
 
@@ -109,7 +137,7 @@ EverOS 本身只强依赖 LLM；embedding 和 rerank 是可选能力，配上之
 每种方法都要用 LLM 抽取、答题和判分；`agentic` 和 `llm_multiround` 检索时还会调用 LLM。
 
 没有 embedding 时，EverOS 在 ADD 阶段也会跳过反思（reflection）和技能抽取，所以 `keyword` 运行
-测的是一条更短的流水线，分数不能和 [6. 结果](#6-结果) 对比。运行会在启动任何东西之前，按你选的
+测的是一条更短的流水线，分数不能和 [结果](#结果) 对比。运行会在启动任何东西之前，按你选的
 方法检查这些要求。
 
 模型、`top_k`、检索设置和并发在 `benchmarks/configs/<dataset>.toml` 中设置，不在 `.env` 里；
@@ -125,7 +153,7 @@ EverOS 从那里读取。LoCoMo 的配置还把每条消息都记在被提问的
 数据集 session。session 自带 id 的数据集不接受 `"conversation"`。
 
 **可选：单独的检索 decider**（只用于 `llm_multiround`）。各配置已预填已发表数字所用的 decider
-（见 [6. 结果](#6-结果) 的 decider 列；LoCoMo 见 [batch 还是 step](locomo.zh.md#batch-还是-step)）。
+（见 [结果](#结果) 的 decider 列；LoCoMo 见 [batch 还是 step](locomo.zh.md#batch-还是-step)）。
 要使用它，把 `BENCH_DECIDER_BASE_URL` 设为一个提供该模型的 OpenAI 兼容端点，`BENCH_DECIDER_API_KEY`
 填它的 key；只有想换别的模型时才设 `BENCH_DECIDER_MODEL`。LoCoMo 的 decider 在 OpenRouter 上：
 `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`，key 填你的 OpenRouter key；它的配置让 decider 关着思考运行。不设端点时由
@@ -149,7 +177,7 @@ DATASET=locomo bash benchmarks/reproduce.sh --smoke
 ```
 
 冒烟测试只灌入对话 0 的前 50 条消息，最多抽样回答 10 题（LongMemEval 每个对话只有一题，所以只答
-一题），每题判分一次。它端到端跑通每个阶段，但分数不能和 [6. 结果](#6-结果) 对比，`report.txt`
+一题），每题判分一次。它端到端跑通每个阶段，但分数不能和 [结果](#结果) 对比，`report.txt`
 开头几行也会注明这一点。用它确认配置无误，并在跑全量之前看清一个对话在你的服务商那里花多少钱。
 报告只统计答题和判分的 token；抽取和 embedding 的用量请看各服务商的控制台。
 
@@ -242,7 +270,7 @@ DATASET=locomo RUN=locomo_hybrid STAGES="search answer judge" \
 | `No rerank provider is configured` | 设置 `EVEROS_RERANK__API_KEY`，或换一个不是 `agentic` 的方法 |
 | `decider ... did not answer` | `llm_multiround` 运行的 decider 没有回答探测请求，提示里写了原因；见 [3. 配置](#3-配置) 中的 decider 选项 |
 | `llm_multiround round(s) fell back to a fixed core` | decider 在这些轮里失败了，server 日志里的 `llm_multiround_decider_error` 写明了原因；处理好后换一个新的 `RUN` 重新检索 |
-| `decider  no endpoint for ...` | 是警告，不是错误（只在 `llm_multiround` 出现）：运行会继续，改用抽取模型，分数不能和 [6. 结果](#6-结果) 对比 |
+| `decider  no endpoint for ...` | 是警告，不是错误（只在 `llm_multiround` 出现）：运行会继续，改用抽取模型，分数不能和 [结果](#结果) 对比 |
 | `Refusing to start: these stores already hold memories` | 删除列出的库后重跑，或加 `--reuse-store` |
 | `No SubtleMemory personas under ...` | `bash benchmarks/download_data.sh subtlememory` |
 
@@ -276,7 +304,7 @@ benchmarks/results/<Dataset>/<run>/
 | 行 | 怎么判 | 用途 |
 |---|---|---|
 | `Accuracy` | 每个回答都对照数据集的金标 | 和其他系统已发表的结果比较，它们用这个口径 |
-| `Re-judged` | 同样的回答，其中第三方审计认为金标有问题的题改为对照审计给出的正确答案 | [6. 结果](#6-结果) 里的 LoCoMo 数字（标 \*）：金标本身错了的题，测的是数据集而不是系统 |
+| `Re-judged` | 同样的回答，其中第三方审计认为金标有问题的题改为对照审计给出的正确答案 | [结果](#结果) 里的 LoCoMo 数字（标 \*）：金标本身错了的题，测的是数据集而不是系统 |
 
 重判只换金标：不重新检索、不重新答题，有争议的回答用同一个判分模型、同样的判分次数和同样的
 多数票再判一次。JUDGE 把结果写进 `rejudge_<method>.jsonl`，已判过的会跳过；审计文件下载之前
@@ -314,35 +342,6 @@ find benchmarks/data -mindepth 1 ! -name .gitkeep -delete
 rm -f benchmarks/.env
 ps -eo pid,command | grep "[e]veros server start"    # 查残留的 server
 ```
-
-## 6. 结果
-
-各评测的已发表数字，由 `benchmarks/configs/` 里各自的配置产出。
-
-| 评测 | 题量 | 准确率 | decider | 答题模型 |
-|---|---|---|---|---|
-| [LoCoMo](locomo.zh.md) | 1,540 | **94.61\*** | --（`agentic` 不用） | `openai/gpt-4.1-mini` |
-| LongMemEval | 500 | **94.00** | `qwen3.6-27B` | `google/gemini-3.6-flash` |
-| EverMemBench | 2,400 | **66.67** | `qwen3.6-27B` | `google/gemini-3-flash-preview` |
-| SubtleMemory | 1,522 | **71.75** | `qwen3.6-27B` | `openai/gpt-5.4` |
-
-\* 重判口径：LoCoMo 审计认为标准答案有误的 99 道题，按审计修正后的答案判分。
-
-> **准确率**——表中每个评测都是微平均准确率：所有已判分题目的 `sum(correct) / sum(total)`。
-> `report.txt` 里的分类目各行只做报告，从不平均进总分，所以题量少的类目对总分的影响小于
-> 题量大的类目。
->
-> **EverMemBench**——它已发表的对比表里，大多数行是各类目列的宏平均，和这里的微平均是两种
-> 不同的统计量。
->
-> **SubtleMemory**——按事实抽取是否发现冲突，在两套答题契约之间逐题路由，
-> 适配器自动完成。
-
-### 更多结果
-
-- [LoCoMo](locomo.zh.md)：不同模型、不同检索方式的分数和检索耗时，批量和逐条边界检测的对比，
-  以及各环节的写入耗时。
-
 
 ---
 

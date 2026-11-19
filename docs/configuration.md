@@ -424,16 +424,10 @@ everalgo's `BoundaryDetector` default.
 | LoCoMo ingest, 10 servers | about 4 minutes | about 17–22 minutes |
 | Episodes stored for LoCoMo | about 320 | about 550, each shorter |
 | Agent conversations (tool calls) | supported | chat messages only |
-| LoCoMo `agentic`, best of three runs | 94.35%\* | 94.61%\* |
 
-The two scores are within LoCoMo's run-to-run spread of about one point. They
-were measured with the reply format of each benchmark config: `batch` with the
-default `[llm] response_format_mode = "json_schema"`, which keeps every reply to
-its schema, and `step` with `"prompt_only"` for every call
-([benchmarks/locomo.md](../benchmarks/locomo.md#batch-or-step)).
-
-\* Graded against the corrected answers of the LoCoMo gold audit for the 99
-questions it disputes.
+`step`'s lead on LoCoMo is within the benchmark's run-to-run spread of about one
+point. Both scores, and the reply format each config was measured with, are in
+[benchmarks/locomo.md](../benchmarks/locomo.md#batch-or-step).
 
 ### `[memorize]`
 

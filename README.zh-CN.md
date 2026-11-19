@@ -22,6 +22,7 @@
 <br>
 
 - [为什么选择 EverOS](#为什么选择-everos)
+- [评测](#评测)
 - [生态集成](#生态集成)
 - [快速开始](#快速开始)
 - [使用场景](#使用场景)
@@ -84,6 +85,23 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 <td>❌ 通常只是 retrieval-only memory，缺少后台 consolidation 和长周期改进</td>
 </tr>
 </table>
+
+<br>
+
+## 评测
+
+| 评测 | 题量 | 准确率 | 答题模型 |
+|---|---|---|---|
+| [LoCoMo](benchmarks/locomo.zh.md) | 1,540 | **94.61%**\* | `openai/gpt-4.1-mini` |
+| LongMemEval | 500 | **94.00%** | `google/gemini-3.6-flash` |
+| EverMemBench | 2,400 | **66.67%** | `google/gemini-3-flash-preview` |
+| SubtleMemory | 1,522 | **71.75%** | `openai/gpt-5.4` |
+
+\* 重判口径：LoCoMo 审计认为标准答案有误的 99 道题，按审计修正后的答案判分。
+
+在 LoCoMo 上，不调用 LLM 的 `hybrid` 检索中位数 0.27 秒。不同模型、不同检索方式的分数和检索耗时见
+[benchmarks/locomo.zh.md](benchmarks/locomo.zh.md)，每个数字怎么复现见
+[benchmarks/README.zh.md](benchmarks/README.zh.md)。
 
 <br>
 
