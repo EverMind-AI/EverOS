@@ -121,7 +121,7 @@ EverOS 从那里读取。LoCoMo 的配置还把每条消息都记在被提问的
 数据集 session。session 自带 id 的数据集不接受 `"conversation"`。
 
 **可选：单独的检索 decider**（只用于 `llm_multiround`）。各配置已预填已发表数字所用的 decider
-（见 [6. 结果](#6-结果) 的 decider 列；LoCoMo 见 [各检索方式](locomo.zh.md#各检索方式)）。
+（见 [6. 结果](#6-结果) 的 decider 列；LoCoMo 见 [batch 还是 step](locomo.zh.md#batch-还是-step)）。
 要使用它，把 `BENCH_DECIDER_BASE_URL` 设为一个提供该模型的 OpenAI 兼容端点，`BENCH_DECIDER_API_KEY`
 填它的 key；只有想换别的模型时才设 `BENCH_DECIDER_MODEL`。LoCoMo 的 decider 在 OpenRouter 上：
 `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`，key 填你的 OpenRouter key；它的配置让 decider 关着思考运行。不设端点时由
@@ -336,8 +336,8 @@ ps -eo pid,command | grep "[e]veros server start"    # 查残留的 server
 
 ### 更多结果
 
-- [LoCoMo](locomo.zh.md)：各检索方式的分数、批量和逐条边界检测的对比，以及各环节换用不同模型后的
-  分数和写入、检索耗时。
+- [LoCoMo](locomo.zh.md)：不同模型、不同检索方式的分数和检索耗时，批量和逐条边界检测的对比，
+  以及各环节的写入耗时。
 
 
 ---

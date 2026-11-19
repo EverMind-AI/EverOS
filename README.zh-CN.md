@@ -280,7 +280,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
 
 其中抽取模型和 decider 就是我们已发表 benchmark 指标所用的模型；每个 benchmark 各角色用的
 是哪个模型、怎么复现，见 [benchmarks/README.zh.md](benchmarks/README.zh.md)。想换用其他模型，
-[模型配置](benchmarks/locomo.zh.md#模型配置) 一节按模型和环节对比了 LoCoMo 分数以及写入、检索耗时。
+[LoCoMo 结果总表](benchmarks/locomo.zh.md#各模型和检索方式的分数与耗时) 按模型和检索方式对比了分数和检索耗时。
 
 ### 可选：摄取多模态文件
 

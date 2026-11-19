@@ -197,8 +197,8 @@ inherits too, so a template's `api_key = ""` cannot mask `[llm]`'s key.
 | `search` | Search-time calls: agentic retrieval and the LLM rerank lane |
 | `decider` | The multi-round retrieval decider (`llm_multiround`) |
 
-LoCoMo scores and write / search latency for several models per stage are in
-[benchmarks/locomo.md](../benchmarks/locomo.md#model-configurations).
+LoCoMo accuracy and write / search latency for several models per stage are in
+[benchmarks/locomo.md](../benchmarks/locomo.md#results-by-model-and-retrieval-method).
 
 The task names are a stable interface. Environment variables nest one more
 level: `EVEROS_LLM__<TASK>__<FIELD>`, e.g. `EVEROS_LLM__BOUNDARY__MODEL`.

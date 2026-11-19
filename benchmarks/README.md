@@ -135,7 +135,7 @@ refused for datasets whose sessions carry their own ids.
 
 **Optional -- a separate retrieval decider** (`llm_multiround` only). Each config comes
 pre-filled with the decider behind its published number (the Decider column in
-[6. Results](#6-results); for LoCoMo, [its methods table](locomo.md#by-retrieval-method)).
+[6. Results](#6-results); for LoCoMo, [Batch or step](locomo.md#batch-or-step)).
 To use it, set `BENCH_DECIDER_BASE_URL` to an OpenAI-compatible endpoint that serves it
 and `BENCH_DECIDER_API_KEY` to its key; set `BENCH_DECIDER_MODEL` only to run another
 model. LoCoMo's decider is on OpenRouter: `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`
@@ -378,8 +378,8 @@ its corrected answers.
 
 ### More results
 
-- [LoCoMo](locomo.md): the score by retrieval method and by batch or step boundary detection,
-  and accuracy and write / search latency across models per stage.
+- [LoCoMo](locomo.md): accuracy and search time of every retrieval method across models,
+  batch or step boundary detection, and write latency per stage.
 
 
 ---
