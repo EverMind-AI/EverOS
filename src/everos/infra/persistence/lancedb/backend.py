@@ -441,6 +441,10 @@ class LanceIndexBackend:
             [schema.TABLE_NAME for schema in self._schemas]
         )
 
+    async def drop_retired_tables(self, names: Sequence[str]) -> list[str]:
+        """Drop the named retired tables where present; the names dropped."""
+        return await self._connection.drop_tables(list(names))
+
     async def read_embedding_model(self) -> str | None:
         """Model this index's vectors were built with, or ``None`` if unattested.
 

@@ -33,7 +33,7 @@ __all__ = [
 
 import datetime as dt
 import functools
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -54,6 +54,7 @@ from everos.infra.persistence.markdown import (
     MarkdownKnowledgeStore,
 )
 from everos.infra.persistence.sqlite import SqliteKnowledgeCatalog
+from everos.memory import DeviceLine, project_device_batch
 from everos.memory.deps import MemoryDeps
 from everos.service import (
     Application,
@@ -209,6 +210,35 @@ class StubMemoryService:
         ):
             return await self._queue(payload, request_id, False, defer_extraction)
         return await self._memorize(payload, defer_extraction=defer_extraction)
+
+    async def add_device(
+        self,
+        *,
+        device_id: str,
+        session_id: str,
+        app_id: str,
+        project_id: str,
+        lines: Sequence[DeviceLine],
+        request_id: str,
+        async_mode: bool,
+    ) -> tuple[MemorizeResult | Queued | None, list[str]]:
+        """As ``MemoryService.add_device``: the domain projection, then ``add``."""
+        batch = project_device_batch(device_id, lines)
+        if not batch.messages:
+            return None, []
+        payload = {
+            "session_id": session_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "messages": batch.messages,
+        }
+        result = await self.add(
+            payload,
+            request_id=request_id,
+            async_mode=async_mode,
+            defer_extraction=False,
+        )
+        return result, batch.owners
 
     async def flush(
         self,
@@ -367,6 +397,10 @@ class StubAdmin:
 
     async def start_index(self) -> None:
         self.lifecycle.append("index.start")
+
+    async def retire_removed_kinds(self, root: object) -> dict[str, object]:
+        self.lifecycle.append("index.retire")
+        return {"tables": [], "folders": {}}
 
     async def close_index(self) -> None:
         self.lifecycle.append("index.close")

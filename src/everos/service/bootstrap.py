@@ -247,6 +247,11 @@ class Application:
         if self._admin.backend == "lancedb":
             await _log_unbackfilled_hint(self._admin)
         logger.info("derived_index_ready", backend=self._admin.backend)
+        # Before the cascade scans: a kind a release removed (foresight) left
+        # an index table and daily logs nothing reads, purges or deletes.
+        retired = await self._admin.retire_removed_kinds(self._root.root)
+        if retired["tables"] or retired["folders"]:
+            logger.warning("retired_kind_data_removed", **retired)
 
         await self.ops.start()
         self._stack.push_async_callback(_shielded("cascade", self.ops.aclose))

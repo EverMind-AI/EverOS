@@ -12,7 +12,7 @@ from __future__ import annotations
 
 __all__ = ["DerivedIndex", "check_primary_keys"]
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from ._provenance import EmbeddingProvenance
@@ -100,6 +100,9 @@ class DerivedIndex:
 
     async def drop_business_tables(self) -> list[str]:
         return await self._backend.drop_business_tables()
+
+    async def drop_retired_tables(self, names: Sequence[str]) -> list[str]:
+        return await self._backend.drop_retired_tables(names)
 
     async def read_embedding_model(self) -> str | None:
         """Model the backend says this index was built with."""

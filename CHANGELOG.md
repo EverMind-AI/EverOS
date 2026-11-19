@@ -21,8 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `user_id` on the existing routes. Utterances nobody was identified for
   are filed under the device id; a speaker with `consented: false` is not
   written at all (one decline in a batch drops all of that slot's lines); a
-  speaker sent without `display_name` is labelled by the slot, which starts
-  with a letter and holds a digit or `_`. `async_mode` queues the batch as on `/memory/add` (`202`,
+  speaker sent without `display_name` keeps the name last stored for them,
+  and only one never named is labelled by the slot (which starts with a
+  letter, holds a digit or `_`, and has no `.`). The ownership rules live in
+  `everos.memory.device`, run by `MemoryService.add_device`. `async_mode` queues the batch as on `/memory/add` (`202`,
   with the same `owners`). Existing request bodies are unchanged. See
   `docs/device-assistant.md` and `docs/api.md`.
 
@@ -98,8 +100,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   index table and cascade kind, `[llm.foresight]`, and the
   `UserPipelineStarted` event it was the only subscriber of. A queued
   foresight run left by an earlier release is dropped with an
-  `ome_run_dropped_unknown_strategy` warning. The cascade settles an older store's
-  leftover `.foresights/` logs once instead of re-queuing them on every scan.
+  `ome_run_dropped_unknown_strategy` warning. On its first start, a store that ran
+  foresight has its `foresight` index table / collection and every
+  `.foresights/` folder removed (logged as `retired_kind_data_removed`):
+  nothing reads them, and purge and deletion no longer reach them.
 
 ### Upgrade
 
@@ -107,7 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 |---|---|
 | enabled `extract_foresight` in `ome.toml` | remove the block; it is ignored with a `config_override_unknown_strategy` warning |
 | set `[llm.foresight]` or `EVEROS_LLM__FORESIGHT__*` | remove it: it is ignored, and startup logs an `llm.task.retired` warning |
-| ran foresight and want its data gone | a purge or a whole-user `/memory/delete` still removes the `.foresights/` files with the directory, but a session deletion no longer rewrites them and nothing deletes rows from the `foresight` index table (LanceDB) / collection (Milvus) any more: drop those by hand |
+| ran foresight and want to keep its output | copy every `users/*/.foresights/` folder out before upgrading: the first start removes them and the `foresight` index table |
 | subscribe to `UserPipelineStarted` in your own strategy | subscribe to `EpisodeExtracted` (one per memcell, after the episode is written; it carries `memcell_id`, not the `MemCell`) |
 | disabled `extract_user_profile` in `ome.toml` | also disable `split_episode_by_owner`: it only feeds the profile |
 | want no summary call at all | disable `summarize_episode`; episodes keep their placeholder summary |

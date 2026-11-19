@@ -13,6 +13,9 @@ from __future__ import annotations
 
 __all__ = ["CascadeAdmin"]
 
+import asyncio
+import shutil
+from pathlib import Path
 from typing import Any
 
 from everos.core.observability.logging import get_logger
@@ -28,6 +31,7 @@ from everos.infra.persistence.sqlite import (
     SqliteDatabase,
 )
 
+from .models import RETIRED_KINDS
 from .registry import match_kind
 
 logger = get_logger(__name__)
@@ -104,6 +108,27 @@ class CascadeAdmin:
     async def drop_index_tables(self) -> list[str]:
         return await self._index.drop_business_tables()
 
+    async def retire_removed_kinds(self, root: Path) -> dict[str, object]:
+        """Remove what kinds a release removed left behind (:data:`RETIRED_KINDS`).
+
+        Their index tables, and their daily-log folders under every
+        ``<app>/<project>/users/<owner>/``: nothing reads them any more, and
+        purge and deletion no longer reach them, so leaving them would keep
+        content its owner can no longer erase. Run once at startup before the
+        cascade starts; a no-op on a store that never had them. The ledger rows
+        of the removed files settle on the next scan (see the worker).
+
+        Returns:
+            ``{"tables": [...], "folders": {kind: count}}`` of what was removed.
+        """
+        tables = await self._index.drop_retired_tables(list(RETIRED_KINDS))
+        folders: dict[str, int] = {}
+        for kind, dir_name in RETIRED_KINDS.items():
+            removed = await asyncio.to_thread(_remove_folders, root, dir_name)
+            if removed:
+                folders[kind] = removed
+        return {"tables": tables, "folders": folders}
+
     async def count_index_rows(self) -> dict[str, int]:
         return await self._index.count_business_rows()
 
@@ -165,3 +190,13 @@ class CascadeAdmin:
             return None
         await self._ledger.force_enqueue(rel_md_path, spec.name)
         return spec.name
+
+
+def _remove_folders(root: Path, dir_name: str) -> int:
+    """Delete every ``<app>/<project>/users/<owner>/<dir_name>``; the count."""
+    count = 0
+    for folder in root.glob(f"*/*/users/*/{dir_name}"):
+        if folder.is_dir() and not folder.is_symlink():
+            shutil.rmtree(folder)
+            count += 1
+    return count
