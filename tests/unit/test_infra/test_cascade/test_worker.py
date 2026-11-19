@@ -332,6 +332,27 @@ async def test_unknown_kind_marks_permanent_without_handler(
     assert "no handler" in patched_repo.failed[0][2]
 
 
+async def test_a_retired_kind_is_settled_as_a_done_deletion(
+    patched_repo: _FakeRepo,
+) -> None:
+    """A leftover foresight log from an older store: done/deleted, which the
+    next scan's reconcile skips, not a failure re-queued on every scan."""
+    patched_repo.batch = [
+        _Row(
+            md_path="u/.foresights/foresight-1.md",
+            kind="foresight",
+            change_type="modified",
+        )
+    ]
+    w = CascadeWorker(
+        {"episode": _OkHandler()}, retry_backoff_seconds=0, ledger=patched_repo
+    )
+    await w.drain_once()
+    assert patched_repo.failed == []
+    assert patched_repo.done == ["u/.foresights/foresight-1.md"]
+    assert patched_repo.applied["u/.foresights/foresight-1.md"] == "deleted"
+
+
 async def test_retry_budget_exhausted_marks_unrecoverable(
     patched_repo: _FakeRepo,
 ) -> None:

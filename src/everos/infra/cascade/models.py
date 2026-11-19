@@ -8,9 +8,15 @@ unit-test without an event loop or IO mocks.
 from __future__ import annotations
 
 import dataclasses
-from typing import Literal
+from typing import Final, Literal
 
 ChangeType = Literal["added", "modified", "deleted"]
+
+RETIRED_KINDS: Final[frozenset[str]] = frozenset({"foresight"})
+"""Kinds a later release removed. A store written before keeps their daily logs
+and ``md_change_state`` rows; no spec globs those files any more, so every full
+scan re-emits them. The worker settles such a row as a done deletion (which
+reconcile skips) instead of failing it on every scan."""
 
 
 @dataclasses.dataclass(frozen=True)
