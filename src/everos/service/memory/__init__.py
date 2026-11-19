@@ -22,6 +22,7 @@ __all__ = [
     "DeleteResult",
     "ExtractionSupervisor",
     "FlushResult",
+    "InputLogWriter",
     "MemorizeResult",
     "MemoryService",
     "QueueHealth",
@@ -41,6 +42,7 @@ from everos.core.observability.logging import get_logger
 from ._delete import Deleter
 from ._delete import DeleteResult as DeleteResult
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
+from ._input_log import InputLogWriter
 from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
 from ._models import MemorizeResult as MemorizeResult
@@ -108,9 +110,11 @@ class MemoryService:
         raw_file_builder: RawFileBuilder,
         index_eraser: IndexEraser,
         purge_marks: PurgeMarks | None = None,
+        input_log: InputLogWriter | None = None,
     ) -> None:
         self._search_manager = search_manager
         self._get_manager = get_manager
+        self._input_log = input_log
         self._extractions = ExtractionSupervisor()
         self._stores = stores
         self._deleter = Deleter(
@@ -287,6 +291,11 @@ class MemoryService:
         return await self._queue.health()
 
     # ── write use cases ────────────────────────────────────────────────────
+
+    async def log_add(self, payload: dict[str, Any], *, request_id: str) -> None:
+        """Record one accepted ``/add`` before it enters the write path."""
+        if self._input_log is not None:
+            await self._input_log.log_add(payload, request_id=request_id)
 
     async def add(
         self,
