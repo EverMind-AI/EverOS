@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -73,42 +74,84 @@ def _hold_facts(proxy: Any, token: str) -> Rule:
     )
 
 
-def _backlog(world: Any, proxy: Any, app: str, project: str) -> None:
-    """A backlog of (app, project) the purge must drop, behind a held run of
-    (a2, p1) in the only OME slot (the purge does not wait for another
-    range, so it ends with the backlog still queued).
+_BLOCKER = ("a2", "p1")
 
-    The backlog is the part no source check covers: (app, project)'s agent
-    case is extracted first (its memcell still there), and the event it
-    emits -- which carries the case's content to the skill clustering --
-    lands in the queue behind the held (a2, p1) run. First-stage events
-    alone would prove nothing: their writes are skipped once the memcell
-    is gone, drop rule or not."""
-    srv = world.srv
-    token = scope_token(app, project)
-    began = get_utc_now()
-    cases = md_counts(srv.root, app, project)["md.agent_case"]
-    case = proxy.add(
+
+def _hold_case(proxy: Any, token: str) -> Rule:
+    """Hold the agent-case extraction of the scope ``token`` names."""
+    return proxy.add(
         Rule(
             target="llm",
             pattern=f'(?=.*"_CaseCompressReply")(?=.*{token})',
             mode="hold",
         )
     )
+
+
+def _running(srv: Any) -> list[tuple[str, tuple[str, str] | None]]:
+    return [
+        (r["strategy_name"], _scope_of(r["event_payload"]))
+        for r in _runs(srv.root)
+        if r["status"] == "running"
+    ]
+
+
+def _until_calm(srv: Any, ok: Callable[[], bool], what: str) -> None:
+    """Wait until ``ok()`` holds on two polls a second apart."""
+    calm, deadline = 0, time.monotonic() + 60
+    while time.monotonic() < deadline:
+        calm = calm + 1 if ok() else 0
+        if calm >= 2:
+            return
+        time.sleep(1)
+    raise AssertionError(what, _running(srv))
+
+
+def _backlog(world: Any, proxy: Any, app: str, project: str) -> None:
+    """A backlog of (app, project) the purge must drop, queued behind two held
+    runs of (a2, p1) that fill both OME slots (the world runs two); the purge
+    does not wait for another range, so it ends with the backlog still queued.
+
+    The backlog is the part no source check covers: (app, project)'s agent
+    case is extracted first (its memcell still there), and the event it
+    emits -- which carries the case's content to the skill clustering --
+    lands in the queue behind the held (a2, p1) runs. First-stage events
+    alone would prove nothing: their writes are skipped once the memcell
+    is gone, drop rule or not.
+
+    No other run of (app, project) may have started when the purge comes: a
+    started run is in flight, and the purge waits for it. A strategy that
+    takes a partition lock (the profile, the clusterings) hands its slot back
+    while it takes the lock, so with every slot held it would stay started
+    and never finish. Hence two slots: the case is held in one while the rest
+    of the talk runs to its end in the other, and only then do both slots go
+    to (a2, p1)."""
+    srv = world.srv
+    token = scope_token(app, project)
+    began = get_utc_now()
+    cases = md_counts(srv.root, app, project)["md.agent_case"]
+    case = _hold_case(proxy, token)
     talk(srv, "u1", "backlog", token, {"app_id": app, "project_id": project})
-    assert proxy.wait_held("llm", timeout=60)  # the case extraction, in the slot
-    blocker = scope_token("a2", "p1")
+    assert proxy.wait_held("llm", timeout=60)  # the case extraction, in one slot
+    _until_calm(
+        srv,
+        lambda: _running(srv) == [("extract_agent_case", (app, project))],
+        "the rest of the talk never finished beside the held case",
+    )
+    blocker = scope_token(*_BLOCKER)
     _hold_facts(proxy, blocker)
+    _hold_case(proxy, blocker)
     talk(srv, "u1", "blocker", blocker, {"app_id": "a2", "project_id": "p1"})
     case.release.set()  # the case lands; its follow-up queues behind a2's runs
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline:
-        running = [r for r in _runs(srv.root) if r["status"] == "running"]
-        if [_scope_of(r["event_payload"]) for r in running] == [("a2", "p1")]:
-            break
-        time.sleep(0.2)
-    assert [_scope_of(r["event_payload"]) for r in running] == [("a2", "p1")]
-    assert md_counts(srv.root, app, project)["md.agent_case"] > cases  # it landed
+    _until_calm(
+        srv,
+        lambda: (
+            proxy.held("llm") == 2
+            and all(scope == _BLOCKER for _, scope in _running(srv))
+            and md_counts(srv.root, app, project)["md.agent_case"] > cases
+        ),
+        "both slots never went to (a2, p1) with the case landed",
+    )
     clustering = [
         r
         for r in _after(_runs(srv.root), began)
@@ -137,7 +180,7 @@ def _drain_and_check(world: Any, proxy: Any, job: dict[str, Any]) -> None:
 
 
 def test_t9_1_backlog_never_writes_back(make_world: Any, purge_proxy: Any) -> None:
-    world = make_world("T9.1", EVEROS_OME__MAX_CONCURRENT_RUNS="1")
+    world = make_world("T9.1", EVEROS_OME__MAX_CONCURRENT_RUNS="2")
     srv = world.srv
     _backlog(world, purge_proxy, "a1", "p1")
     job_id, _ = purge(srv, **S)
@@ -147,7 +190,7 @@ def test_t9_1_backlog_never_writes_back(make_world: Any, purge_proxy: Any) -> No
 def test_t24_1_app_tombstone_covers_its_projects(
     make_world: Any, purge_proxy: Any
 ) -> None:
-    world = make_world("T24.1", EVEROS_OME__MAX_CONCURRENT_RUNS="1")
+    world = make_world("T24.1", EVEROS_OME__MAX_CONCURRENT_RUNS="2")
     srv = world.srv
     _backlog(world, purge_proxy, "a1", "p1")
     job_id, _ = purge(srv, scope="app", app_id="a1")
@@ -155,7 +198,7 @@ def test_t24_1_app_tombstone_covers_its_projects(
 
 
 def test_t24_2_latest_purge_of_a_scope_wins(make_world: Any, purge_proxy: Any) -> None:
-    world = make_world("T24.2", EVEROS_OME__MAX_CONCURRENT_RUNS="1")
+    world = make_world("T24.2", EVEROS_OME__MAX_CONCURRENT_RUNS="2")
     srv = world.srv
     first, _ = purge(srv, **S)
     assert finish(srv, first)["status"] == "succeeded"
