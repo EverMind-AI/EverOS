@@ -177,7 +177,8 @@ are in the [table above](#results-by-model-and-retrieval-method).
 
 ## Appendix: full results
 
-Every number behind the tables above, with the columns of the first table.
+Every number behind the results table and the latency sections, with the results table's
+columns.
 
 ### Accuracy per run
 
