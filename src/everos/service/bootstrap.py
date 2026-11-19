@@ -66,7 +66,13 @@ from everos.component.llm import (
 from everos.component.parser import aparse_file, build_raw_file, parser_available
 from everos.component.rerank import RerankProvider, build_rerank_provider
 from everos.component.tokenizer import Tokenizer, build_tokenizer
-from everos.config import OmeSettings, Settings, load_settings, resolve_root
+from everos.config import (
+    RETIRED_LLM_TASKS,
+    OmeSettings,
+    Settings,
+    load_settings,
+    resolve_root,
+)
 from everos.config.search_runtime import SearchConfigSource
 from everos.core.observability.logging import configure_logging, get_logger
 from everos.core.observability.metrics import configure_metrics
@@ -241,6 +247,11 @@ class Application:
         if self._admin.backend == "lancedb":
             await _log_unbackfilled_hint(self._admin)
         logger.info("derived_index_ready", backend=self._admin.backend)
+        # Before the cascade scans: a kind a release removed (foresight) left
+        # an index table and daily logs nothing reads, purges or deletes.
+        retired = await self._admin.retire_removed_kinds(self._root.root)
+        if retired["tables"] or retired["folders"]:
+            logger.warning("retired_kind_data_removed", **retired)
 
         await self.ops.start()
         self._stack.push_async_callback(_shielded("cascade", self.ops.aclose))
@@ -464,6 +475,14 @@ def _build_llm_clients(settings: Settings) -> LLMClients:
     """One client per task; tasks configured alike share one."""
     resolutions = resolve_llm_tasks(settings)
     _log_llm_tasks(resolutions.values())
+    for task in settings.llm.retired_tasks:
+        logger.warning(
+            "llm.task.retired",
+            task=task,
+            reason=RETIRED_LLM_TASKS[task],
+            hint=f"[llm.{task}] is ignored: delete it "
+            f"(and any EVEROS_LLM__{task.upper()}__* variable)",
+        )
     providers = build_llm_task_providers(
         {task: llm_client_config(r) for task, r in resolutions.items()},
         observer=observer_for(settings),

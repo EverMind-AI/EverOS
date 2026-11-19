@@ -176,7 +176,7 @@ def test_t15_1_failed_runs_keep_rows_lose_content(make_world: Any, fake: Any) ->
                 Override(
                     pattern=f"{token}poison",
                     reply=UNUSABLE_REPLY,
-                    name="_ForesightsReply",
+                    name="_CaseFilterReply",
                 )
             )
         )

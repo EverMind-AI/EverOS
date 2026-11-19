@@ -162,8 +162,8 @@ async def _seed_user_memory_cluster(
 
 
 # Minimal agent_case / agent_skill row factories. The search_seed slice
-# only ships user-side rows (episode / atomic_fact / foresight /
-# user_profile), so agent-owner tests construct synthetic rows directly.
+# only ships user-side rows (episode / atomic_fact / user_profile), so
+# agent-owner tests construct synthetic rows directly.
 # ``vector`` defaults to zero-filled (fine for BM25-only / dispatch
 # coverage where the test never queries the dense path); live_llm tests
 # that exercise vector / hybrid recall must pass real embeddings via

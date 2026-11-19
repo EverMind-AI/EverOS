@@ -1,6 +1,6 @@
 """Shared diff / dispatch loop for every daily-log cascade handler.
 
-The 4 daily-log kinds (episode / atomic_fact / foresight / agent_case)
+The daily-log kinds (episode / atomic_fact / agent_case)
 all do the same three-way reconcile against LanceDB:
 
 1. Parse the md into structured entries.

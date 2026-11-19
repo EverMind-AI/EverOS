@@ -16,9 +16,6 @@ Sampling rules:
   fact-first paths (vector MaxSim, agentic) have a non-trivial,
   multi-episode corpus; facts are then kept iff their host episode made
   the cut (≤15/owner), guaranteeing every kept fact bridges back.
-- **foresight**: 5 per owner. Archived for future use; current
-  ``/search`` does not query foresight, so the seed only exists so
-  downstream tests can opt in without re-cutting the corpus.
 - **user_profile**: 1 per owner (= 2 total).
 
 Run::
@@ -113,13 +110,7 @@ def main() -> None:
             owner_afs.extend(facts_by_ep.get(e["entry_id"], [])[:3])
         afs.extend(owner_afs[:15])
 
-    # 3) foresights — 5 per owner, archived for future use.
-    fss_all = _read(db, "foresight")
-    fss: list[dict[str, Any]] = []
-    for owner in ALL_OWNERS:
-        fss.extend([r for r in fss_all if r["owner_id"] == owner][:5])
-
-    # 4) user_profile — 1 per owner.
+    # 3) user_profile — 1 per owner.
     ups_all = _read(db, "user_profile")
     ups = [r for r in ups_all if r["owner_id"] in ALL_OWNERS]
 
@@ -127,7 +118,6 @@ def main() -> None:
     for name, rows in (
         ("episode", eps),
         ("atomic_fact", afs),
-        ("foresight", fss),
         ("user_profile", ups),
     ):
         serialised = [_serialise(r) for r in rows]

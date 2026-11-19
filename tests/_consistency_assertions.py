@@ -11,9 +11,9 @@ LanceDB row(s):
 This is the e2e tail check meant to follow ``add+flush+cascade-drain``
 pipelines (see ``tests/e2e/test_add_flush_*_pipeline_e2e.py``). It
 exercises every kind that writes md and indexes into LanceDB, not just
-the 4 daily-log kinds covered by the white-box integration test.
+the 3 daily-log kinds covered by the white-box integration test.
 
-Daily-log kinds (atomic_fact / episode / foresight / agent_case) hold
+Daily-log kinds (atomic_fact / episode / agent_case) hold
 many entries per md and use a per-entry digest; user_profile +
 agent_skill are single-md-per-row and digest the file as a whole
 (agent_skill additionally folds in concatenated ``references/*.md``).
@@ -164,7 +164,7 @@ async def assert_md_lance_strict_consistent(
     return stats
 
 
-# ── Daily-log kinds (atomic_fact / episode / foresight / agent_case) ──
+# ── Daily-log kinds (atomic_fact / episode / agent_case) ──
 
 
 def _daily_log_sha_for_entry(

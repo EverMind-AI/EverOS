@@ -1,4 +1,4 @@
-"""POST /api/v2/memory/add and /api/v2/memory/flush.
+"""POST /api/v2/memory/add, /api/v2/memory/device/add and /api/v2/memory/flush.
 
 Routes are thin adapters: validate the DTO (``schemas.memorize``), dump
 to dict, hand to service. No business logic lives here.
@@ -19,6 +19,9 @@ from everos.entrypoints.api.routes.purge import REFUSED_DURING_PURGE
 from everos.entrypoints.api.schemas import (
     AcceptedResponseData,
     AddResponseData,
+    DeviceAcceptedResponseData,
+    DeviceAddRequest,
+    DeviceAddResponseData,
     FlushResponseData,
     MemorizeAddRequest,
     MemorizeFlushRequest,
@@ -49,6 +52,10 @@ _ADD_RESPONSES: dict[int | str, dict[str, Any]] = {
     413: {"description": "Body over memorize.async_queue.max_payload_bytes"},
     429: {"description": "Queue at its per-session or global cap"},
     **REFUSED_DURING_PURGE,
+}
+_DEVICE_ADD_RESPONSES: dict[int | str, dict[str, Any]] = {
+    **_ADD_RESPONSES,
+    202: {**_ADD_RESPONSES[202], "model": SuccessEnvelope[DeviceAcceptedResponseData]},
 }
 _FLUSH_RESPONSES: dict[int | str, dict[str, Any]] = {
     202: {
@@ -82,6 +89,54 @@ async def add_memory(
         data=AddResponseData(
             message_count=result.message_count,
             status=result.status,
+        ),
+    )
+
+
+@router.post("/device/add", responses=_DEVICE_ADD_RESPONSES)
+async def add_device_memory(
+    req: Annotated[DeviceAddRequest, ...],
+    response: Response,
+    app: ApplicationDep,
+    request_id: RequestIdDep,
+) -> (
+    SuccessEnvelope[DeviceAddResponseData] | SuccessEnvelope[DeviceAcceptedResponseData]
+):
+    """Add one device's utterances, each speaker under their own owner.
+
+    ``MemoryService.add_device`` decides who owns each utterance
+    (``everos.memory.device``) and runs ``/add``'s write; a person is then read
+    and deleted by ``<device_id>@<slot>`` as ``user_id`` on the existing routes.
+    """
+    app.purge.refuse_writes_to(req.app_id, req.project_id)
+    result, owners = await app.memory.add_device(
+        device_id=req.device_id,
+        session_id=req.session_id,
+        app_id=req.app_id,
+        project_id=req.project_id,
+        lines=req.lines(),
+        request_id=request_id,
+        async_mode=req.async_mode,
+    )
+    if result is None:  # every speaker declined: nothing written or queued
+        return SuccessEnvelope(
+            request_id=request_id,
+            data=DeviceAddResponseData(message_count=0, status="accumulated"),
+        )
+    if isinstance(result, Queued):
+        response.status_code = HTTP_202_ACCEPTED
+        return SuccessEnvelope(
+            request_id=request_id,
+            data=DeviceAcceptedResponseData(
+                message_count=result.message_count,
+                pending=result.pending,
+                owners=owners,
+            ),
+        )
+    return SuccessEnvelope(
+        request_id=request_id,
+        data=DeviceAddResponseData(
+            message_count=result.message_count, status=result.status, owners=owners
         ),
     )
 

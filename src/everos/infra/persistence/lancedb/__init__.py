@@ -30,7 +30,6 @@ from ..records import AgentCase as AgentCase
 from ..records import AgentSkill as AgentSkill
 from ..records import AtomicFact as AtomicFact
 from ..records import Episode as Episode
-from ..records import Foresight as Foresight
 from ..records import KnowledgeTopic as KnowledgeTopic
 from ..records import ParentType as ParentType
 from ..records import UserProfile as UserProfile
@@ -54,7 +53,6 @@ __all__ = [
     "AgentSkill",
     "AtomicFact",
     "Episode",
-    "Foresight",
     "KnowledgeTopic",
     "LanceDBMigrationError",
     "LanceDBSchemaMismatchError",

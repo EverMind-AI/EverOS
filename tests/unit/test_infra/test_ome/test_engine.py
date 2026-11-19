@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from structlog.testing import capture_logs
 
 from everos.infra.ome.config import OMEConfig
 from everos.infra.ome.engine import OfflineEngine
@@ -652,6 +653,49 @@ async def test_enqueue_run_rolls_back_counter_on_add_job_failure(
         assert await engine.wait_idle(timeout=0.5) is True
     finally:
         monkeypatch.undo()
+        await engine.stop()
+
+
+@pytest.mark.asyncio
+async def test_run_of_an_unregistered_strategy_is_dropped(cfg: OMEConfig) -> None:
+    """A run an earlier release persisted for a strategy this one no longer
+    has (a queued ``extract_foresight`` job) is dropped with a warning and
+    releases its in-flight count; a registered strategy still runs."""
+    ran: list[_E] = []
+
+    @ome_strategy(name="s", trigger=Immediate(on=[_E]), emits=[])
+    async def s(event: _E, deps: MemoryDeps) -> list[Event]:
+        ran.append(event)
+        return []
+
+    engine = OfflineEngine(config=cfg)
+    engine.register(s)
+    await engine.start()
+    try:
+        engine._in_flight.enqueued()  # what the enqueue path did for the job
+        with capture_logs() as logs:
+            await engine.dispatch_run(
+                strategy_name="extract_foresight",
+                run_id="r_gone",
+                event_topic="everos.memory.events:UserPipelineStarted",
+                event_payload="{}",
+                max_retries_snapshot=0,
+            )
+        (dropped,) = [
+            e for e in logs if e["event"] == "ome_run_dropped_unknown_strategy"
+        ]
+        assert (dropped["strategy_name"], dropped["run_id"]) == (
+            "extract_foresight",
+            "r_gone",
+        )
+        assert engine._in_flight.active == 0
+        assert not [e for e in logs if e["event"] == "active_runs_underflow"]
+
+        await engine.emit(_E())
+        assert await engine.wait_idle(timeout=2.0) is True
+        assert len(ran) == 1
+        assert [r.status for r in await engine.list_runs("s")] == [RunStatus.SUCCESS]
+    finally:
         await engine.stop()
 
 

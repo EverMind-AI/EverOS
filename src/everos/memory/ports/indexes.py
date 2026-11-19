@@ -179,7 +179,7 @@ class IndexEraser(Protocol):
     ) -> None:
         """Remove the rows of ``removed`` entries, by daily-log table.
 
-        Keys are table names (``episode``, ``atomic_fact``, ``foresight``,
+        Keys are table names (``episode``, ``atomic_fact``,
         ``agent_case``).
         """
         ...

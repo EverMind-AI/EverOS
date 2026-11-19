@@ -25,6 +25,10 @@ from everos.core.errors import DocumentNotFoundError as DocumentNotFoundError
 from everos.core.errors import DuplicateDocumentError as DuplicateDocumentError
 from everos.core.errors import ExtractionEmptyError as ExtractionEmptyError
 from everos.core.errors import TopicNotFoundError as TopicNotFoundError
+from everos.memory import DEVICE_OWNER_SEPARATOR as DEVICE_OWNER_SEPARATOR
+from everos.memory import MAX_OWNER_ID_LENGTH as MAX_OWNER_ID_LENGTH
+from everos.memory import DeviceLine as DeviceLine
+from everos.memory import speaker_owner_id as speaker_owner_id
 from everos.memory.get import GetRequest as GetRequest
 from everos.memory.get import GetResponse as GetResponse
 from everos.memory.search import SearchRequest as SearchRequest
@@ -86,6 +90,8 @@ from .purge import PurgeService as PurgeService
 
 __all__ = [
     "BACKFILL_PHASES",
+    "DEVICE_OWNER_SEPARATOR",
+    "MAX_OWNER_ID_LENGTH",
     "TASK_STATUSES",
     "Application",
     "BackfillDeps",
@@ -99,6 +105,7 @@ __all__ = [
     "ClustersPhaseResult",
     "CreateDocumentResult",
     "DeleteResult",
+    "DeviceLine",
     "DocumentContext",
     "DocumentDetail",
     "DocumentListResult",
@@ -146,4 +153,5 @@ __all__ = [
     "configure_process",
     "describe_llm_tasks",
     "format_tokens",
+    "speaker_owner_id",
 ]

@@ -27,7 +27,6 @@ from .agent_case import AgentCaseDailyFrontmatter as AgentCaseDailyFrontmatter
 from .agent_skill import AgentSkillFrontmatter as AgentSkillFrontmatter
 from .atomic_fact import AtomicFactDailyFrontmatter as AtomicFactDailyFrontmatter
 from .episode import EpisodeDailyFrontmatter as EpisodeDailyFrontmatter
-from .foresight import ForesightDailyFrontmatter as ForesightDailyFrontmatter
 from .knowledge_document import (
     KnowledgeDocumentFrontmatter as KnowledgeDocumentFrontmatter,
 )
@@ -39,7 +38,6 @@ __all__ = [
     "AgentSkillFrontmatter",
     "AtomicFactDailyFrontmatter",
     "EpisodeDailyFrontmatter",
-    "ForesightDailyFrontmatter",
     "KnowledgeDocumentFrontmatter",
     "KnowledgeTopicFrontmatter",
     "UserProfileFrontmatter",

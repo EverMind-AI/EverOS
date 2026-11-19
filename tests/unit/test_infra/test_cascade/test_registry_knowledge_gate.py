@@ -82,7 +82,6 @@ def test_non_knowledge_handlers_always_registered(tmp_path: Path) -> None:
     for kind in (
         "episode",
         "atomic_fact",
-        "foresight",
         "agent_case",
         "agent_skill",
         "user_profile",

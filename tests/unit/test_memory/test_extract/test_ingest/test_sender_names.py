@@ -85,3 +85,56 @@ async def test_names_do_not_cross_spaces_or_senders() -> None:
     await _names(store, [("u1", "Alice")], app_id="a")
     assert await _names(store, [("u1", None)], app_id="other") == [None]
     assert await _names(store, [("u2", None)], app_id="a") == [None]
+
+
+async def _names_with_fallback(
+    store: InMemorySenderNameStore,
+    messages: Sequence[tuple[str, str | None, str | None]],
+) -> list[str | None]:
+    """Like ``_names``, each message also carrying ``sender_name_fallback``."""
+    payload = {
+        "session_id": "s1",
+        "app_id": "a",
+        "project_id": "p",
+        "messages": [
+            {
+                "sender_id": sender_id,
+                "sender_name": name,
+                "sender_name_fallback": fallback,
+                "role": "user",
+                "timestamp": _TS + i,
+                "content": f"line {i}",
+            }
+            for i, (sender_id, name, fallback) in enumerate(messages)
+        ],
+    }
+    ingested = await process(
+        payload,
+        multimodal_llm=None,
+        raw_file_builder=unused_raw_file_builder,
+        sender_names=store,
+    )
+    return [m.sender_name for m in ingested.messages]
+
+
+async def test_a_fallback_labels_a_never_named_sender_and_is_not_stored() -> None:
+    store = InMemorySenderNameStore()
+    assert await _names_with_fallback(store, [("d@spk_1", None, "spk_1")]) == ["spk_1"]
+    assert store.names == {}
+
+
+async def test_a_fallback_never_overrides_a_name_learned_earlier() -> None:
+    """A device batch without display_name keeps the person's real name: the
+    split-label case sender names exist to prevent."""
+    store = InMemorySenderNameStore()
+    await _names_with_fallback(store, [("d@spk_1", "Alice", "spk_1")])
+    assert await _names_with_fallback(store, [("d@spk_1", None, "spk_1")]) == ["Alice"]
+    assert store.names == {("a", "p", "d@spk_1"): "Alice"}
+
+
+async def test_a_name_in_the_same_batch_beats_the_fallback() -> None:
+    store = InMemorySenderNameStore()
+    names = await _names_with_fallback(
+        store, [("d@spk_1", None, "spk_1"), ("d@spk_1", "Alice", "spk_1")]
+    )
+    assert names == ["Alice", "Alice"]

@@ -595,26 +595,6 @@ def test_vectorless_table_declares_the_dummy_vector_column() -> None:
     assert actual["summary"].nullable is False
 
 
-def test_nullable_bm25_input_is_declared_not_null() -> None:
-    """``foresight.evidence_tokens`` is the only nullable BM25 column.
-
-    A BM25 input feeds an analyzer, so it is stored as "" rather than null —
-    which means the physical column must be declared NOT NULL even though the
-    logical field is optional. Episode and user_profile cannot cover this
-    interaction, so it is asserted where it actually occurs.
-    """
-    logical = _milvus().foresight.index_schema
-    assert logical.field("evidence_tokens").nullable is True
-    assert "evidence_tokens" in logical.bm25_fields
-
-    physical = {f.name: f for f in _milvus().foresight._layout.physical_fields()}  # type: ignore[attr-defined]
-    assert physical["evidence_tokens"].nullable is False
-    assert physical["evidence_tokens"].enable_analyzer is True
-    # "evidence" is the same optional text without the analyzer attached, so
-    # it stays nullable — the NOT NULL above is caused by BM25, nothing else.
-    assert physical["evidence"].nullable is True
-
-
 async def test_search_topk_is_clamped_to_the_milvus_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

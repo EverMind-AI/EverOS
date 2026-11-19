@@ -108,7 +108,6 @@ def test_t14_1_whole_owner_and_escapes(make_server: Any) -> None:
         for t in (
             "episode",
             "atomic_fact",
-            "foresight",
             "agent_case",
             "user_profile",
             "agent_skill",

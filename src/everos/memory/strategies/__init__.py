@@ -19,8 +19,6 @@ from .extract_agent_skill import EXTRACT_AGENT_SKILL_SPEC as EXTRACT_AGENT_SKILL
 from .extract_agent_skill import extract_agent_skill as extract_agent_skill
 from .extract_atomic_facts import EXTRACT_ATOMIC_FACTS_SPEC as EXTRACT_ATOMIC_FACTS_SPEC
 from .extract_atomic_facts import extract_atomic_facts as extract_atomic_facts
-from .extract_foresight import EXTRACT_FORESIGHT_SPEC as EXTRACT_FORESIGHT_SPEC
-from .extract_foresight import extract_foresight as extract_foresight
 from .extract_user_profile import EXTRACT_USER_PROFILE_SPEC as EXTRACT_USER_PROFILE_SPEC
 from .extract_user_profile import extract_user_profile as extract_user_profile
 from .finish_reflection import FINISH_REFLECTION_SPEC as FINISH_REFLECTION_SPEC
@@ -49,7 +47,6 @@ from .trigger_skill_clustering import (
 STRATEGY_SPECS: tuple[StrategySpec, ...] = (
     EXTRACT_ATOMIC_FACTS_SPEC,
     SUMMARIZE_EPISODE_SPEC,
-    EXTRACT_FORESIGHT_SPEC,
     EXTRACT_AGENT_CASE_SPEC,
     SPLIT_EPISODE_BY_OWNER_SPEC,
     EXTRACT_USER_PROFILE_SPEC,
@@ -65,7 +62,6 @@ __all__ = [
     "EXTRACT_AGENT_CASE_SPEC",
     "EXTRACT_AGENT_SKILL_SPEC",
     "EXTRACT_ATOMIC_FACTS_SPEC",
-    "EXTRACT_FORESIGHT_SPEC",
     "EXTRACT_USER_PROFILE_SPEC",
     "FINISH_REFLECTION_SPEC",
     "REFLECT_EPISODES_SPEC",
@@ -77,7 +73,6 @@ __all__ = [
     "extract_agent_case",
     "extract_agent_skill",
     "extract_atomic_facts",
-    "extract_foresight",
     "extract_user_profile",
     "finish_reflection",
     "reflect_episodes",

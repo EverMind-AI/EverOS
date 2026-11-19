@@ -1,6 +1,6 @@
-"""Tests for AtomicFact / Foresight / AgentCase daily-log writers.
+"""Tests for AtomicFact / AgentCase daily-log writers.
 
-The 4 daily-log kinds (episode + these 3) all share ``BaseDailyWriter``
+The 3 daily-log kinds (episode + these 2) all share ``BaseDailyWriter``
 plumbing — exhaustive chassis tests live in ``test_base.py`` and
 ``test_episode_writer.py`` indirectly via the e2e flows. Here we focus
 on the per-kind path resolution + frontmatter shape that each
@@ -21,8 +21,6 @@ from everos.infra.persistence.markdown import (
     AgentCaseWriter,
     AtomicFactReader,
     AtomicFactWriter,
-    ForesightReader,
-    ForesightWriter,
     MarkdownReader,
 )
 from tests.fakes import handler_deps
@@ -112,47 +110,6 @@ async def test_atomic_fact_writer_appends_multiple(memory_root: MemoryRoot) -> N
     )
     assert eid1.format() != eid2.format()
     assert eid2.format().endswith("0002")
-
-
-# ── Foresight ─────────────────────────────────────────────────────────────
-
-
-async def test_foresight_writer_round_trip(memory_root: MemoryRoot) -> None:
-    writer = ForesightWriter(memory_root)
-    today = _dt.date(2026, 5, 15)
-    eid = await writer.append_entry(
-        "u1",
-        inline={
-            "owner_id": "u1",
-            "session_id": "s1",
-            "timestamp": "2026-05-15T10:00:00+00:00",
-            "parent_id": "mc_1",
-            "start_time": "2026-05-15T12:00:00+00:00",
-            "end_time": "2026-05-15T13:00:00+00:00",
-            "duration_days": 1,
-        },
-        sections={
-            "Foresight": "User will book lunch at noon.",
-            "Evidence": "Past calendar pattern.",
-        },
-        date=today,
-    )
-    path = memory_root.users_dir() / "u1" / ".foresights" / "foresight-2026-05-15.md"
-    parsed = await MarkdownReader.read(path)
-    fm = parsed.frontmatter
-    assert fm["id"] == "foresight_log_u1_2026-05-15"
-    assert fm["type"] == "foresight_daily"
-
-    structured = parsed.entries[0].as_structured()
-    assert structured.sections["Foresight"] == "User will book lunch at noon."
-    assert structured.sections["Evidence"] == "Past calendar pattern."
-    assert structured.inline["duration_days"] == "1"
-    assert structured.inline["start_time"].startswith("2026-05-15T12:00:00")
-
-    reader = ForesightReader(memory_root)
-    found = await reader.find_structured("u1", eid)
-    assert found is not None
-    assert found.sections["Evidence"] == "Past calendar pattern."
 
 
 # ── AgentCase ─────────────────────────────────────────────────────────────
@@ -275,9 +232,9 @@ async def test_atomic_fact_frontmatter_last_appended_at_carries_display_tz_offse
     write an entry, read the .md file, assert the literal string ends
     with ``+08:00``.
 
-    Repeats the same check for ``ForesightWriter`` and
-    ``AgentCaseWriter`` — they share ``BaseDailyWriter`` plumbing so a
-    regression on one would likely affect all three, but pinning each
+    Repeats the same check for ``AgentCaseWriter`` — they share
+    ``BaseDailyWriter`` plumbing so a regression on one would likely
+    affect both, but pinning each
     rules out per-subclass shadowing of ``_frontmatter_updates``.
     """
     from everos.config import load_settings
@@ -308,24 +265,6 @@ async def test_atomic_fact_frontmatter_last_appended_at_carries_display_tz_offse
     )
     af_fm = (await MarkdownReader.read(af_path)).frontmatter
     assert af_fm["last_appended_at"].endswith("+08:00"), af_fm["last_appended_at"]
-
-    # Foresight
-    fs_writer = ForesightWriter(memory_root)
-    await fs_writer.append_entry(
-        "u1",
-        inline={
-            "owner_id": "u1",
-            "session_id": "s1",
-            "timestamp": "2026-05-15T10:00:00+00:00",
-            "scope": "today",
-            "horizon_days": 1,
-        },
-        sections={"Foresight": "x"},
-        date=today,
-    )
-    fs_path = memory_root.users_dir() / "u1" / ".foresights" / "foresight-2026-05-15.md"
-    fs_fm = (await MarkdownReader.read(fs_path)).frontmatter
-    assert fs_fm["last_appended_at"].endswith("+08:00"), fs_fm["last_appended_at"]
 
     # AgentCase
     ac_writer = AgentCaseWriter(memory_root)

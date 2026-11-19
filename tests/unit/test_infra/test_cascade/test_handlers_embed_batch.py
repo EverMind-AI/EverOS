@@ -20,7 +20,6 @@ from everos.component.tokenizer import Tokenizer
 from everos.infra.cascade._projections import (
     AgentCaseHandler,
     AtomicFactHandler,
-    ForesightHandler,
     HandlerDeps,
 )
 from everos.infra.cascade._projections._daily_log_base import ParsedEntry
@@ -123,11 +122,6 @@ def _entry(sections: dict[str, str]) -> ParsedEntry:
     ("handler_cls", "sections", "expected_texts"),
     [
         (AtomicFactHandler, {"Fact": " the fact "}, ("the fact",)),
-        (
-            ForesightHandler,
-            {"Foresight": "will book lunch", "Evidence": "said so"},
-            ("will book lunch",),
-        ),
         (
             AgentCaseHandler,
             {"TaskIntent": "scan contract", "Approach": "read pages"},

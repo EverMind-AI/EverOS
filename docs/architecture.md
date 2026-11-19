@@ -107,7 +107,7 @@ interpret storage layout.
 | Module | Contents |
 |---|---|
 | `ports/query.py` | `Filter` (backend-neutral predicate tree) and the value objects `Scope`, `SessionKey`, `Page`, `PageResult`, `MemoryRef`, `Stored`, `SearchHit`, `ScoredKnowledgeTopic` |
-| `ports/stores.py` | write side, the truth and system state: `EpisodeStore`, `AtomicFactStore`, `ForesightStore`, `ProfileStore`, `AgentCaseStore`, `AgentSkillStore`, `SessionBufferStore`, `MemcellStore`, `ClusterStore`, `MemorizeInboxStore`, `ReflectionReportStore`, and for the project-level knowledge base `KnowledgeStore` (markdown documents + taxonomy) and `KnowledgeCatalog` (the cascade's document / topic records) |
+| `ports/stores.py` | write side, the truth and system state: `EpisodeStore`, `AtomicFactStore`, `ProfileStore`, `AgentCaseStore`, `AgentSkillStore`, `SessionBufferStore`, `MemcellStore`, `ClusterStore`, `MemorizeInboxStore`, `ReflectionReportStore`, and for the project-level knowledge base `KnowledgeStore` (markdown documents + taxonomy) and `KnowledgeCatalog` (the cascade's document / topic records) |
 | `ports/indexes.py` | read side, the rebuildable derived indexes: `EpisodeIndex`, `AtomicFactIndex`, `AgentCaseIndex`, `AgentSkillIndex`, `ProfileIndex`, `KnowledgeTopicIndex` |
 | `ports/events.py` | `Event` (frozen, JSON round-trippable, identified by `topic()`) and the scheduler ticks `CronTick` / `IdleTick` / `ManualTick` |
 | `ports/strategy.py` | the triggers `Immediate` / `Cron` / `Idle`, the `Counter` gate, and `StrategySpec` — one strategy's name, function, trigger, `emits`, `applies_to`, gate, retries and enabled flag |
@@ -426,7 +426,7 @@ index backend:
 - Entry-level diff (added / changed / removed)
 - Per-entry index upsert / delete (text + vector columns update together)
 - LSN-based crash recovery via the SQLite `md_change_state` queue
-- Handlers for all eight business kinds: episode, atomic_fact, foresight,
+- Handlers for all seven business kinds: episode, atomic_fact,
   user_profile, agent_case, agent_skill, knowledge_document, knowledge_topic
 
 ### `memory/custom_instructions/`
@@ -460,7 +460,7 @@ function; `STRATEGY_SPECS` collects
 them. Strategy names are stable — run records and `ome.toml` overrides key on
 them.
 
-- `extract_atomic_facts` / `summarize_episode` / `extract_foresight` /
+- `extract_atomic_facts` / `summarize_episode` /
   `split_episode_by_owner` / `extract_user_profile` — user pipeline.
   `EpisodeExtracted` is one event per memcell listing every owner's copy:
   facts, the summary and clustering run once on it and fan out over the
@@ -508,8 +508,7 @@ sound dependency structure.
     ├── users/<user_id>/
     │   ├── user.md                                     # profile (single-file rewrite)
     │   ├── episodes/episode-<YYYY-MM-DD>.md            # daily-log append
-    │   ├── .atomic_facts/atomic_fact-<YYYY-MM-DD>.md   # hidden, framework-derived
-    │   └── .foresights/foresight-<YYYY-MM-DD>.md       # hidden, framework-derived
+    │   └── .atomic_facts/atomic_fact-<YYYY-MM-DD>.md   # hidden, framework-derived
     ├── agents/<agent_id>/
     │   ├── .cases/agent_case-<YYYY-MM-DD>.md           # hidden, framework-derived
     │   └── skills/skill_<name>/SKILL.md                # named-dir
@@ -530,7 +529,7 @@ optional `everalgo-parser` extra), imported under the `everalgo` namespace,
 providing memory algorithms, parsing, and their data contracts:
 
 - `everalgo.parser` — multi-modal parsing (optional `[multimodal]` extra)
-- `everalgo.user_memory` — ConvMemCell / Episode / Foresight / AtomicFact / Profile extractors
+- `everalgo.user_memory` — ConvMemCell / Episode / AtomicFact / Profile extractors
 - `everalgo.agent_memory` — AgentMemCell / Case / Skill extractors
 - `everalgo.boundary` — boundary detection (conversation -> MemCells)
 - `everalgo.rank` — fusion + rerank

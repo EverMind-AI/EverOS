@@ -36,6 +36,8 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
     SecretStr,
     field_validator,
     model_validator,
@@ -172,7 +174,6 @@ class LLMTask(StrEnum):
     EPISODE = "episode"
     SUMMARY = "summary"
     ATOMIC_FACT = "atomic_fact"
-    FORESIGHT = "foresight"
     PROFILE = "profile"
     REFLECTION = "reflection"
     AGENT_CASE = "agent_case"
@@ -363,6 +364,16 @@ class LLMTaskSettings(BaseModel):
         return _blank_to_none(value)
 
 
+RETIRED_LLM_TASKS: Final[Mapping[str, str]] = MappingProxyType(
+    {"foresight": "foresight extraction was removed after 1.7.0"}
+)
+"""``[llm.<task>]`` sections of tasks that no longer exist, and why.
+
+Users' configs still carry them: such a section is dropped with a startup
+warning (``llm.task.retired``) instead of failing the load like an unknown one.
+"""
+
+
 class LLMSettings(LLMClientSettings):
     """``[llm]``: the LLM every task uses, and an optional section per task.
 
@@ -370,7 +381,9 @@ class LLMSettings(LLMClientSettings):
     (:class:`LLMTaskSettings`) overrides any field for that one task; what it
     leaves unset comes from ``[llm]``, except the decider fields listed in
     :data:`LLM_TASK_DEFAULTS`. The section names are :class:`LLMTask`'s values;
-    an unknown section or field fails the load, naming the valid ones.
+    an unknown section or field fails the load, naming the valid ones, except a
+    retired task's (:data:`RETIRED_LLM_TASKS`), which is dropped and reported in
+    :attr:`retired_tasks`.
 
     Env binding (via parent ``Settings``):
         EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL ... one
@@ -387,8 +400,6 @@ class LLMSettings(LLMClientSettings):
     (the ``summarize_episode`` strategy) over the placeholder it is stored with."""
     atomic_fact: LLMTaskSettings = LLMTaskSettings()
     """Atomic-fact extraction."""
-    foresight: LLMTaskSettings = LLMTaskSettings()
-    """Foresight extraction."""
     profile: LLMTaskSettings = LLMTaskSettings()
     """User-profile extraction."""
     reflection: LLMTaskSettings = LLMTaskSettings()
@@ -405,15 +416,30 @@ class LLMSettings(LLMClientSettings):
     """The multi-round retrieval decider (``llm_multiround``). Replaces the LLM
     fields of ``[decider]``, which are still read (see :class:`DeciderSettings`)."""
 
-    @model_validator(mode="before")
+    _retired_tasks: tuple[str, ...] = PrivateAttr(default=())
+
+    @property
+    def retired_tasks(self) -> tuple[str, ...]:
+        """Retired task sections this load dropped, for the startup warning."""
+        return self._retired_tasks
+
+    @model_validator(mode="wrap")
     @classmethod
-    def _known_keys_only(cls, data: object) -> object:
+    def _known_keys_only(
+        cls, data: object, handler: ModelWrapValidatorHandler[LLMSettings]
+    ) -> LLMSettings:
+        if not isinstance(data, Mapping):
+            return handler(data)
+        retired = tuple(sorted(str(k) for k in data if k in RETIRED_LLM_TASKS))
+        data = {k: v for k, v in data.items() if k not in RETIRED_LLM_TASKS}
         _reject_unknown_keys(
             data,
             "llm",
             {"fields": LLMClientSettings.model_fields, "tasks": list(LLMTask)},
         )
-        return data
+        settings = handler(data)
+        settings._retired_tasks = retired
+        return settings
 
 
 class DeciderSettings(BaseModel):

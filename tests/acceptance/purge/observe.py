@@ -41,7 +41,6 @@ SQLITE_TABLES = (*SCOPED_TABLES, "cluster_member")
 INDEX_TABLES = (
     "episode",
     "atomic_fact",
-    "foresight",
     "user_profile",
     "agent_case",
     "agent_skill",
@@ -50,7 +49,6 @@ INDEX_TABLES = (
 MD_KINDS = (
     "episode",
     "atomic_fact",
-    "foresight",
     "agent_case",
     "user_profile",
     "agent_skill",

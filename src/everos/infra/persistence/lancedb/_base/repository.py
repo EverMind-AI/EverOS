@@ -1057,7 +1057,7 @@ class LanceRepoBase[T: IndexRecord]:
 class LanceDailyLogRepoBase[T: IndexRecord](LanceRepoBase[T]):
     """LanceRepoBase + queries unique to daily-log tables.
 
-    Daily-log tables (``episode`` / ``atomic_fact`` / ``foresight`` /
+    Daily-log tables (``episode`` / ``atomic_fact`` /
     ``agent_case``) share a fixed schema slice: ``entry_id`` (md seq
     id), ``session_id`` (conversation scope), and ``parent_type`` /
     ``parent_id`` (record lineage). The queries below compose those

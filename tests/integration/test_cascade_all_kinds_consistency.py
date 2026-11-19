@@ -1,4 +1,4 @@
-"""Strict md <-> lancedb consistency across all 4 daily-log kinds.
+"""Strict md <-> lancedb consistency across all 3 daily-log kinds.
 
 For each registered daily-log kind, seed N entries via the kind's
 writer, wait for the cascade to drain, then assert exact equality
@@ -37,13 +37,11 @@ from everos.infra.persistence.markdown import (
     AgentCaseWriter,
     AtomicFactWriter,
     EpisodeWriter,
-    ForesightWriter,
     MarkdownReader,
 )
 from everos.infra.persistence.records.agent_case import AgentCase
 from everos.infra.persistence.records.atomic_fact import AtomicFact
 from everos.infra.persistence.records.episode import Episode
-from everos.infra.persistence.records.foresight import Foresight
 from tests._consistency_assertions import _daily_log_sha_for_entry
 from tests.fakes.storage import Storage
 
@@ -119,19 +117,6 @@ def _ep_item(scope_id: str, j: int):
     )
 
 
-def _fs_item(scope_id: str, j: int):
-    return (
-        {
-            "owner_id": scope_id,
-            "session_id": f"s_{j}",
-            "timestamp": "2026-05-19T07:04:26+00:00",
-            "parent_id": f"mc_{j}",
-            "sender_ids": [scope_id],
-        },
-        {"Foresight": f"foresight body {j}"},
-    )
-
-
 def _ac_item(scope_id: str, j: int):
     return (
         {
@@ -167,15 +152,6 @@ _KIND_CASES: list[_DailyLogKindCase] = [
         writer_factory=EpisodeWriter,
         table_cls=Episode,
         build_item=_ep_item,
-    ),
-    _DailyLogKindCase(
-        name="foresight",
-        scope="users",
-        dir_name=".foresights",
-        file_prefix="foresight",
-        writer_factory=ForesightWriter,
-        table_cls=Foresight,
-        build_item=_fs_item,
     ),
     _DailyLogKindCase(
         name="agent_case",

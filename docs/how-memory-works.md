@@ -59,10 +59,8 @@ visually distinct from a user-named one).
 │       │       ├── user.md                 single-file   (profile)
 │       │       ├── episodes/
 │       │       │   └── episode-<YYYY-MM-DD>.md      daily-log append
-│       │       ├── .atomic_facts/                   daily-log (hidden)
-│       │       │   └── atomic_fact-<YYYY-MM-DD>.md
-│       │       └── .foresights/                     daily-log (hidden)
-│       │           └── foresight-<YYYY-MM-DD>.md
+│       │       └── .atomic_facts/                   daily-log (hidden)
+│       │           └── atomic_fact-<YYYY-MM-DD>.md
 │       ├── agents/
 │       │   └── <agent_id>/
 │       │       ├── .cases/                          daily-log (hidden)
@@ -123,7 +121,7 @@ index catches up asynchronously.
                                      ▼                              ▼
                           ┌───────────────────  Offline Memory Engine (OME)  ───────────────────┐
                           │  async strategies write derived .md:                                 │
-                          │  atomic_facts · summary · foresight · profile · agent cases · skills │
+                          │  atomic_facts · summary · profile · agent cases · skills             │
                           └───────────────────────────────┬──────────────────────────────────────┘
                                                            ▼
                                             cascade daemon watches the .md tree
@@ -156,7 +154,7 @@ index catches up asynchronously.
   sender of the memcell, each copy with a placeholder summary (the
   episode's opening, cut and closed with `…`) that the OME replaces with
   a model-written preview shortly after.
-- Everything else (atomic facts, foresight, profile, agent cases/skills)
+- Everything else (atomic facts, profile, agent cases/skills)
   is produced **asynchronously** by the OME — see
   [the OME section](#the-offline-memory-engine-ome).
 - The **cascade daemon** turns every `.md` write into LanceDB rows so the
@@ -171,7 +169,6 @@ each picking one of three on-disk patterns:
 |---|---|---|---|---|
 | **episode** | user | `episodes/episode-<date>.md` | daily-log | extraction (sync) |
 | **atomic_fact** | user | `.atomic_facts/atomic_fact-<date>.md` (hidden) | daily-log | OME |
-| **foresight** | user | `.foresights/foresight-<date>.md` (hidden) | daily-log | OME |
 | **profile** | user | `user.md` | single-file rewrite | OME |
 | **agent_case** | agent | `.cases/agent_case-<date>.md` (hidden) | daily-log | OME |
 | **agent_skill** | agent | `skills/skill_<name>/SKILL.md` | skill-named dir | OME (clustering) |
@@ -225,7 +222,6 @@ episode runs once and is shared by its owners:
   once and written under every owner of the episode
 - `summarize_episode` — the episode's display summary, written in the
   episode's language over the placeholder it was stored with
-- `extract_foresight` — anticipatory notes
 - `split_episode_by_owner` — hands each owner's copy of an episode to the
   profile as an event of its own (no model call)
 - `extract_user_profile` — the aggregated `user.md`, one run per owner
@@ -248,7 +244,7 @@ Strategies are configurable without a code change via **`ome.toml`** at the
 memory root (hot-reloaded within ~2 s). Example — turn two off:
 
 ```toml
-[strategies.extract_foresight]
+[strategies.summarize_episode]
 enabled = false
 
 [strategies.extract_user_profile]

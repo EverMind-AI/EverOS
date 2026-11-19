@@ -40,7 +40,7 @@ _TRASH_PREFIX = "purge-"
 _OWNER_TYPES = {"users": "user", "agents": "agent"}
 _TAXONOMY = ".taxonomy.md"
 _INDEX = "index.md"
-_DAILY_KINDS = ("episode", "atomic_fact", "foresight", "agent_case")
+_DAILY_KINDS = ("episode", "atomic_fact", "agent_case")
 
 
 def _children(path: Path) -> list[Path]:

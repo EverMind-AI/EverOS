@@ -49,6 +49,7 @@ _STARTED = [
     "purge.restore",
     "memory.finish_interrupted_deletions",
     "index.start",
+    "index.retire",  # before the cascade scans the retired kinds' files
     "ops.start",
     "ome.start",
     "memory.start",

@@ -58,7 +58,7 @@ from everos.infra.persistence.sqlite import MdChangeState, MdChangeStateRepo
 
 from .._fence import DeleteFence
 from .._projections import Handler
-from ..models import ChangeType
+from ..models import RETIRED_KINDS, ChangeType
 from ._health import CascadeWorkerHealth
 from ._maintenance import IndexMaintainer
 from ._supervision import LoopSupervisor, request_process_exit
@@ -390,6 +390,14 @@ class CascadeWorker:
         step is gated on actual writes happening this batch.
         """
         handler = self._handlers.get(row.kind)
+        if handler is None and row.kind in RETIRED_KINDS:
+            await self._write_terminal(
+                self._ledger.mark_done,
+                row.md_path,
+                kind=row.kind,
+                change_type="deleted",
+            )
+            return None
         if handler is None:
             await self._write_terminal(
                 self._ledger.mark_failed,

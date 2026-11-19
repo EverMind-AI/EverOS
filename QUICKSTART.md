@@ -220,8 +220,7 @@ Your extracted memory is a normal Markdown file under the memory root:
 │       ├── users/alice/
 │       │   ├── user.md
 │       │   ├── episodes/
-│       │   ├── .atomic_facts/
-│       │   └── .foresights/
+│       │   └── .atomic_facts/
 │       ├── agents/<agent_id>/
 │       │   ├── agent.md
 │       │   ├── .cases/

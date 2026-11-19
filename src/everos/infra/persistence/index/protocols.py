@@ -233,6 +233,11 @@ class IndexBackend(Protocol):
 
     async def drop_business_tables(self) -> list[str]: ...
 
+    async def drop_retired_tables(self, names: Sequence[str]) -> list[str]:
+        """Drop the named tables of kinds a release removed, where present;
+        return the names dropped."""
+        ...
+
     async def read_embedding_model(self) -> str | None:
         """Model this index's vectors were built with, ``None`` if unattested.
 

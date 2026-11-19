@@ -8,9 +8,19 @@ unit-test without an event loop or IO mocks.
 from __future__ import annotations
 
 import dataclasses
-from typing import Literal
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Final, Literal
 
 ChangeType = Literal["added", "modified", "deleted"]
+
+RETIRED_KINDS: Final[Mapping[str, str]] = MappingProxyType({"foresight": ".foresights"})
+"""Kinds a later release removed, each with its daily-log folder name.
+
+Startup (``CascadeAdmin.retire_removed_kinds``) drops their index table and
+their folders. Until then, and for a row whose file is gone, the worker settles
+such a ``md_change_state`` row as a done deletion (which reconcile skips)
+instead of failing it on every scan."""
 
 
 @dataclasses.dataclass(frozen=True)

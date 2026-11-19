@@ -17,19 +17,16 @@ from everos.infra.persistence.markdown import (
     MarkdownAgentCaseStore,
     MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
-    MarkdownForesightStore,
 )
 from everos.memory.ports import (
     AgentCaseStore,
     AtomicFactStore,
     EpisodeStore,
-    ForesightStore,
 )
 from tests.fakes.stores import (
     InMemoryAgentCaseStore,
     InMemoryAtomicFactStore,
     InMemoryEpisodeStore,
-    InMemoryForesightStore,
 )
 
 _WRITES: list[tuple[type, str]] = [
@@ -38,13 +35,11 @@ _WRITES: list[tuple[type, str]] = [
     (EpisodeStore, "deprecate"),
     (AtomicFactStore, "append_many"),
     (AtomicFactStore, "deprecate"),
-    (ForesightStore, "append_many"),
     (AgentCaseStore, "append"),
 ]
 _ADAPTERS = {
     EpisodeStore: (MarkdownEpisodeStore, InMemoryEpisodeStore),
     AtomicFactStore: (MarkdownAtomicFactStore, InMemoryAtomicFactStore),
-    ForesightStore: (MarkdownForesightStore, InMemoryForesightStore),
     AgentCaseStore: (MarkdownAgentCaseStore, InMemoryAgentCaseStore),
 }
 

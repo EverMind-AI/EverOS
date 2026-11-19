@@ -22,7 +22,6 @@ from everos.infra.persistence.records import (
     AgentSkill,
     AtomicFact,
     Episode,
-    Foresight,
     KnowledgeTopic,
 )
 from tests.fakes import TEST_DIM, arrow_schema
@@ -31,7 +30,6 @@ _VECTOR_COLUMNS = [
     (Episode, "vector"),
     (Episode, "subject_vector"),
     (AtomicFact, "vector"),
-    (Foresight, "vector"),
     (AgentCase, "vector"),
     (AgentSkill, "vector"),
     (KnowledgeTopic, "vector"),

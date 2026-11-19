@@ -1,4 +1,4 @@
-"""Per-kind ``_build_row`` mapping for the 3 non-Episode daily-log handlers.
+"""Per-kind ``_build_row`` mapping for the 2 non-Episode daily-log handlers.
 
 The diff loop (read → sha256 → 3-way diff → upsert/delete) lives on
 :class:`BaseDailyLogHandler` and is exercised by
@@ -8,7 +8,7 @@ the right LanceDB columns get populated?
 
 Each kind gets one happy-path test (all fields present) plus a
 focused error-path test (missing required inline field). Sharing one
-file avoids 3 nearly-identical fixture stacks.
+file avoids 2 nearly-identical fixture stacks.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from everos.component.tokenizer import Tokenizer
 from everos.infra.cascade._projections import (
     AgentCaseHandler,
     AtomicFactHandler,
-    ForesightHandler,
     HandlerDeps,
 )
 from everos.infra.cascade._projections._daily_log_base import ParsedEntry
@@ -139,67 +138,6 @@ async def test_atomic_fact_missing_timestamp_raises(tmp_path) -> None:  # type: 
                 sections={"Fact": "x"},
             ),
         )
-
-
-# ── Foresight ────────────────────────────────────────────────────────────
-
-
-async def test_foresight_build_row_with_evidence(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    handler = ForesightHandler(_deps(tmp_path))
-    row = await _embed_one(
-        handler,
-        owner_id="u1",
-        owner_type="user",
-        md_path="users/u1/.foresights/foresight-2026-05-14.md",
-        entry=_entry(
-            "fs_20260514_0001",
-            inline={
-                "owner_id": "u1",
-                "session_id": "s1",
-                "timestamp": "2026-05-14T10:00:00+00:00",
-                "parent_id": "mc_1",
-                "start_time": "2026-05-14T11:00:00+00:00",
-                "end_time": "2026-05-14T13:00:00+00:00",
-                "duration_days": "2",
-            },
-            sections={
-                "Foresight": "user will book lunch",
-                "Evidence": "calendar invite mentions 12pm",
-            },
-        ),
-    )
-    assert row.foresight == "user will book lunch"
-    assert row.foresight_tokens == "user will book lunch"
-    assert row.evidence == "calendar invite mentions 12pm"
-    assert row.evidence_tokens == "calendar invite mentions 12pm"
-    assert row.start_time == _dt.datetime(2026, 5, 14, 11, 0, tzinfo=_dt.UTC)
-    assert row.end_time == _dt.datetime(2026, 5, 14, 13, 0, tzinfo=_dt.UTC)
-    assert row.duration_days == 2
-
-
-async def test_foresight_optional_evidence_left_none(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    handler = ForesightHandler(_deps(tmp_path))
-    row = await _embed_one(
-        handler,
-        owner_id="u1",
-        owner_type="user",
-        md_path="x.md",
-        entry=_entry(
-            "fs_20260514_0001",
-            inline={
-                "owner_id": "u1",
-                "session_id": "s1",
-                "timestamp": "2026-05-14T10:00:00+00:00",
-                "parent_id": "mc_1",
-            },
-            sections={"Foresight": "user will book lunch"},
-        ),
-    )
-    assert row.evidence is None
-    assert row.evidence_tokens is None
-    assert row.start_time is None
-    assert row.end_time is None
-    assert row.duration_days is None
 
 
 # ── AgentCase ────────────────────────────────────────────────────────────

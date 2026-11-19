@@ -9,6 +9,7 @@ only on that branch, so ``pymilvus`` stays an optional extra.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from typing import Any, ClassVar, cast
 
 from everos.core.observability.logging import get_logger
@@ -20,12 +21,12 @@ from everos.infra.persistence.records import (
 from .milvus_manager import MilvusConfigurationError as MilvusConfigurationError
 from .milvus_manager import MilvusConnection as MilvusConnection
 from .milvus_manager import MilvusSchemaMismatchError as MilvusSchemaMismatchError
+from .milvus_manager import collection_name
 from .repos import (
     _AgentCaseRepo,
     _AgentSkillRepo,
     _AtomicFactRepo,
     _EpisodeRepo,
-    _ForesightRepo,
     _KnowledgeTopicRepo,
     _UserProfileRepo,
 )
@@ -54,7 +55,6 @@ class MilvusIndexBackend:
         self.repositories = IndexRepositories(
             episode=self._episode,
             atomic_fact=_AtomicFactRepo(connection, dim=dim),
-            foresight=_ForesightRepo(connection, dim=dim),
             agent_case=_AgentCaseRepo(connection, dim=dim),
             agent_skill=_AgentSkillRepo(connection, dim=dim),
             user_profile=_UserProfileRepo(connection, dim=dim),
@@ -104,6 +104,17 @@ class MilvusIndexBackend:
                     )
                 dropped.append(name)
         MilvusRepoBase._reset_collection_cache()
+        return dropped
+
+    async def drop_retired_tables(self, names: Sequence[str]) -> list[str]:
+        """Drop the collections of the named retired tables where present."""
+        client = await self._connection.client()
+        dropped: list[str] = []
+        for table in names:
+            name = collection_name(table, self._connection.settings)
+            if await asyncio.to_thread(client.has_collection, name):
+                await asyncio.to_thread(client.drop_collection, name)
+                dropped.append(table)
         return dropped
 
     async def read_embedding_model(self) -> str | None:

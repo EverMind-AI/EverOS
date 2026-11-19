@@ -237,7 +237,7 @@ def test_t24_1_a_unreachable_index_still_200_and_caught_up(
         gate.unblock()
 
     assert resp.status_code == 200, resp.text
-    assert took <= 15 * 3 + 1, took  # episode, atomic_fact, foresight tables
+    assert took <= 15 * 2 + 1, took  # episode, atomic_fact tables
     deadline = time.monotonic() + 60
     left = ids
     while time.monotonic() < deadline:

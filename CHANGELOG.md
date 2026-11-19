@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   episode's display summary (below); `split_episode_by_owner` hands each
   owner's copy of an episode to the profile as an `EpisodeExtractedForOwner`
   event of its own, with no model call.
+- **`POST /memory/device/add`: one hardware device, many speakers.** Each
+  utterance names the speaker the device recognized; the route builds the
+  `/memory/add` request with the sender `<device_id>@<slot>`, so every person
+  gets their own episodes and profile, read, searched and deleted by that id
+  as `user_id` on the existing routes. Utterances nobody was identified for
+  are filed under the device id; a speaker with `consented: false` is not
+  written at all (one decline in a batch drops all of that slot's lines); a
+  speaker sent without `display_name` keeps the name last stored for them,
+  and only one never named is labelled by the slot (which starts with a
+  letter, holds a digit or `_`, and has no `.`). The ownership rules live in
+  `everos.memory.device`, run by `MemoryService.add_device`. `async_mode` queues the batch as on `/memory/add` (`202`,
+  with the same `owners`). Existing request bodies are unchanged. See
+  `docs/device-assistant.md` and `docs/api.md`.
 
 ### Changed
 
@@ -80,10 +93,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the ingest identity, so a store ingested with an earlier config is not
   reused.
 
+### Removed
+
+- **Foresight.** The `extract_foresight` strategy (off by default since
+  1.2.3; no route ever returned its output), the `foresight` daily log,
+  index table and cascade kind, `[llm.foresight]`, and the
+  `UserPipelineStarted` event it was the only subscriber of. A queued
+  foresight run left by an earlier release is dropped with an
+  `ome_run_dropped_unknown_strategy` warning. On its first start, a store that ran
+  foresight has its `foresight` index table / collection and every
+  `.foresights/` folder removed (logged as `retired_kind_data_removed`):
+  nothing reads them, and purge and deletion no longer reach them.
+
 ### Upgrade
 
 | If you | Then |
 |---|---|
+| enabled `extract_foresight` in `ome.toml` | remove the block; it is ignored with a `config_override_unknown_strategy` warning |
+| set `[llm.foresight]` or `EVEROS_LLM__FORESIGHT__*` | remove it: it is ignored, and startup logs an `llm.task.retired` warning |
+| ran foresight and want to keep its output | copy every `users/*/.foresights/` folder out before upgrading: the first start removes them and the `foresight` index table |
+| subscribe to `UserPipelineStarted` in your own strategy | subscribe to `EpisodeExtracted` (one per memcell, after the episode is written; it carries `memcell_id`, not the `MemCell`) |
 | disabled `extract_user_profile` in `ome.toml` | also disable `split_episode_by_owner`: it only feeds the profile |
 | want no summary call at all | disable `summarize_episode`; episodes keep their placeholder summary |
 | read `owner_id`, `episode_entry_id` or `owner_name` from `EpisodeExtracted` in your own strategy | read `copies` (one entry per owner), or subscribe to `EpisodeExtractedForOwner` |
@@ -135,8 +164,8 @@ See Upgrade below.
   so a store indexed with another one is not resumed. Changing `name` on an
   existing store requires `everos cascade rebuild`.
 - **Per-task LLM sections, `[llm.<task>]`.** `[llm]` alone still runs
-  everything; any of twelve tasks -- `boundary`, `episode`, `summary`,
-  `atomic_fact`, `foresight`, `profile`, `reflection`, `agent_case`,
+  everything; any of eleven tasks -- `boundary`, `episode`, `summary`,
+  `atomic_fact`, `profile`, `reflection`, `agent_case`,
   `agent_skill`, `knowledge`, `search`, `decider` -- can override any `[llm]`
   field for itself (`EVEROS_LLM__<TASK>__<FIELD>` in the environment). Each
   field is inherited from `[llm]` on its own; `extra` is replaced whole, never
@@ -247,7 +276,7 @@ See Upgrade below.
   written as before. A cell now costs two extraction calls instead of one.
 - **`[memory] timezone` now also sets the zone the model sees message times
   in.** Boundary detection, episode and summary extraction, atomic facts,
-  foresight, the profile and agentic search show every time in that zone with
+  the profile and agentic search show every time in that zone with
   its offset (`2024-03-11 00:00 UTC+08:00 (Monday)`), so relative dates resolve
   against the user's own calendar. With the default `UTC` the requests are
   unchanged.

@@ -54,7 +54,6 @@ VECTOR_PROJECTIONS: dict[str, VectorProjection] = {
     for spec in (
         VectorProjection("episode", lambda r: r["episode"]),
         VectorProjection("atomic_fact", lambda r: r["fact"]),
-        VectorProjection("foresight", lambda r: r["foresight"]),
         VectorProjection("agent_case", lambda r: r["task_intent"]),
         VectorProjection("agent_skill", _skill_text),
         VectorProjection("knowledge_topic", lambda r: r["summary"]),
