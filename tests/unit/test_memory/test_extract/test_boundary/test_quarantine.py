@@ -43,6 +43,7 @@ from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
 )
 from everos.memory.extract.boundary import BoundaryDetection, BoundaryOutcome
 from everos.memory.extract.boundary.quarantine import POISON_CALLS
+from everos.memory.extract.ingest import message_ids
 from everos.memory.extract.ingest import service as ingest
 from everos.memory.extract.llm_retry import OUTPUT_ATTEMPTS
 from tests.fakes import (
@@ -119,17 +120,8 @@ class _Stage:
 
     async def add_orphan_tool_row(self, session: str, start: int) -> BoundaryOutcome:
         """An agent-mode add whose tool row answers no tool call."""
-        payload = _payload(session, start)
-        payload["messages"].append(
-            {
-                "content": "tool output",
-                "timestamp": BASE_TS + start,
-                "sender_id": "tool",
-                "role": "tool",
-            }
-        )
         ingested = await ingest.process(
-            payload,
+            _orphan_payload(session, start),
             multimodal_llm=None,
             raw_file_builder=unused_raw_file_builder,
             sender_names=InMemorySenderNameStore(),
@@ -143,6 +135,24 @@ class _Stage:
             ]
             for track in ("memorize", "quarantine")
         }
+
+
+def _orphan_payload(session: str, start: int) -> dict[str, Any]:
+    payload = _payload(session, start)
+    payload["messages"].append(
+        {
+            "content": "tool output",
+            "timestamp": BASE_TS + start,
+            "sender_id": "tool",
+            "role": "tool",
+        }
+    )
+    return payload
+
+
+def _ids(*payloads: dict[str, Any]) -> list[str]:
+    """The message ids ingest gives these payloads' messages."""
+    return [i for p in payloads for i in message_ids(p["session_id"], p["messages"])]
 
 
 def _payload(session: str, start: int) -> dict[str, Any]:
@@ -175,15 +185,14 @@ async def test_third_consecutive_unusable_call_quarantines_the_buffer() -> None:
         assert tracks["memorize"] == [], "the session starts over"
         # The buffered poison and the quarantining call's own message are
         # kept; the two earlier calls' messages were never persisted.
-        assert sorted(tracks["quarantine"]) == [
-            "m_s1_1700000000001_000",
-            "m_s1_1700000000004_000",
-        ]
+        assert sorted(tracks["quarantine"]) == sorted(
+            _ids(_payload("s1", 1), _payload("s1", 4))
+        )
         assert stage.llm.call_count == OUTPUT_ATTEMPTS * POISON_CALLS
         # The session goes on: a healthy flush cuts a cell from an empty buffer.
         outcome = await stage.add("s1", 5, final=True)
         assert outcome.status == "extracted"
-        assert outcome.per_cell_message_ids == [["m_s1_1700000000005_000"]]
+        assert outcome.per_cell_message_ids == [_ids(_payload("s1", 5))]
         assert (await stage.tracks("s1"))["memorize"] == []
         assert len((await stage.tracks("s1"))["quarantine"]) == 2
 
@@ -235,7 +244,5 @@ async def test_an_orphan_tool_row_counts_without_reaching_the_model() -> None:
         assert stage.llm.call_count == 0, "never retried, never sent"
         tracks = await stage.tracks("s1")
         assert tracks["memorize"] == []
-        assert sorted(tracks["quarantine"]) == [
-            "m_s1_1700000000003_000",
-            "m_s1_1700000000003_001",
-        ]
+        # One timestamp, two rows: request order is kept in the id (_000, _001).
+        assert sorted(tracks["quarantine"]) == sorted(_ids(_orphan_payload("s1", 3)))

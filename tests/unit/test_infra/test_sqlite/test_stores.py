@@ -218,6 +218,23 @@ async def test_cut_records_the_cells_and_buffers_only_the_tail(
     assert status[1] is not None
 
 
+async def test_already_cut_names_what_this_sessions_memcells_hold(
+    stores: _Stores,
+) -> None:
+    m1, m2, m3 = _message("m1", 1), _message("m2", 2), _message("m3", 3)
+    other = SessionKey(app_id="app", project_id="proj", session_id="s2")
+    await stores.buffer.cut(
+        _SESSION, [_record("mc_1", m1, m2)], tail=[m3], last_memcell_ts=m2.timestamp
+    )
+    await stores.buffer.cut(
+        other, [_record("mc_2", m3)], tail=[], last_memcell_ts=m3.timestamp
+    )
+
+    assert await stores.buffer.already_cut(_SESSION, ["m1", "m3", "m9"]) == {"m1"}
+    assert await stores.buffer.already_cut(other, ["m1", "m3"]) == {"m3"}
+    assert await stores.buffer.already_cut(_SESSION, []) == set()
+
+
 async def test_keep_leaves_the_last_memcell_stamp_alone(stores: _Stores) -> None:
     m1, m2 = _message("m1", 1), _message("m2", 2)
     await stores.buffer.keep(_SESSION, [m1], last_message_ts=m1.timestamp)

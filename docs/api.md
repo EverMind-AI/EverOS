@@ -606,6 +606,18 @@ correlation.
   LLM ran extraction and the writers persisted at least one memory
   cell. The buffer is empty after the call returns.
 
+**Resending a batch.** A client that retries `/add` after a timeout may
+resend messages the first call already processed. A message's identity is
+its session, its `timestamp`, its place among the request's messages with
+that same `timestamp`, and what was said by whom (`sender_id`, `role`,
+`content`, `tool_call_id`, `tool_calls`); `sender_name` is not part of it.
+A resent message that is still buffered, or already part of a memory cell
+of the session, is dropped, so a retry (whole, split or regrouped) never
+writes it twice and answers `200` (`"accumulated"` when it cut nothing
+new). Two different messages with one `timestamp` are both kept. After the
+session's memories are deleted (`/memory/delete` with its `session_id`), a
+resend is memorized again.
+
 `202 Accepted` — only with `async_mode`, or when the session already has
 queued batches (see [Asynchronous mode](#asynchronous-mode)) — returns a
 SuccessEnvelope wrapping:

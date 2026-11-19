@@ -35,7 +35,7 @@ from everos.memory.extract.parser import (
     require_multimodal,
 )
 
-from .id_gen import gen_message_id
+from .id_gen import message_ids
 from .multimodal import coerce_items, derive_text
 from .sender_names import resolve_sender_names, sender_name_of
 
@@ -75,7 +75,8 @@ async def process(
 
     canonical: list[CanonicalMessage] = []
     non_text_total = 0
-    for idx, m in enumerate(raw_messages):
+    ids = message_ids(session_id, raw_messages)
+    for m, message_id in zip(raw_messages, ids, strict=True):
         content_items = coerce_items(m["content"])
         if has_unparsed_multimodal(content_items):
             require_multimodal()
@@ -88,9 +89,7 @@ async def process(
         text, non_text = derive_text(content_items)
         non_text_total += non_text
 
-        ts_ms: int = int(m["timestamp"])
-        message_id = gen_message_id(session_id, ts_ms, idx)
-        ts = from_timestamp(ts_ms)
+        ts = from_timestamp(int(m["timestamp"]))
 
         canonical.append(
             CanonicalMessage(

@@ -36,6 +36,7 @@ from everalgo.llm import LLMOutputError
 from everalgo.types import ChatMessage, ConversationItem, MemCell
 
 from everos.config import BoundaryDetectionSettings
+from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import from_timestamp
 from everos.memory.custom_instructions import CustomInstructions
@@ -53,6 +54,8 @@ from .messages import (
     unique_senders,
 )
 from .quarantine import SessionQuarantine
+
+logger = get_logger(__name__)
 
 type Status = Literal["accumulated", "extracted", "skipped"]
 
@@ -158,7 +161,11 @@ class BoundaryDetection:
         if not fresh:
             return _empty_outcome("skipped", message_count=0)
         session = _session_of(ingested)
-        merged = merge_dedupe_sort(await self._session_buffer.list(session), fresh)
+        buffered = await self._session_buffer.list(session)
+        fresh = await self._not_yet_cut(session, fresh, buffered)
+        if not fresh:
+            return _empty_outcome("skipped", message_count=0)
+        merged = merge_dedupe_sort(buffered, fresh)
         await self._keep_buffered(session, merged)
         return _empty_outcome("accumulated", message_count=len(fresh))
 
@@ -191,6 +198,9 @@ class BoundaryDetection:
         if not fresh and not is_final:
             return _empty_outcome("skipped", message_count=0)
         buffered = await self._session_buffer.list(session)
+        fresh = await self._not_yet_cut(session, fresh, buffered)
+        if not fresh and not is_final:
+            return _empty_outcome("skipped", message_count=0)
         merged = merge_dedupe_sort(buffered, fresh)
         if not merged:
             return _empty_outcome("accumulated", message_count=0)
@@ -207,6 +217,32 @@ class BoundaryDetection:
         return await self._commit_cells(
             session, result, mode=mode, message_count=len(fresh)
         )
+
+    async def _not_yet_cut(
+        self,
+        session: SessionKey,
+        fresh: list[CanonicalMessage],
+        buffered: Sequence[CanonicalMessage],
+    ) -> list[CanonicalMessage]:
+        """``fresh`` without the messages a memcell of the session already holds.
+
+        A client that resends a batch after a timeout sends messages the first
+        call may have cut already; those left the buffer, so the merge alone
+        would cut them a second time. A buffered message is kept: the tail
+        may share rows with the last cell.
+        """
+        held = {m.message_id for m in buffered}
+        cut = await self._session_buffer.already_cut(
+            session, [m.message_id for m in fresh if m.message_id not in held]
+        )
+        if not cut:
+            return fresh
+        logger.info(
+            "boundary_resent_messages_dropped",
+            session_id=session.session_id,
+            count=len(cut),
+        )
+        return [m for m in fresh if m.message_id not in cut]
 
     async def _segment_or_quarantine(
         self,

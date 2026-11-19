@@ -141,6 +141,21 @@ unchanged apart from additions. See Upgrade below.
   of the ingest identity, so a store ingested with an earlier config is not
   reused.
 
+### Fixed
+
+- **A resent `/memory/add` no longer cuts the same messages twice** (#274).
+  Messages were deduplicated only against the session buffer, so a client
+  retrying after a timeout re-sent messages the first call had already cut
+  into a memory cell, and they became a second memcell and episode. The
+  boundary stage now drops fresh messages a memcell of the session already
+  holds. Message ids no longer depend on the message's position in the
+  request: `m_<session>_<timestamp>_<n>_<digest>`, where `n` counts the
+  request's messages sharing that timestamp and `digest` covers who said what,
+  so a regrouped resend keeps its ids and two different messages sent in
+  separate requests with one timestamp are no longer merged into one.
+  Buffered messages from an earlier version keep their old ids; a batch sent
+  before the upgrade and resent after it is not recognized as a resend.
+
 ### Removed
 
 - **Foresight.** The `extract_foresight` strategy (off by default since

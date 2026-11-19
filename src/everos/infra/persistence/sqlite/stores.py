@@ -137,6 +137,17 @@ class SqliteSessionBufferStore:
             project_id=session.project_id,
         )
 
+    async def already_cut(
+        self, session: SessionKey, message_ids: Sequence[str]
+    ) -> set[str]:
+        return await self._cut.already_cut(
+            session.session_id,
+            _SESSION_TRACK,
+            message_ids,
+            app_id=session.app_id,
+            project_id=session.project_id,
+        )
+
 
 class SqliteMemcellStore:
     """Memcells over the ``memcell`` table.

@@ -359,6 +359,12 @@ class SessionBufferStore(Protocol):
         """Set the buffer (plus ``extra``) aside; return how many moved."""
         ...
 
+    async def already_cut(
+        self, session: SessionKey, message_ids: Sequence[str]
+    ) -> set[str]:
+        """Which of ``message_ids`` a memcell of the session already holds."""
+        ...
+
 
 @runtime_checkable
 class MemcellStore(Protocol):
