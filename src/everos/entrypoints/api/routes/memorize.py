@@ -19,6 +19,7 @@ from everos.entrypoints.api.routes.purge import REFUSED_DURING_PURGE
 from everos.entrypoints.api.schemas import (
     AcceptedResponseData,
     AddResponseData,
+    DeviceAcceptedResponseData,
     DeviceAddRequest,
     DeviceAddResponseData,
     FlushResponseData,
@@ -51,6 +52,10 @@ _ADD_RESPONSES: dict[int | str, dict[str, Any]] = {
     413: {"description": "Body over memorize.async_queue.max_payload_bytes"},
     429: {"description": "Queue at its per-session or global cap"},
     **REFUSED_DURING_PURGE,
+}
+_DEVICE_ADD_RESPONSES: dict[int | str, dict[str, Any]] = {
+    **_ADD_RESPONSES,
+    202: {**_ADD_RESPONSES[202], "model": SuccessEnvelope[DeviceAcceptedResponseData]},
 }
 _FLUSH_RESPONSES: dict[int | str, dict[str, Any]] = {
     202: {
@@ -88,13 +93,15 @@ async def add_memory(
     )
 
 
-@router.post("/device/add", responses=_ADD_RESPONSES)
+@router.post("/device/add", responses=_DEVICE_ADD_RESPONSES)
 async def add_device_memory(
     req: Annotated[DeviceAddRequest, ...],
     response: Response,
     app: ApplicationDep,
     request_id: RequestIdDep,
-) -> SuccessEnvelope[DeviceAddResponseData] | SuccessEnvelope[AcceptedResponseData]:
+) -> (
+    SuccessEnvelope[DeviceAddResponseData] | SuccessEnvelope[DeviceAcceptedResponseData]
+):
     """Add one device's utterances, each speaker under their own owner.
 
     A thin projection onto ``/add`` (``schemas.device``): every speaker
@@ -113,18 +120,21 @@ async def add_device_memory(
             app_id=req.app_id,
             project_id=req.project_id,
             messages=messages,
+            async_mode=req.async_mode,
         ),
         response,
         app,
         request_id,
     )
+    owners = req.speaker_owners()
     if isinstance(added.data, AcceptedResponseData):
-        return added
+        return SuccessEnvelope(
+            request_id=request_id,
+            data=DeviceAcceptedResponseData(**added.data.model_dump(), owners=owners),
+        )
     return SuccessEnvelope(
         request_id=request_id,
-        data=DeviceAddResponseData(
-            **added.data.model_dump(), owners=req.speaker_owners()
-        ),
+        data=DeviceAddResponseData(**added.data.model_dump(), owners=owners),
     )
 
 

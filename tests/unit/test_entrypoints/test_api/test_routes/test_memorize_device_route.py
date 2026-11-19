@@ -125,3 +125,36 @@ async def test_an_owner_that_would_be_ambiguous_or_too_long_is_a_422(
 
     assert resp.status_code == 422
     assert memory.calls == []
+
+
+async def test_async_mode_queues_the_batch_and_still_names_its_owners(
+    client: AsyncClient, memory: StubMemoryService
+) -> None:
+    resp = await client.post(
+        "/api/v2/memory/device/add",
+        json={
+            "device_id": "xiaoai01",
+            "session_id": "s_kitchen",
+            "async_mode": True,
+            "utterances": [
+                _says("spk_a", "remind me to buy milk"),
+                _says(None, "who left this here"),
+            ],
+        },
+    )
+
+    assert resp.status_code == 202, resp.text
+    data = resp.json()
+    assert data["data"] == {
+        "status": "queued",
+        "message_count": 2,
+        "pending": 1,
+        "owners": ["xiaoai01@spk_a"],
+    }
+    assert memory.calls == []
+    ((payload, request_id, _, _),) = memory.enqueued
+    assert request_id == data["request_id"]
+    assert [m["sender_id"] for m in payload["messages"]] == [
+        "xiaoai01@spk_a",
+        "xiaoai01",
+    ]

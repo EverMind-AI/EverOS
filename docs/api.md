@@ -669,6 +669,7 @@ device's own records (utterances nobody was identified for) are under
 | `session_id` | `string` | yes | — | as `/memory/add` |
 | `app_id` / `project_id` | `string` *(ScopeId)* | no | `"default"` | as `/memory/add` |
 | `utterances` | `array<DeviceUtterance>` | yes | — | 1–500 items, in spoken order |
+| `async_mode` | `boolean` | no | `false` | as `/memory/add`: queue the batch and return `202` at once; see [Asynchronous mode](#asynchronous-mode) |
 
 `DeviceUtterance`:
 
@@ -700,8 +701,12 @@ whole batch.
 | `owners` | `array<string>` | Per-person owner ids this batch wrote to, first-spoken order |
 
 A batch in which every speaker declined writes nothing and returns
-`message_count: 0`, `status: "accumulated"`, `owners: []`. `202 Accepted` is
-`/memory/add`'s body unchanged.
+`message_count: 0`, `status: "accumulated"`, `owners: []`.
+
+`202 Accepted` — with `async_mode`, or when the session already has queued
+batches — is `/memory/add`'s `202` body (`status: "queued"`, `message_count`,
+`pending`) plus the same `owners`; poll
+[`GET /tasks/{task_id}`](#get-apiv2taskstask_id) with the `request_id`.
 
 #### cURL example
 

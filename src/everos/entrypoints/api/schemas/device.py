@@ -28,12 +28,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .ids import PATH_SAFE_CHARSET, AppScopeId, PathSafeId, ProjectScopeId, SessionId
+from .memorize import AcceptedResponseData
 
 __all__ = [
     "DEVICE_ID_CHARSET",
     "DEVICE_OWNER_SEPARATOR",
     "MAX_OWNER_ID_LENGTH",
     "SPEAKER_SLOT_CHARSET",
+    "DeviceAcceptedResponseData",
     "DeviceAddRequest",
     "DeviceAddResponseData",
     "DeviceSpeaker",
@@ -111,6 +113,8 @@ class DeviceAddRequest(BaseModel):
             ``/memory/add`` takes it.
         app_id / project_id: Scope segments, as ``/memory/add`` takes them.
         utterances: The batch, in spoken order.
+        async_mode: As ``/memory/add`` takes it: queue the batch and answer
+            ``202`` at once.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -126,6 +130,13 @@ class DeviceAddRequest(BaseModel):
         default="default", min_length=1, max_length=128, pattern=PATH_SAFE_CHARSET
     )
     utterances: list[DeviceUtterance] = Field(..., min_length=1, max_length=500)
+    async_mode: bool = Field(
+        default=False,
+        description=(
+            "As /memory/add: persist the batch to the memorize queue and return "
+            "202 at once; poll GET /tasks/{request_id}."
+        ),
+    )
 
     def speaker_owners(self) -> list[str]:
         """The per-person owners this batch writes to, in first-spoken order.
@@ -196,6 +207,12 @@ class DeviceAddResponseData(BaseModel):
 
     message_count: int
     status: Literal["accumulated", "extracted"]
+    owners: list[str] = Field(default_factory=list)
+
+
+class DeviceAcceptedResponseData(AcceptedResponseData):
+    """``202`` body: ``/memory/add``'s, plus the owners the batch will write to."""
+
     owners: list[str] = Field(default_factory=list)
 
 

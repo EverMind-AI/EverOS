@@ -667,15 +667,17 @@ async def test_everalgos_lists_round_trip_through_user_md(
     assert held["description"] in request
 
 
+@pytest.mark.parametrize("async_mode", [False, True], ids=["sync", "async"])
 async def test_device_add_keeps_each_speaker_in_their_own_memory(
-    core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
+    core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch, async_mode: bool
 ) -> None:
     """``/memory/device/add``: one device, two people, one unidentified line.
 
     The route only renames senders (``<device_id>@<slot>``); this pins that the
     real pipeline then keeps the three owners apart on disk and through get,
     search and delete — every copy carries the same canned narrative, so only
-    the owner keeps one person's search from returning another's.
+    the owner keeps one person's search from returning another's. With
+    ``async_mode`` the batch goes through the memorize queue and its worker.
     """
     llm = user_track_llm(boundary="boundary_empty")
     people = ["xiaoai01@spk_a", "xiaoai01@spk_b"]
@@ -687,6 +689,7 @@ async def test_device_add_keeps_each_speaker_in_their_own_memory(
             json={
                 "device_id": "xiaoai01",
                 "session_id": "s_kitchen",
+                "async_mode": async_mode,
                 "utterances": [
                     {
                         "speaker": {"slot": "spk_a", "display_name": "Alice"},
@@ -702,14 +705,17 @@ async def test_device_add_keeps_each_speaker_in_their_own_memory(
                 ],
             },
         )
-        assert add.status_code == 200, add.text
+        assert add.status_code == (202 if async_mode else 200), add.text
         assert add.json()["data"]["owners"] == people
 
         flush = await client.post(
             "/api/v1/memory/flush", json={"session_id": "s_kitchen"}
         )
-        assert flush.status_code == 200, flush.text
-        assert flush.json()["data"]["status"] == "extracted"
+        if async_mode:  # queued behind the batch, or run once it drained
+            assert flush.status_code in (200, 202), flush.text
+        else:
+            assert flush.status_code == 200, flush.text
+            assert flush.json()["data"]["status"] == "extracted"
 
         async def _episodes(owner: str) -> list[dict]:
             resp = await client.post(

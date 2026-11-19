@@ -146,7 +146,7 @@ so the memory, storage, search and delete code is unchanged.
 |---|---|
 | Request | `DeviceAddRequest` (section 1 table) |
 | Success | `200` `{"request_id": ..., "data": {"message_count": N, "status": "accumulated" \| "extracted", "owners": ["D@S", ...]}}` (`DeviceAddResponseData`) |
-| Queued | `202` exactly as `/memory/add` returns it (the session already has queued batches) |
+| Queued | `202` with `async_mode: true`, or when the session already has queued batches: `/memory/add`'s body plus `owners` (`DeviceAcceptedResponseData`) |
 | All declined | `200` with `message_count: 0`, `status: "accumulated"`, `owners: []`; nothing is written |
 | Errors | `422` — no utterances, a slot or device id outside its charset, an owner id over 128 characters; `409` `SESSION_BUSY` / `500` `PAYLOAD_TOO_LARGE`, inherited from `/memory/add` |
 | Projection | `DeviceAddRequest.projected_messages()` → the `messages[]` the pipeline consumes: `sender_id` = `D@S` (or `D`), `sender_name` = label, `role` = `"user"` |

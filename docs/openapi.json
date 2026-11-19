@@ -153,7 +153,7 @@
                       "$ref": "#/components/schemas/SuccessEnvelope_DeviceAddResponseData_"
                     },
                     {
-                      "$ref": "#/components/schemas/SuccessEnvelope_AcceptedResponseData_"
+                      "$ref": "#/components/schemas/SuccessEnvelope_DeviceAcceptedResponseData_"
                     }
                   ],
                   "title": "Response Add Device Memory Api V1 Memory Device Add Post"
@@ -166,7 +166,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_AcceptedResponseData_"
+                  "$ref": "#/components/schemas/SuccessEnvelope_DeviceAcceptedResponseData_"
                 }
               }
             }
@@ -1544,7 +1544,7 @@
                       "$ref": "#/components/schemas/SuccessEnvelope_DeviceAddResponseData_"
                     },
                     {
-                      "$ref": "#/components/schemas/SuccessEnvelope_AcceptedResponseData_"
+                      "$ref": "#/components/schemas/SuccessEnvelope_DeviceAcceptedResponseData_"
                     }
                   ],
                   "title": "Response Add Device Memory Api V2 Memory Device Add Post"
@@ -1557,7 +1557,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope_AcceptedResponseData_"
+                  "$ref": "#/components/schemas/SuccessEnvelope_DeviceAcceptedResponseData_"
                 }
               }
             }
@@ -3511,6 +3511,39 @@
         "title": "DeleteResponseData",
         "description": "What a deletion removed.\n\nAttributes:\n    filters: The scope fields the request set.\n    count: Memories removed (entries, plus one per skill and one for the\n        profile when a whole owner is deleted)."
       },
+      "DeviceAcceptedResponseData": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "queued",
+            "title": "Status",
+            "default": "queued"
+          },
+          "message_count": {
+            "type": "integer",
+            "title": "Message Count"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending",
+            "description": "Unfinished queued batches of this session, this one included"
+          },
+          "owners": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Owners"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_count",
+          "pending"
+        ],
+        "title": "DeviceAcceptedResponseData",
+        "description": "``202`` body: ``/memory/add``'s, plus the owners the batch will write to."
+      },
       "DeviceAddRequest": {
         "properties": {
           "device_id": {
@@ -3550,6 +3583,12 @@
             "maxItems": 500,
             "minItems": 1,
             "title": "Utterances"
+          },
+          "async_mode": {
+            "type": "boolean",
+            "title": "Async Mode",
+            "description": "As /memory/add: persist the batch to the memorize queue and return 202 at once; poll GET /tasks/{request_id}.",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -3560,7 +3599,7 @@
           "utterances"
         ],
         "title": "DeviceAddRequest",
-        "description": "A batch of utterances from one device.\n\nAttributes:\n    device_id: The device's id: the owner of utterances nobody was\n        identified for, and the prefix of every speaker owner id.\n    session_id: The conversation the utterances belong to, as\n        ``/memory/add`` takes it.\n    app_id / project_id: Scope segments, as ``/memory/add`` takes them.\n    utterances: The batch, in spoken order."
+        "description": "A batch of utterances from one device.\n\nAttributes:\n    device_id: The device's id: the owner of utterances nobody was\n        identified for, and the prefix of every speaker owner id.\n    session_id: The conversation the utterances belong to, as\n        ``/memory/add`` takes it.\n    app_id / project_id: Scope segments, as ``/memory/add`` takes them.\n    utterances: The batch, in spoken order.\n    async_mode: As ``/memory/add`` takes it: queue the batch and answer\n        ``202`` at once."
       },
       "DeviceAddResponseData": {
         "properties": {
@@ -6039,6 +6078,23 @@
           "data"
         ],
         "title": "SuccessEnvelope[DeleteResponseData]"
+      },
+      "SuccessEnvelope_DeviceAcceptedResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DeviceAcceptedResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[DeviceAcceptedResponseData]"
       },
       "SuccessEnvelope_DeviceAddResponseData_": {
         "properties": {
