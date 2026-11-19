@@ -13,7 +13,6 @@ __all__ = [
     "MarkdownAgentSkillStore",
     "MarkdownAtomicFactStore",
     "MarkdownEpisodeStore",
-    "MarkdownForesightStore",
     "MarkdownProfileStore",
 ]
 
@@ -39,7 +38,6 @@ from everos.memory.models import (
     AgentSkill,
     AtomicFact,
     Episode,
-    Foresight,
     Profile,
 )
 from everos.memory.ports import (
@@ -59,7 +57,6 @@ from ._writers import (
     AtomicFactWriter,
     BaseDailyWriter,
     EpisodeWriter,
-    ForesightWriter,
     ProfileWriter,
 )
 
@@ -427,28 +424,6 @@ class MarkdownAtomicFactStore(_DailyLogStore[AtomicFact]):
         return removed
 
 
-class MarkdownForesightStore(_DailyLogStore[Foresight]):
-    """Foresight daily logs (``users/<id>/.foresights/``).
-
-    Args:
-        root: Memory root the files live under.
-    """
-
-    _KIND = "foresight"
-
-    def __init__(self, root: MemoryRoot) -> None:
-        super().__init__(root, ForesightWriter(root), _foresight_entry)
-
-    async def append_many(
-        self,
-        scope: Scope,
-        items: Sequence[Foresight],
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> list[MemoryRef]:
-        return await self._append_many(scope, items, only_if)
-
-
 class MarkdownAgentCaseStore(_DailyLogStore[AgentCase]):
     """Agent-case daily logs (``agents/<id>/.agent_cases/``).
 
@@ -712,24 +687,6 @@ def _atomic_fact_entry(fact: AtomicFact) -> EntryBody:
     if fact.session_id is not None:
         inline["session_id"] = fact.session_id
     return inline, {"Fact": fact.content}
-
-
-def _foresight_entry(foresight: Foresight) -> EntryBody:
-    """Optional time-window fields are written only when set."""
-    inline: dict[str, object] = {
-        "owner_id": foresight.owner_id,
-        "session_id": foresight.session_id,
-        "timestamp": _iso(foresight.timestamp),
-        "parent_type": "memcell",
-        "parent_id": foresight.parent_id,
-    }
-    if foresight.start_time:
-        inline["start_time"] = foresight.start_time
-    if foresight.end_time:
-        inline["end_time"] = foresight.end_time
-    if foresight.duration_days is not None:
-        inline["duration_days"] = foresight.duration_days
-    return inline, {"Foresight": foresight.foresight, "Evidence": foresight.evidence}
 
 
 def _agent_case_entry(case: AgentCase) -> EntryBody:

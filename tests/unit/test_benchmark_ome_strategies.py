@@ -45,9 +45,9 @@ def test_the_written_file_is_one_ome_reads(tmp_path: Path) -> None:
 
 def test_a_rerun_replaces_the_file(tmp_path: Path) -> None:
     run.write_ome_strategies(tmp_path, {"extract_user_profile": {"enabled": False}})
-    run.write_ome_strategies(tmp_path, {"extract_foresight": {"enabled": True}})
+    run.write_ome_strategies(tmp_path, {"extract_atomic_facts": {"enabled": True}})
     parsed = tomllib.loads((tmp_path / "ome.toml").read_text(encoding="utf-8"))
-    assert parsed == {"strategies": {"extract_foresight": {"enabled": True}}}
+    assert parsed == {"strategies": {"extract_atomic_facts": {"enabled": True}}}
 
 
 def test_the_fleet_writes_it_before_a_server_starts(

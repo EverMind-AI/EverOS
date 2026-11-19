@@ -14,7 +14,6 @@ from everos.infra.cascade._projections import (
     AgentSkillHandler,
     AtomicFactHandler,
     EpisodeHandler,
-    ForesightHandler,
     HandlerDeps,
     KnowledgeTopicHandler,
 )
@@ -87,7 +86,6 @@ async def _normal_row(
     handlers = {
         "episode": EpisodeHandler,
         "atomic_fact": AtomicFactHandler,
-        "foresight": ForesightHandler,
         "agent_case": AgentCaseHandler,
     }
     entry = ParsedEntry(
@@ -104,7 +102,6 @@ async def _normal_row(
                 "Content": "episode body",
                 "Subject": subject,
                 "Fact": "atomic fact",
-                "Foresight": "future plan",
                 "TaskIntent": "case intent",
                 "Approach": "not the embedding source",
             },

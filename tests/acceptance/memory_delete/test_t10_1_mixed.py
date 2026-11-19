@@ -27,7 +27,7 @@ pytestmark = pytest.mark.acceptance
 
 _SECONDS = 600
 _USERS = ("m1", "m2", "m3")
-_TABLES = 4  # episode, atomic_fact, foresight, agent_case
+_TABLES = 3  # episode, atomic_fact, agent_case
 _REWRITE_S = 4.6
 """Ten times the slowest plain session deletion measured in T18.1."""
 _ADD_CALLS = 2

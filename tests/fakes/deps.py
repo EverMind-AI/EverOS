@@ -43,7 +43,6 @@ from .stores import (
     InMemoryAtomicFactStore,
     InMemoryClusterStore,
     InMemoryEpisodeStore,
-    InMemoryForesightStore,
     InMemoryMemcellStore,
     InMemoryProfileStore,
     InMemoryReflectionReportStore,
@@ -94,7 +93,6 @@ def make_stores(**overrides: Any) -> Stores:
     fields: dict[str, Any] = {
         "episode": InMemoryEpisodeStore(),
         "atomic_fact": InMemoryAtomicFactStore(),
-        "foresight": InMemoryForesightStore(),
         "profile": InMemoryProfileStore(),
         "agent_case": InMemoryAgentCaseStore(),
         "agent_skill": InMemoryAgentSkillStore(),

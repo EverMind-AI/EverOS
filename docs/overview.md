@@ -13,7 +13,7 @@ Build an open-source Python memory framework where **AI agents' long-term memory
 - Hybrid retrieval (BM25 + vector + scalar filter)
 - Cascade index sync (md edit → derived index)
 - Dual-track memory (user-track / agent-track)
-- Offline memory evolution (Foresight / AtomicFact / Profile / Skill),
+- Offline memory evolution (AtomicFact / Profile / Skill),
   including Reflection — a consolidation strategy within the OME that
   merges + re-extracts related episodes
 - Knowledge base (document upload, parse, CRUD, semantic search)

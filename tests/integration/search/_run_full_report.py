@@ -337,21 +337,21 @@ async def ingest(client: httpx.AsyncClient) -> dict:
 async def wait_cascade(
     memory_root: Path,
     *,
-    expected_md_paths: int = 8,
+    expected_md_paths: int = 6,
     stable_checks: int = 5,
     deadline_seconds: float = 600.0,
 ) -> dict:
     """Block until cascade is *stably* done across all expected md kinds.
 
     A plain ``pending == 0`` check is racy: OME async strategies
-    (extract_foresight / extract_user_profile) emit md writes
+    (extract_atomic_facts / extract_user_profile) emit md writes
     asynchronously after ``/flush`` returns, and there's a window
     where the cascade queue is momentarily empty before OME's writes
     arrive. We require two stronger conditions:
 
     1. At least ``expected_md_paths`` rows exist in ``md_change_state``
        (one per expected (owner × kind) — episodes + atomic_facts +
-       foresights + user_profile, per owner). This guards against
+       user_profile, per owner). This guards against
        returning before OME has emitted *anything*.
     2. ``pending == 0`` stays true for ``stable_checks`` consecutive
        polls (separated by 1s sleep). This guards against a transient
@@ -416,7 +416,6 @@ async def inspect_artifacts(memory_root: Path) -> dict:
         counts = {
             "episode_rows": await repos.episode.count(),
             "atomic_fact_rows": await repos.atomic_fact.count(),
-            "foresight_rows": await repos.foresight.count(),
             "user_profile_rows": await repos.user_profile.count(),
         }
     finally:
@@ -532,7 +531,6 @@ def render_report(
     for k in (
         "episode_rows",
         "atomic_fact_rows",
-        "foresight_rows",
         "user_profile_rows",
     ):
         lines.append(f"| {k.replace('_rows', '')} | {artifacts[k]} |\n")

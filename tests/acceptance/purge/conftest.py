@@ -22,9 +22,6 @@ pytestmark = pytest.mark.acceptance
 
 OME_TOML = """\
 # Purge acceptance (H5): every table a purge clears gets seeded.
-[strategies.extract_foresight]
-enabled = true
-
 [strategies.reflect_episodes]
 enabled = true
 """
@@ -124,7 +121,7 @@ def make_purge_server(
     tmp_path: Path, purge_proxy: Proxy, fake: FakeUpstream
 ) -> Iterator[Callable[..., PurgeServer]]:
     """``make_purge_server(name, start=True, **env)``: a server over
-    ``tmp_path/name`` with Foresight and Reflection on (H5); not started when
+    ``tmp_path/name`` with Reflection on (H5); not started when
     ``start=False`` (seed the root first, then ``.start()``)."""
     made: list[PurgeServer] = []
 

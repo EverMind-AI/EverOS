@@ -9,7 +9,7 @@ runs without real LLM calls. Each test isolates state by:
 - starting / stopping a per-test ``OfflineEngine``
 - building the application over a fake LLM (boundary + strategies)
 
-OME strategies (atomic / foresight) are silenced via ``mock_aextract`` so
+OME strategies (atomic facts) are silenced via ``mock_aextract`` so
 this test focuses on the synchronous boundary + pipeline + md path —
 strategy dispatch correctness already has its own coverage in
 ``test_ome_strategies_integration.py``.
@@ -75,7 +75,6 @@ async def memorize_env(
     (tmp_path / "ome.toml").write_text("# test\n")
 
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
-    fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
 
     started: dict[str, Any] = {"application": None}
 
@@ -94,18 +93,12 @@ async def memorize_env(
         await storage.create_schema()
 
         # Mock the OME extractors so the async strategy chain is a no-op
-        # (the strategy itself still runs; it just sees no facts/foresights).
+        # (the strategy itself still runs; it just sees no facts).
         mock_af = AsyncMock(return_value=[])
-        mock_fs = AsyncMock(return_value=[])
         monkeypatch.setattr(
             af_mod,
             "AtomicFactExtractor",
             lambda *a, **k: type("M", (), {"aextract": mock_af})(),
-        )
-        monkeypatch.setattr(
-            fs_mod,
-            "ForesightExtractor",
-            lambda *a, **k: type("M", (), {"aextract": mock_fs})(),
         )
 
         settings = load_settings()

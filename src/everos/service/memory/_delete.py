@@ -201,7 +201,6 @@ class Deleter:
         removed = {
             "episode": await stores.episode.remove_session(scope, session_id),
             "atomic_fact": await stores.atomic_fact.remove_session(scope, session_id),
-            "foresight": await stores.foresight.remove_session(scope, session_id),
         }
         # Scan this owner's clusters even when a retry removed no new entries.
         # A previous attempt may have stopped after rewriting the markdown.

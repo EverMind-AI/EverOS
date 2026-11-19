@@ -75,7 +75,6 @@ from .stores import InMemoryAgentSkillStore as InMemoryAgentSkillStore
 from .stores import InMemoryAtomicFactStore as InMemoryAtomicFactStore
 from .stores import InMemoryClusterStore as InMemoryClusterStore
 from .stores import InMemoryEpisodeStore as InMemoryEpisodeStore
-from .stores import InMemoryForesightStore as InMemoryForesightStore
 from .stores import InMemoryMemcellStore as InMemoryMemcellStore
 from .stores import InMemoryProfileStore as InMemoryProfileStore
 from .stores import InMemoryReflectionReportStore as InMemoryReflectionReportStore
@@ -103,7 +102,6 @@ __all__ = [
     "InMemoryClusterStore",
     "InMemoryEpisodeIndex",
     "InMemoryEpisodeStore",
-    "InMemoryForesightStore",
     "InMemoryMemcellStore",
     "InMemoryProfileIndex",
     "InMemoryProfileStore",

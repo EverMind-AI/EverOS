@@ -20,7 +20,6 @@ from everos.memory.models import (
     AtomicFact,
     Cluster,
     Episode,
-    Foresight,
     MemcellRecord,
     Profile,
     ReflectionReport,
@@ -127,21 +126,6 @@ async def _seed_world(root: Path) -> Seeded:
                     only_if=NO_SOURCE_CHECK,
                 )
                 seeded.add(who, "atomic_fact", fact.entry_id)
-                (fs,) = await stores.foresight.append_many(
-                    user(who),
-                    [
-                        Foresight(
-                            owner_id=who,
-                            foresight=f"{who} will return after {session}",
-                            evidence="said so",
-                            timestamp=TS,
-                            session_id=session,
-                            parent_id=memcell_id,
-                        )
-                    ],
-                    only_if=NO_SOURCE_CHECK,
-                )
-                seeded.add(who, "foresight", fs.entry_id)
             case = await stores.agent_case.append(
                 agent("a1"),
                 AgentCase(

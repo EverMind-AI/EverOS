@@ -151,7 +151,6 @@ def test_the_task_names_are_stable() -> None:
         "episode",
         "summary",
         "atomic_fact",
-        "foresight",
         "profile",
         "reflection",
         "agent_case",

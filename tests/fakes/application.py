@@ -87,7 +87,6 @@ from .stores import UnusedPort
 _VECTOR_TABLES = (
     "episode",
     "atomic_fact",
-    "foresight",
     "agent_case",
     "agent_skill",
     "knowledge_topic",

@@ -15,7 +15,6 @@ from everos.infra.persistence.markdown import (
     MarkdownAgentSkillStore,
     MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
-    MarkdownForesightStore,
     MarkdownProfileStore,
     MarkdownReader,
     parse_structured_entry,
@@ -25,7 +24,6 @@ from everos.memory.models import (
     AgentSkill,
     AtomicFact,
     Episode,
-    Foresight,
     Profile,
 )
 from everos.memory.ports import (
@@ -34,7 +32,6 @@ from everos.memory.ports import (
     AgentSkillStore,
     AtomicFactStore,
     EpisodeStore,
-    ForesightStore,
     ProfileStore,
     Scope,
 )
@@ -145,7 +142,6 @@ async def test_profile_and_skill_writes_hold_the_owner_lock(root: MemoryRoot) ->
 def test_adapters_satisfy_their_ports(root: MemoryRoot) -> None:
     assert isinstance(MarkdownEpisodeStore(root), EpisodeStore)
     assert isinstance(MarkdownAtomicFactStore(root), AtomicFactStore)
-    assert isinstance(MarkdownForesightStore(root), ForesightStore)
     assert isinstance(MarkdownAgentCaseStore(root), AgentCaseStore)
     assert isinstance(MarkdownProfileStore(root), ProfileStore)
     assert isinstance(MarkdownAgentSkillStore(root), AgentSkillStore)
@@ -282,22 +278,7 @@ async def test_atomic_facts_append_and_deprecate(root: MemoryRoot) -> None:
     assert parsed.frontmatter["deprecated_entries"] == {refs[0].entry_id: "ep_m"}
 
 
-async def test_foresight_and_agent_case_land_in_their_logs(root: MemoryRoot) -> None:
-    (foresight_ref,) = await MarkdownForesightStore(root).append_many(
-        _user(),
-        [
-            Foresight(
-                owner_id="u1",
-                foresight="will travel",
-                evidence="said so",
-                timestamp=_TS,
-                duration_days=3,
-                session_id="s1",
-                parent_id="mc_1",
-            )
-        ],
-        only_if=NO_SOURCE_CHECK,
-    )
+async def test_agent_case_lands_in_its_log(root: MemoryRoot) -> None:
     case_ref = await MarkdownAgentCaseStore(root).append(
         _agent(),
         AgentCase(
@@ -312,10 +293,7 @@ async def test_foresight_and_agent_case_land_in_their_logs(root: MemoryRoot) -> 
         only_if=NO_SOURCE_CHECK,
     )
 
-    foresight = (await _entries(root, foresight_ref.md_path))[foresight_ref.entry_id]
     case = (await _entries(root, case_ref.md_path))[case_ref.entry_id]
-    assert foresight["inline"]["duration_days"] == "3"
-    assert foresight["sections"] == {"Foresight": "will travel", "Evidence": "said so"}
     assert case_ref.md_path.startswith("app/proj/agents/a1/")
     assert case["sections"] == {"TaskIntent": "fix bug", "Approach": "bisect"}
 

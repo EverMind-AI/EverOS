@@ -11,6 +11,8 @@ captured from a previous release. No current model serializer generated them.
   an actual historical release.
 - `user_pipeline_started.json` freezes a nested MemCell and omitted scope
   and sender-name defaults. Event identity and event time are explicit.
+  `UserPipelineStarted` has since been removed; the test reads this payload
+  as `AgentPipelineStarted`, which has the same fields.
 - `memcell.json` freezes ordered text/tool-result union members and exact
   millisecond timestamps. The SQLite test inserts these bytes directly into
   `memcell.payload_json`; it does not call the current store writer.

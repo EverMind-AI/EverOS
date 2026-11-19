@@ -13,7 +13,6 @@ __all__ = [
     "InMemoryAtomicFactStore",
     "InMemoryClusterStore",
     "InMemoryEpisodeStore",
-    "InMemoryForesightStore",
     "InMemoryMemcellStore",
     "InMemoryProfileStore",
     "InMemoryReflectionReportStore",
@@ -33,7 +32,6 @@ from everos.memory.models import (
     ClusterKind,
     ClusterMemberType,
     Episode,
-    Foresight,
     MemCell,
     MemcellRecord,
     Profile,
@@ -260,20 +258,6 @@ class InMemoryAtomicFactStore(_DailyLog[AtomicFact]):
         return await self._deprecate(
             entries=entries, replaced_by=replaced_by, only_if=only_if
         )
-
-
-class InMemoryForesightStore(_DailyLog[Foresight]):
-    def __init__(self) -> None:
-        super().__init__("fs", ".foresights")
-
-    async def append_many(
-        self,
-        scope: Scope,
-        items: Sequence[Foresight],
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> list[MemoryRef]:
-        return await self._append_many(scope, items, only_if)
 
 
 class InMemoryAgentCaseStore(_DailyLog[AgentCase]):

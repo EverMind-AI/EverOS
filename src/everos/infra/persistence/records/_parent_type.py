@@ -3,7 +3,7 @@
 Three values cover the current provenance graph:
 
 * :attr:`ParentType.MEMCELL` — the original ingestion unit; every
-  business row (episode / foresight / atomic_fact / agent_case) points
+  business row (episode / atomic_fact / agent_case) points
   back to a source MemCell by default.
 * :attr:`ParentType.EPISODE` — used by atomic facts that are extracted
   from an episode rather than directly from a MemCell.

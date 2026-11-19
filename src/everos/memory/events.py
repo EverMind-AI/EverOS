@@ -17,30 +17,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from everos.memory.ports import Event, Scope
 
 
-class UserPipelineStarted(Event):
-    """Fired at the start of :class:`UserMemoryPipeline.run`, once per cell.
-
-    Hot-path emit, so the strategies that read the memcell itself
-    (foresight) can start in parallel with the in-pipeline Episode
-    extraction. Carries the algo-side ``MemCell`` so crash recovery has the
-    full payload (OME serialises events to JSON via Pydantic v2 nested-model
-    handling).
-    """
-
-    memcell_id: str
-    session_id: str
-    app_id: str = "default"
-    project_id: str = "default"
-    memcell: MemCell
-
-
 class AgentPipelineStarted(Event):
     """Fired at the start of :class:`AgentMemoryPipeline.run`, once per cell.
 
     Only emitted in ``mode="agent"`` (the agent pipeline does not run in
     chat mode). Subscribers handle the agent-side processing chain
     (case extraction, agent-skill clustering) in parallel with the user
-    chain. Payload mirrors :class:`UserPipelineStarted`.
+    chain.
     """
 
     memcell_id: str

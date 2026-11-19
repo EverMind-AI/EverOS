@@ -294,9 +294,7 @@ def _providers(settings: Settings) -> dict[LLMTask, Any]:
     return build_llm_task_providers(configs)
 
 
-def test_by_default_eleven_tasks_share_one_provider_and_the_decider_has_its_own() -> (
-    None
-):
+def test_by_default_ten_tasks_share_one_provider_and_the_decider_has_its_own() -> None:
     providers = _providers(_settings())
     shared = {id(p) for task, p in providers.items() if task is not LLMTask.DECIDER}
     assert len(shared) == 1

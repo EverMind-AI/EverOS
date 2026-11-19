@@ -64,7 +64,6 @@ from .stores import AgentSkillStore as AgentSkillStore
 from .stores import AtomicFactStore as AtomicFactStore
 from .stores import ClusterStore as ClusterStore
 from .stores import EpisodeStore as EpisodeStore
-from .stores import ForesightStore as ForesightStore
 from .stores import KnowledgeCatalog as KnowledgeCatalog
 from .stores import KnowledgeStore as KnowledgeStore
 from .stores import MemcellStore as MemcellStore
@@ -112,7 +111,6 @@ __all__ = [
     "Event",
     "EventBus",
     "Filter",
-    "ForesightStore",
     "Idle",
     "IdleTick",
     "Immediate",

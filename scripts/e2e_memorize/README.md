@@ -86,7 +86,6 @@ After `flush` the buffer should be empty for the test session.
 ### 5. OME async output (only if subscribers exist)
 
 - `users/<owner>/atomic_facts/atomic_fact-YYYY-MM-DD.md` (always; `extract_atomic_facts` is registered)
-- `users/<owner>/foresights/foresight-YYYY-MM-DD.md` (always; `extract_foresight` is registered)
 - `agents/<agent>/agent_cases/agent_case-YYYY-MM-DD.md` (**only after `extract_agent_cases` strategy is written + registered** — currently absent, the emit is a no-op)
 
 ### 6. Reset between runs

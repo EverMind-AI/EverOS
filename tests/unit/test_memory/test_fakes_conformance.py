@@ -15,7 +15,6 @@ from everos.memory.ports import (
     ClusterStore,
     EpisodeIndex,
     EpisodeStore,
-    ForesightStore,
     MemcellStore,
     ProfileIndex,
     ProfileStore,
@@ -31,7 +30,6 @@ _DEPS = make_deps()
     [
         (EpisodeStore, _DEPS.stores.episode),
         (AtomicFactStore, _DEPS.stores.atomic_fact),
-        (ForesightStore, _DEPS.stores.foresight),
         (ProfileStore, _DEPS.stores.profile),
         (AgentCaseStore, _DEPS.stores.agent_case),
         (AgentSkillStore, _DEPS.stores.agent_skill),

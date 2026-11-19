@@ -24,7 +24,6 @@ from .models import AgentCase as AgentCase
 from .models import AtomicFact as AtomicFact
 from .models import CanonicalMessage as CanonicalMessage
 from .models import Episode as Episode
-from .models import Foresight as Foresight
 from .models import IngestResult as IngestResult
 from .models import MemCell as MemCell
 from .models import ToolCall as ToolCall
@@ -34,7 +33,6 @@ __all__ = [
     "AtomicFact",
     "CanonicalMessage",
     "Episode",
-    "Foresight",
     "IngestResult",
     "MemCell",
     "ToolCall",

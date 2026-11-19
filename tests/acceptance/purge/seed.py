@@ -1,7 +1,7 @@
 """Seed every table a purge clears, through the server's own HTTP API (H5).
 
 Per scope: two users each talk to agent ``ag1`` in two sessions (memcell,
-conversation status, episodes; atomic facts, foresights, the agent case and
+conversation status, episodes; atomic facts, the agent case and
 its skill, clusters and the profile through OME), one deferred add (the
 unprocessed buffer), one knowledge document, and one async add that succeeds
 plus one the fake upstream fails (``memorize_inbox``). Reflection runs once

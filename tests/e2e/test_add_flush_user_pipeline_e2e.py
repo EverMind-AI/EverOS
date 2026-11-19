@@ -16,8 +16,8 @@ verifies:
 2. After /flush the buffer is empty and the memcell table has rows.
 3. After cascade drains, episode md files exist and LanceDB rows
    reflect them with valid content_sha256 + vector.
-4. OME-driven async strategies have produced atomic_fact / foresight /
-   profile md files.
+4. OME-driven async strategies have produced atomic_fact / profile md
+   files.
 
 Real LLM + real embedder (creds via ``.env``). Marked ``slow`` —
 ``pytest -m slow tests/integration/test_add_flush_core_pipeline_smoke.py``.
@@ -42,17 +42,15 @@ from everalgo.testing import FakeLLMClient
 from everos.infra.persistence.markdown import (
     AtomicFactDailyFrontmatter,
     EpisodeDailyFrontmatter,
-    ForesightDailyFrontmatter,
     MarkdownReader,
 )
 from tests.fakes import make_providers, user_track_llm, user_track_script
 from tests.fakes.storage import StorageView
 
 # Directory names live on the frontmatter schemas (single source of truth);
-# atomic_facts / foresights are dotfile-hidden so users only see episodes.
+# atomic_facts are dotfile-hidden so users only see episodes.
 _EPISODE_DIR = EpisodeDailyFrontmatter.DIR_NAME
 _ATOMIC_FACT_DIR = AtomicFactDailyFrontmatter.DIR_NAME
-_FORESIGHT_DIR = ForesightDailyFrontmatter.DIR_NAME
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -98,7 +96,7 @@ def _count_episode_entries(md_files: list[Path]) -> int:
             # We count any second-level heading that isn't the standard
             # subsection headers used inside an entry.
             if stripped.startswith("## ") and not stripped.startswith(
-                ("## Subject", "## Summary", "## Content", "## Fact", "## Foresight")
+                ("## Subject", "## Summary", "## Content", "## Fact")
             ):
                 n += 1
     return n
@@ -238,8 +236,8 @@ async def test_long_conversation_produces_all_memory_types(
     )
 
     # ── Stage 3 + 4: wait for cascade to drain ────────────────────────────
-    # Cascade syncs md → LanceDB. OME async strategies (atomic / foresight /
-    # profile) also write md, which then cascade picks up. So one wait on
+    # Cascade syncs md → LanceDB. OME async strategies (atomic / profile)
+    # also write md, which then cascade picks up. So one wait on
     # cascade-drain effectively covers both pipelines, IF OME has already
     # emitted its strategies (which memorize.py does inline via engine.emit).
     await cascade_done_poll(deadline_seconds=600.0)
@@ -272,17 +270,7 @@ async def test_long_conversation_produces_all_memory_types(
         f"LanceDB atomic_fact rows = {lance_af_count}; expected ≥ 1"
     )
 
-    # 5.4 foresight
-    # Foresight extractor is correctly invoked (log: ``foresights_extracted``
-    # per memcell) but daily-life chat about kids / work / hobbies rarely
-    # yields explicit future-intent statements, so count is usually 0.
-    # We assert the LanceDB table exists (count returns 0 cleanly) — not
-    # that any row was emitted.
-
-    lance_fs_count = await storage_view.repos.foresight.count()
-    assert lance_fs_count >= 0, f"foresight table broken: count={lance_fs_count}"
-
-    # 5.5 profile (md only — profile retrieval path is stub; we only assert
+    # 5.4 profile (md only — profile retrieval path is stub; we only assert
     # the writer wrote something). Profile lives as a single file
     # ``users/<user_id>/user.md`` (schema: ``UserProfileFrontmatter.PROFILE_FILENAME``).
     from everos.infra.persistence.markdown import UserProfileFrontmatter
@@ -311,9 +299,7 @@ async def test_long_conversation_produces_all_memory_types(
     #
     # ``expect_at_least`` pins the kinds this pipeline MUST produce so an
     # empty glob (kind not emitted at all) fails loudly — without this
-    # guard the parity check would silently pass on zero files. Foresight
-    # is NOT pinned because the LLM frequently yields 0 future-intent
-    # statements on daily-life chat (see commentary above stage 5.4).
+    # guard the parity check would silently pass on zero files.
     from tests._consistency_assertions import assert_md_lance_strict_consistent
 
     await assert_md_lance_strict_consistent(

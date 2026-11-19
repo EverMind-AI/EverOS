@@ -1421,9 +1421,9 @@ an unknown field) is `422`.
 
 | Request sets | Memories deleted | Conversation state (buffers, memcells, session status) | Clusters, Reflection reports |
 |---|---|---|---|
-| `session_id` | every owner's episodes, atomic facts, foresights and agent cases of the session | deleted; a `failed` queued request of the session keeps its row with an empty body | kept |
+| `session_id` | every owner's episodes, atomic facts and agent cases of the session | deleted; a `failed` queued request of the session keeps its row with an empty body | kept |
 | `user_id` | everything of the user, `user.md` included | kept | the user's clusters and reports deleted |
-| `user_id` + `session_id` | the user's episodes, atomic facts and foresights of the session | kept | kept |
+| `user_id` + `session_id` | the user's episodes and atomic facts of the session | kept | kept |
 | `agent_id` | every case and skill of the agent | kept | the agent's case clusters deleted |
 | `agent_id` + `session_id` | the agent's cases of the session | kept | kept |
 

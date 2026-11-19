@@ -31,7 +31,6 @@ from .markdown import (
     MarkdownAgentSkillStore,
     MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
-    MarkdownForesightStore,
     MarkdownOwnerDirStore,
     MarkdownProfileStore,
 )
@@ -53,7 +52,6 @@ def build_stores(root: MemoryRoot, sqlite: SqliteRepos) -> Stores:
     return Stores(
         episode=MarkdownEpisodeStore(root),
         atomic_fact=MarkdownAtomicFactStore(root),
-        foresight=MarkdownForesightStore(root),
         profile=MarkdownProfileStore(root),
         agent_case=MarkdownAgentCaseStore(root),
         agent_skill=MarkdownAgentSkillStore(root),

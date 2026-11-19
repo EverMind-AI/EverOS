@@ -85,7 +85,7 @@ async def test_owner_delete_counts_and_keeps_today_counter(root: MemoryRoot) -> 
 
     assert [r.entry_id for r in deletion.refs["episode"]] == old
     assert len(deletion.refs["atomic_fact"]) == 1
-    assert deletion.refs["foresight"] == []
+    assert set(deletion.refs) == {"episode", "atomic_fact"}
     assert deletion.count == 3 + 1 + 1
     owner_dir = root.users_dir("app", "p") / "u1"
     assert sorted(p.name for p in owner_dir.rglob("*") if p.is_file()) == [

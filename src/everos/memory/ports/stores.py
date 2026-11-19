@@ -16,7 +16,6 @@ __all__ = [
     "AtomicFactStore",
     "ClusterStore",
     "EpisodeStore",
-    "ForesightStore",
     "KnowledgeCatalog",
     "KnowledgeStore",
     "MemcellStore",
@@ -47,7 +46,6 @@ from everos.memory.models import (
     ClusterKind,
     ClusterMemberType,
     Episode,
-    Foresight,
     KnowledgeCategory,
     KnowledgeDocument,
     KnowledgeMemory,
@@ -236,27 +234,6 @@ class AtomicFactStore(Protocol):
 
 
 @runtime_checkable
-class ForesightStore(Protocol):
-    """Foresight truth: append-only daily logs per owner (``only_if``: above)."""
-
-    async def append_many(
-        self,
-        scope: Scope,
-        items: Sequence[Foresight],
-        *,
-        only_if: SourceCheck | NoSourceCheck,
-    ) -> list[MemoryRef]: ...
-
-    async def remove_session(self, scope: Scope, session_id: str) -> list[MemoryRef]:
-        """Remove the owner's entries of ``session_id``; their refs.
-
-        Takes the owner lock once first (a barrier), then rewrites each file
-        under it. The caller deletes the session's memcells before.
-        """
-        ...
-
-
-@runtime_checkable
 class ProfileStore(Protocol):
     """The single profile document of one user."""
 
@@ -311,7 +288,7 @@ class OwnerDirDeletion:
 
     Attributes:
         refs: The daily-log entries, by index table (``episode``,
-            ``atomic_fact``, ``foresight``, ``agent_case``).
+            ``atomic_fact``, ``agent_case``).
         count: Entries, plus one per skill directory, plus one for
             ``user.md``.
     """

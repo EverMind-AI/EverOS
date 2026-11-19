@@ -111,9 +111,9 @@ def _extract_fact_sections(md: Path) -> list[str]:
     """Return every ``### Fact`` section body in a daily-log md file.
 
     Daily-log entries are ``## <entry-id>`` blocks; the labelled body
-    sections inside an entry are h3 (``### Fact``, ``### Foresight``,
-    …). We scan linearly for ``### Fact`` and collect lines until the
-    next heading at any level or the end-of-entry marker.
+    sections inside an entry are h3 (``### Fact``, …). We scan linearly
+    for ``### Fact`` and collect lines until the next heading at any level
+    or the end-of-entry marker.
     """
     body = md.read_text(encoding="utf-8")
     sections: list[str] = []

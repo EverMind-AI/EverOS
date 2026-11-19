@@ -82,7 +82,6 @@ async def memorize_env_scripted(
     (tmp_path / "ome.toml").write_text("# test\n")
 
     af_mod = importlib.import_module("everos.memory.strategies.extract_atomic_facts")
-    fs_mod = importlib.import_module("everos.memory.strategies.extract_foresight")
 
     started: dict[str, Any] = {"application": None}
 
@@ -98,16 +97,10 @@ async def memorize_env_scripted(
 
         # Silence OME strategies — orthogonal to boundary segmentation.
         mock_af = AsyncMock(return_value=[])
-        mock_fs = AsyncMock(return_value=[])
         monkeypatch.setattr(
             af_mod,
             "AtomicFactExtractor",
             lambda *a, **k: type("M", (), {"aextract": mock_af})(),
-        )
-        monkeypatch.setattr(
-            fs_mod,
-            "ForesightExtractor",
-            lambda *a, **k: type("M", (), {"aextract": mock_fs})(),
         )
 
         settings = load_settings()
