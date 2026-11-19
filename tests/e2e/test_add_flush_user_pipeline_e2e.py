@@ -679,3 +679,93 @@ async def test_everalgos_lists_round_trip_through_user_md(
     (held,) = after_init["pending"]
     assert '<entry index="0"' in request
     assert held["description"] in request
+
+
+async def test_device_add_keeps_each_speaker_in_their_own_memory(
+    core_pipeline_runtime: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``/memory/device/add``: one device, two people, one unidentified line.
+
+    The route only renames senders (``<device_id>@<slot>``); this pins that the
+    real pipeline then keeps the three owners apart on disk and through get,
+    search and delete — every copy carries the same canned narrative, so only
+    the owner keeps one person's search from returning another's.
+    """
+    llm = user_track_llm(boundary="boundary_empty")
+    people = ["xiaoai01@spk_a", "xiaoai01@spk_b"]
+    owners = [*people, "xiaoai01"]
+
+    async with _canned_user_track_client(monkeypatch, llm) as client:
+        add = await client.post(
+            "/api/v1/memory/device/add",
+            json={
+                "device_id": "xiaoai01",
+                "session_id": "s_kitchen",
+                "utterances": [
+                    {
+                        "speaker": {"slot": "spk_a", "display_name": "Alice"},
+                        "text": _CONVERSATION[0][3],
+                        "timestamp": _ALICE_TS,
+                    },
+                    {
+                        "speaker": {"slot": "spk_b", "display_name": "Bob"},
+                        "text": _CONVERSATION[2][3],
+                        "timestamp": _ALICE_TS + 60_000,
+                    },
+                    {"text": _CONVERSATION[1][3], "timestamp": _ALICE_TS + 120_000},
+                ],
+            },
+        )
+        assert add.status_code == 200, add.text
+        assert add.json()["data"]["owners"] == people
+
+        flush = await client.post(
+            "/api/v1/memory/flush", json={"session_id": "s_kitchen"}
+        )
+        assert flush.status_code == 200, flush.text
+        assert flush.json()["data"]["status"] == "extracted"
+
+        async def _episodes(owner: str) -> list[dict]:
+            resp = await client.post(
+                "/api/v1/memory/get",
+                json={"user_id": owner, "memory_type": "episode"},
+            )
+            assert resp.status_code == 200, resp.text
+            return resp.json()["data"]["episodes"]
+
+        async def _hits(owner: str) -> list[dict]:
+            resp = await client.post(
+                "/api/v1/memory/search",
+                json={"user_id": owner, "query": "Kyoto ryokan", "method": "keyword"},
+            )
+            assert resp.status_code == 200, resp.text
+            return resp.json()["data"]["episodes"]
+
+        async def _each_owner_found() -> bool:
+            for owner in owners:
+                if len(await _episodes(owner)) != 1 or not await _hits(owner):
+                    return False
+            return True
+
+        await _poll_until(_each_owner_found)
+        for owner in owners:
+            assert {e["user_id"] for e in await _episodes(owner)} == {owner}
+            assert {h["user_id"] for h in await _hits(owner)} == {owner}
+
+        users = core_pipeline_runtime / "default_app" / "default_project" / "users"
+        on_disk = anyio.Path(users).iterdir()
+        assert sorted(
+            [p.name async for p in on_disk if not p.name.startswith(".")]
+        ) == sorted(owners)
+
+        delete = await client.post(
+            "/api/v1/memory/delete", json={"user_id": "xiaoai01@spk_a"}
+        )
+        assert delete.status_code == 200, delete.text
+
+        async def _a_forgotten() -> bool:
+            return not await _episodes("xiaoai01@spk_a")
+
+        await _poll_until(_a_forgotten)
+        assert len(await _episodes("xiaoai01@spk_b")) == 1
+        assert len(await _episodes("xiaoai01")) == 1

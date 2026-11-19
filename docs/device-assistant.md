@@ -5,10 +5,11 @@ A hardware device runs **one** EverOS agent instance and is spoken to by
 is written around — "one agent, one human user" — so this page fixes the
 identity rules and the request surface the hardware path has to honour.
 
-Status: **interface design**. The identity mapping and the request/response
-models in [`schemas/device.py`](../src/everos/entrypoints/api/schemas/device.py)
-exist and are tested; the routes and the write path are not implemented yet.
-The open questions at the end are the implementation's to settle.
+Status: **write route shipped**. `POST /api/v2/memory/device/add` accepts a
+device batch ([`schemas/device.py`](../src/everos/entrypoints/api/schemas/device.py))
+and projects it onto `/memory/add`; reads and deletes use the existing routes
+with the composed owner id as `user_id`. The open questions at the end are
+still open.
 
 ## The problem
 
@@ -33,16 +34,15 @@ slots collides across devices in the same app/project.
 
 | Concept | Where it travels | What it means |
 |---|---|---|
-| Device | `DeviceAddRequest.device_id` (path-safe, ≤ 128) | The one agent instance: the scope of the device's own records (room context, device settings) and the **prefix** of every per-person owner id |
+| Device | `DeviceAddRequest.device_id` (path-safe without `@`, ≤ 128) | The one agent instance: the owner of utterances nobody was identified for, and the **prefix** of every per-person owner id |
 | Conversation | `DeviceAddRequest.session_id` | As `/memory/add` takes it: the utterances accumulate under one session, and boundary detection cuts memcells over all speakers |
-| Room | `DeviceAddRequest.room` (free text, ≤ 64) | A label the device reports. **Never** part of an owner id, so renaming a room moves no memory |
 | Speaker | `DeviceUtterance.speaker.slot` | The device's stable per-person id — voiceprint slot, roster index. **Not** a name |
 | Speaker label | `DeviceUtterance.speaker.display_name` | How the person is called in the room. A label only: it never selects a directory |
 | Consent | `DeviceUtterance.speaker.consented` | `false` means their utterances are not written at all |
-| Per-person memory owner | derived: `speaker_owner_id(device_id, slot)` = `"<device_id>::<slot>"` | The `user_id` / `sender_id` of that person's episodes, profile and clusters **on that device** |
+| Per-person memory owner | derived: `speaker_owner_id(device_id, slot)` = `"<device_id>@<slot>"` | The `user_id` / `sender_id` of that person's episodes, profile and clusters **on that device** |
 
 **The rule, in one line:** the device is the scope, the speaker is the
-owner, and the owner id is `<device_id>::<slot>`.
+owner, and the owner id is `<device_id>@<slot>`.
 
 Why a composed id rather than the bare slot:
 
@@ -50,11 +50,16 @@ Why a composed id rather than the bare slot:
   household; `spk_1` on the kitchen device and `spk_1` in the study would
   otherwise be one memory. Per-device resolution also matches how a roster
   is assigned (voiceprints are enrolled device by device).
-- **No forgery through the existing routes.** `:` is outside the
-  `sender_id` / `user_id` charset (`^[a-zA-Z0-9_.@+-]+$`,
-  [`ids.py`](../src/everos/entrypoints/api/schemas/ids.py)), so no client can
-  address another person's memory by sending a hand-made `sender_id`, and a
-  composed id can never be mistaken for a device id or a slot.
+- **An ordinary owner id everywhere.** `@` is inside the `sender_id` /
+  `user_id` charset (`^[a-zA-Z0-9_.@+-]+$`,
+  [`ids.py`](../src/everos/entrypoints/api/schemas/ids.py)), so the composed
+  id is read, searched and deleted through the existing routes unchanged, and
+  it is a valid directory name on every platform. An earlier draft used
+  `::`, which no route accepted (nothing could read or delete it) and which
+  is not a valid Windows file name. Neither a device id nor a slot may
+  contain `@`, so one owner id names exactly one (device, speaker) pair.
+  The price: a client can send such an id to `/memory/add` itself — like any
+  owner id, it is not a credential.
 - **Deterministic and re-derivable.** The same (device, slot) always yields
   the same owner, so a re-registered speaker finds their memory again, and a
   renamed person (`display_name`) keeps it.
@@ -65,9 +70,9 @@ Rules at the edges:
 |---|---|---|
 | `speaker` is `None` (nobody identified) | The utterance is filed under the **device** (`sender_id = device_id`). Never guessed onto a person | `DeviceAddRequest.projected_messages()` |
 | Speaker known, `consented = false` | Not written; no owner is produced for them | `projected_messages()`, `speaker_owners()` |
-| `slot` is a name, contains `/`, `..`, `:`, or is longer than 63 | 422 at validation | `DeviceSpeaker.slot` pattern |
-| `device_id` has a path separator or is `.` / `..` | 422 at validation | `PathSafeId` |
-| `device_id` + `::` + `slot` would exceed 128 characters | 422 for the whole batch, before any write | `DeviceAddRequest` after-validator |
+| `slot` is a name, contains `/`, `..`, `@`, or is longer than 63 | 422 at validation | `DeviceSpeaker.slot` pattern |
+| `device_id` has a path separator or `@`, or is `.` / `..` | 422 at validation | `DeviceAddRequest.device_id` pattern, `PathSafeId` |
+| `device_id` + `@` + `slot` would exceed 128 characters | 422 for the whole batch, before any write | `DeviceAddRequest` after-validator |
 | Two utterances by one speaker in a batch | One owner (`speaker_owners()` de-duplicates, first-spoken order) | `speaker_owners()` |
 | Two speakers in one memcell | Two episode copies, one per owner — the existing fan-out | `_unique_user_senders` |
 
@@ -77,7 +82,7 @@ The roster is the device's own state, not EverOS's. A device enrolls a
 voiceprint (or seats a roster index), assigns a slot, and only then starts
 sending `speaker.slot`. EverOS learns a person the first time their slot
 appears in a batch: the first episode copy under
-`users/<device>::<slot>/` creates the directory, and `extract_user_profile`
+`users/<device>@<slot>/` creates the directory, and `extract_user_profile`
 writes the profile from that episode on. Nothing needs a registration call;
 there is nothing to invalidate when a slot is retired (its memory stays
 readable until deleted — see the deletion question below).
@@ -100,7 +105,7 @@ For device `D`, speaker slot `S`, in scope `app_id`/`project_id`:
 ```
 <root>/<app>/<project>/
 ├── users/
-│   ├── D::S/                            # S's own memory on D
+│   ├── D@S/                            # S's own memory on D
 │   │   ├── user.md                      # S's profile (as ever)
 │   │   └── episodes/episode-<date>.md   # S's episode copies
 │   └── D/                               # the device's own records
@@ -124,31 +129,31 @@ For device `D`, speaker slot `S`, in scope `app_id`/`project_id`:
   would need a cascade projection and an index table, and buys nothing the
   owner directory does not already give.
 
-The owner limit (128 characters) applies to `<device_id>::<slot>`; a device
+The owner limit (128 characters) applies to `<device_id>@<slot>`; a device
 id and a slot that would not fit is refused at request time (see the table
 in section 1) rather than truncated — a truncated id would silently land in
 someone else's or nowhere's memory.
 
 ## 3. The request / response surface
 
-The design keeps **one** request shape, not a parallel API: the device
-models project onto the existing endpoints, so the memory, storage, search
-and delete code is unchanged. `schemas/device.py` ships the models now; the
-routes that accept them are the implementation's work.
+The design keeps **one** write path, not a parallel API: the device route
+projects onto `/memory/add`, and reads and deletes are the existing routes,
+so the memory, storage, search and delete code is unchanged.
 
-### 3.1 Add — `POST /api/v2/memory/add`
+### 3.1 Add — `POST /api/v2/memory/device/add`
 
 | | |
 |---|---|
 | Request | `DeviceAddRequest` (section 1 table) |
-| Success | `200` `{"request_id": ..., "data": {"message_count": N, "status": "accumulated" \| "extracted", "owners": ["D::S", ...]}}` (`DeviceAddResponseData`) |
-| Queued | `202` as `/memory/add` returns it today, body carrying the same three fields with `status: "queued"` |
+| Success | `200` `{"request_id": ..., "data": {"message_count": N, "status": "accumulated" \| "extracted", "owners": ["D@S", ...]}}` (`DeviceAddResponseData`) |
+| Queued | `202` exactly as `/memory/add` returns it (the session already has queued batches) |
+| All declined | `200` with `message_count: 0`, `status: "accumulated"`, `owners: []`; nothing is written |
 | Errors | `422` — no utterances, a slot or device id outside its charset, an owner id over 128 characters; `409` `SESSION_BUSY` / `500` `PAYLOAD_TOO_LARGE`, inherited from `/memory/add` |
-| Projection | `DeviceAddRequest.projected_messages()` → the `messages[]` the pipeline consumes: `sender_id` = `D::S` (or `D`), `sender_name` = label, `role` = `"user"` |
+| Projection | `DeviceAddRequest.projected_messages()` → the `messages[]` the pipeline consumes: `sender_id` = `D@S` (or `D`), `sender_name` = label, `role` = `"user"` |
 
 `sender_name` missing: the episode copy's `owner_name` falls back to the
 **sender id** (existing `_sender_label` behaviour), so the narrative says
-`D::S` — ugly but unambiguous. Devices should always send a
+`D@S` — ugly but unambiguous. Devices should always send a
 `display_name` they know; the profile is not affected either way.
 
 ### 3.2 Flush — `POST /api/v2/memory/flush`
@@ -164,11 +169,11 @@ after `split_episode_by_owner` → `extract_user_profile` run.
 Whose memory is searched is expressed by `user_id` alone, so nothing new is
 needed on the wire:
 
-| `MemoryScope` | `user_id` sent | Meaning |
+| Scope | `user_id` sent | Meaning |
 |---|---|---|
-| `speaker` | `D::S` | one person's memory on this device |
+| `speaker` | `D@S` | one person's memory on this device |
 | `device` | `D` | the device's own records |
-| `both` | `D::S`, then `D` | the person's memory first, then the device's |
+| `both` | `D@S`, then `D` | the person's memory first, then the device's |
 
 For `both` the client issues the two searches and merges by score (the
 response items carry `score` on one scale, HYBRID/AGENTIC only — see
@@ -182,17 +187,17 @@ carries `user_id`, so a client can assert none of them is another slot's.
 
 | Need | Request | Effect |
 |---|---|---|
-| Forget one person on one device | `{"user_id": "D::S"}` | That person's directory, profile, clusters and index rows |
-| Forget one conversation | `{"session_id": ..., "user_id": "D::S"}` | Their copies of that session only |
+| Forget one person on one device | `{"user_id": "D@S"}` | That person's directory, profile, clusters and index rows |
+| Forget one conversation | `{"session_id": ..., "user_id": "D@S"}` | Their copies of that session only |
 | Forget the device | `{"user_id": "D"}` | The device's own records; **not** the people's |
-| Forget one episode | `/memory/delete_by_ids` with `user_id: "D::S"` | As today, scoped to that owner |
+| Forget one episode | `/memory/delete_by_ids` with `user_id: "D@S"` | As today, scoped to that owner |
 
 The 128-character owner limit applies to `user_id` here too, and the same
 validation runs.
 
 ### 3.5 Profile — `POST /api/v2/memory/get`
 
-`{"user_id": "D::S", "memory_type": "profile"}` returns that person's
+`{"user_id": "D@S", "memory_type": "profile"}` returns that person's
 profile. `{"user_id": "D", "memory_type": "profile"}` returns the device's.
 A device that wants to greet a person by name reads the profile's summary;
 it should not parse `explicit_info` items as facts to repeat aloud.
@@ -206,16 +211,9 @@ pins the request bodies of `/memory/add`, `/memory/flush`, `/memory/delete`,
 `/memory/delete_by_ids`, `/memory/get` and `/memory/search` as frozen
 values: each one must validate and round-trip with every value a client sent
 coming back unchanged (defaults the client omitted are the server's to
-fill). The device module is additive — new models, new helpers — and the
-existing `sender_id` charset is asserted to still reject `::`, which is what
-makes the composed owner unforgeable.
-
-Consequence for the implementation: the literal device projection cannot be
-sent to today's `/memory/add` (its `sender_id` charset has no `:`). The
-hardware route either widens that charset deliberately (a reviewed change,
-with the same path-safety tests) or accepts `DeviceAddRequest` and builds
-the message rows server-side. The design prefers the latter: the device id
-and slot stay structured and the owner id is never client-authored.
+fill). The device route is additive, and the same test asserts the
+projection and the composed owner pass `/memory/add`, `/memory/delete` and
+`/memory/search` validation unchanged.
 
 ## 4. Open questions the implementation must settle
 
@@ -233,7 +231,7 @@ and slot stay structured and the owner id is never client-authored.
    whether the device's own records may name a non-consenting person.
 3. **Deletion semantics when a device changes hands.** Today a deletion
    removes one owner. Selling or resetting a device should remove every
-   `D::*` owner plus `D` — but "every owner with prefix `D::`" is not a
+   `D@*` owner plus `D` — but "every owner with prefix `D@`" is not a
    deletion the API expresses (prefix scans cross owner directories). Likely
    answer: a device-scoped deletion that resolves the prefix through the
    sqlite index and then deletes each owner in turn, with the same crash-safe
@@ -247,7 +245,7 @@ and slot stay structured and the owner id is never client-authored.
    memory.
 5. **Two devices, one person.** The mapping deliberately gives the same
    person two memories. Whether the product wants a cross-device person
-   identity (say `person::<slot>` independent of device) is a product
+   identity (say `person@<slot>` independent of device) is a product
    decision; it would be a second owner id scheme, not a change to this one.
 6. **Session length.** A device session that never flushes grows until the
    buffer is cut; a household's conversations also interleave. The device

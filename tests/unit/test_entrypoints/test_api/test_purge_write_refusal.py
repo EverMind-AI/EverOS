@@ -24,6 +24,13 @@ _UPLOAD = {"file": ("n.md", b"# n\n", "text/markdown")}
 
 REFUSED: dict[tuple[str, str], dict[str, Any]] = {
     ("POST", "/memory/add"): {"json": {"session_id": "s", "messages": [_MESSAGE]}},
+    ("POST", "/memory/device/add"): {
+        "json": {
+            "device_id": "d1",
+            "session_id": "s",
+            "utterances": [{"speaker": {"slot": "s1"}, "text": "hi", "timestamp": 1}],
+        }
+    },
     ("POST", "/memory/flush"): {"json": {"session_id": "s"}},
     ("POST", "/knowledge/documents"): {"data": {"title": "n"}, "files": _UPLOAD},
     ("PUT", "/knowledge/documents/{doc_id}"): {

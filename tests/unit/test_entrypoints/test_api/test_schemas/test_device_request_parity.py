@@ -19,9 +19,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-from pydantic import ValidationError
-
 from everos.entrypoints.api.schemas import (
     DeleteByIdsRequest,
     DeleteRequest,
@@ -112,7 +109,6 @@ def test_the_device_request_projects_onto_the_existing_add_body() -> None:
     request = DeviceAddRequest.model_validate(
         {
             "device_id": "dev_kitchen",
-            "room": "kitchen",
             "session_id": "s_kitchen",
             "utterances": [
                 {
@@ -128,36 +124,36 @@ def test_the_device_request_projects_onto_the_existing_add_body() -> None:
     messages = request.projected_messages()
 
     assert [m["sender_id"] for m in messages] == [
-        "dev_kitchen::spk_a",
+        "dev_kitchen@spk_a",
         "dev_kitchen",
     ]
     assert [m["sender_name"] for m in messages] == ["Alice", None]
     assert [m["content"] for m in messages] == ["we need milk", "unintelligible"]
-    assert request.speaker_owners() == ["dev_kitchen::spk_a"]
+    assert request.speaker_owners() == ["dev_kitchen@spk_a"]
 
 
-def test_a_device_qualified_sender_id_is_not_a_message_sender_today() -> None:
-    """The literal projection is refused by ``/memory/add`` — by design, for now.
-
-    ``sender_id`` is a ``PathSafeId`` whose charset excludes ``:``, so the
-    device-qualified owner id cannot travel as a message sender until the
-    hardware path lands (a dedicated route or a widened sender charset).
-    Pinned so loosening the charset stays a deliberate, reviewed change.
-    """
-    with pytest.raises(ValidationError):
-        MemorizeAddRequest.model_validate(
-            {
-                "session_id": "s_kitchen",
-                "messages": [
-                    {
-                        "sender_id": "dev_kitchen::spk_a",
-                        "role": "user",
-                        "timestamp": _TS,
-                        "content": "we need milk",
-                    }
-                ],
-            }
-        )
+def test_the_projection_is_a_valid_add_body_and_owner() -> None:
+    """``/memory/device/add`` hands the projection to ``/memory/add``'s model,
+    and the person is then read and deleted by the same id on the existing
+    routes — so the composed owner must pass every one of them unchanged."""
+    request = DeviceAddRequest.model_validate(
+        {
+            "device_id": "dev_kitchen",
+            "session_id": "s_kitchen",
+            "utterances": [
+                {"speaker": {"slot": "spk_a"}, "text": "milk", "timestamp": _TS}
+            ],
+        }
+    )
+    add = MemorizeAddRequest.model_validate(
+        {"session_id": "s_kitchen", "messages": request.projected_messages()}
+    )
+    assert [m.sender_id for m in add.messages] == ["dev_kitchen@spk_a"]
+    assert DeleteRequest(user_id="dev_kitchen@spk_a").user_id == "dev_kitchen@spk_a"
+    search = SearchRequest.model_validate(
+        {"user_id": "dev_kitchen@spk_a", "query": "milk", "method": "keyword"}
+    )
+    assert search.owner_id == "dev_kitchen@spk_a"
 
 
 def test_the_device_scope_carries_the_device_id_not_a_person() -> None:

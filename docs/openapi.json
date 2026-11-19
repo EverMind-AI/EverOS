@@ -124,6 +124,82 @@
         }
       }
     },
+    "/api/v1/memory/device/add": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Add Device Memory",
+        "description": "Add one device's utterances, each speaker under their own owner.\n\nA thin projection onto ``/add`` (``schemas.device``): every speaker\nbecomes the sender ``<device_id>@<slot>``, read and deleted afterwards by\nthat id as ``user_id`` on the existing routes.",
+        "operationId": "add_device_memory_api_v1_memory_device_add_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessEnvelope_DeviceAddResponseData_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SuccessEnvelope_AcceptedResponseData_"
+                    }
+                  ],
+                  "title": "Response Add Device Memory Api V1 Memory Device Add Post"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Queued: async_mode, or the session already had a backlog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_AcceptedResponseData_"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over memorize.async_queue.max_payload_bytes"
+          },
+          "429": {
+            "description": "Queue at its per-session or global cap"
+          },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/memory/flush": {
       "post": {
         "tags": [
@@ -1396,6 +1472,82 @@
                     }
                   ],
                   "title": "Response Add Memory Api V2 Memory Add Post"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Queued: async_mode, or the session already had a backlog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope_AcceptedResponseData_"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body over memorize.async_queue.max_payload_bytes"
+          },
+          "429": {
+            "description": "Queue at its per-session or global cap"
+          },
+          "409": {
+            "description": "PURGE_IN_PROGRESS: a running purge is clearing this app / project; resend once the job named in the message has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/memory/device/add": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Add Device Memory",
+        "description": "Add one device's utterances, each speaker under their own owner.\n\nA thin projection onto ``/add`` (``schemas.device``): every speaker\nbecomes the sender ``<device_id>@<slot>``, read and deleted afterwards by\nthat id as ``user_id`` on the existing routes.",
+        "operationId": "add_device_memory_api_v2_memory_device_add_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessEnvelope_DeviceAddResponseData_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SuccessEnvelope_AcceptedResponseData_"
+                    }
+                  ],
+                  "title": "Response Add Device Memory Api V2 Memory Device Add Post"
                 }
               }
             }
@@ -3358,6 +3510,154 @@
         ],
         "title": "DeleteResponseData",
         "description": "What a deletion removed.\n\nAttributes:\n    filters: The scope fields the request set.\n    count: Memories removed (entries, plus one per skill and one for the\n        profile when a whole owner is deleted)."
+      },
+      "DeviceAddRequest": {
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.+-]+$",
+            "title": "Device Id"
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id"
+          },
+          "app_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "App Id",
+            "default": "default"
+          },
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.@+-]+$",
+            "title": "Project Id",
+            "default": "default"
+          },
+          "utterances": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceUtterance"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Utterances"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "device_id",
+          "session_id",
+          "utterances"
+        ],
+        "title": "DeviceAddRequest",
+        "description": "A batch of utterances from one device.\n\nAttributes:\n    device_id: The device's id: the owner of utterances nobody was\n        identified for, and the prefix of every speaker owner id.\n    session_id: The conversation the utterances belong to, as\n        ``/memory/add`` takes it.\n    app_id / project_id: Scope segments, as ``/memory/add`` takes them.\n    utterances: The batch, in spoken order."
+      },
+      "DeviceAddResponseData": {
+        "properties": {
+          "message_count": {
+            "type": "integer",
+            "title": "Message Count"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accumulated",
+              "extracted"
+            ],
+            "title": "Status"
+          },
+          "owners": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Owners"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_count",
+          "status"
+        ],
+        "title": "DeviceAddResponseData",
+        "description": "What one device batch wrote.\n\nAttributes:\n    message_count: Utterances written, unattributed ones included and\n        non-consenting speakers' left out.\n    status: As ``/memory/add`` returns it.\n    owners: The per-person owners the batch wrote to; empty when every\n        utterance was unattributed or unconsented."
+      },
+      "DeviceSpeaker": {
+        "properties": {
+          "slot": {
+            "type": "string",
+            "maxLength": 63,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,62}$",
+            "title": "Slot"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "consented": {
+            "type": "boolean",
+            "title": "Consented",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slot"
+        ],
+        "title": "DeviceSpeaker",
+        "description": "One person the device can recognize, resolved upstream.\n\nAttributes:\n    slot: The device's stable per-person id (voiceprint slot, roster\n        index). Never a name: names change, slots do not.\n    display_name: How the person is called in the room; ``None`` when the\n        device has not been told. Only ever a label — it never selects\n        which memory directory an utterance lands in.\n    consented: Whether this person agreed to the device keeping their\n        memory. ``False`` means their utterances are not written at all."
+      },
+      "DeviceUtterance": {
+        "properties": {
+          "speaker": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeviceSpeaker"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Text"
+          },
+          "timestamp": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Timestamp"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "timestamp"
+        ],
+        "title": "DeviceUtterance",
+        "description": "One thing said in front of the device, attributed to one speaker.\n\nAttributes:\n    speaker: The resolved speaker; ``None`` when the device could not\n        identify who is talking. Such an utterance is filed under the\n        device, never guessed onto a person.\n    text: What was said, as transcribed.\n    timestamp: Event time as Unix epoch milliseconds, like\n        :class:`~.memorize.MessageItemDTO.timestamp`."
       },
       "DocumentContextDTO": {
         "properties": {
@@ -5739,6 +6039,23 @@
           "data"
         ],
         "title": "SuccessEnvelope[DeleteResponseData]"
+      },
+      "SuccessEnvelope_DeviceAddResponseData_": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DeviceAddResponseData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "data"
+        ],
+        "title": "SuccessEnvelope[DeviceAddResponseData]"
       },
       "SuccessEnvelope_DocumentCreateResponse_": {
         "properties": {

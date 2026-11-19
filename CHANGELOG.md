@@ -14,14 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   episode's display summary (below); `split_episode_by_owner` hands each
   owner's copy of an episode to the profile as an `EpisodeExtractedForOwner`
   event of its own, with no model call.
-- **Device-assistant request models and identity helpers**
-  (`entrypoints/api/schemas/device.py`): one hardware device, many speakers.
-  `speaker_owner_id(device_id, slot)` names a person's memory on a device as
-  `<device_id>::<slot>`; `DeviceAddRequest` describes a batch of utterances
-  and projects them onto the message rows `/memory/add` consumes, an
-  unidentified or non-consenting speaker falling back to the device's own
-  owner. Interface only — no route, no write path; existing request bodies are
-  unchanged and pinned by a parity test. See `docs/device-assistant.md`.
+- **`POST /memory/device/add`: one hardware device, many speakers.** Each
+  utterance names the speaker the device recognized; the route builds the
+  `/memory/add` request with the sender `<device_id>@<slot>`, so every person
+  gets their own episodes and profile, read, searched and deleted by that id
+  as `user_id` on the existing routes. Utterances nobody was identified for
+  are filed under the device id; a speaker with `consented: false` is not
+  written at all. Existing request bodies are unchanged. See
+  `docs/device-assistant.md` and `docs/api.md`.
 
 ### Changed
 

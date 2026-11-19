@@ -3,8 +3,8 @@
 A device runs ONE EverOS agent instance and is spoken to by several people in
 the same room. Two identities therefore travel with every utterance:
 
-* the **device** — the agent's scope (``app_id`` / ``project_id``) plus the
-  ``session_id`` the utterances accumulate under;
+* the **device** — the ``device_id``, plus the ``session_id`` the utterances
+  accumulate under;
 * the **speaker** — the person talking, resolved upstream (voiceprint slot,
   roster index, wake-word profile) to a stable slot id.
 
@@ -13,13 +13,12 @@ written once per distinct ``role="user"`` ``sender_id`` of a memcell
 (``everos.memory.extract.pipeline.user_memory._unique_user_senders``), each
 copy under that sender's owner directory, and the profile is keyed the same
 way. Giving every speaker of a device a *device-qualified* owner id therefore
-keeps each person's episodes and profile in their own directory, while the
-device keeps its own session and its own records.
+keeps each person's episodes and profile in their own directory, while
+utterances nobody was identified for stay with the device.
 
-Nothing here touches storage or the service layer: the helpers are pure and
-the models are request/response shapes. Whether the hardware path later gets
-its own route or maps onto ``/memory/add`` is an implementation decision the
-design document records; both consume the mapping below.
+``POST /memory/device/add`` (``routes.memorize``) projects a
+:class:`DeviceAddRequest` onto the ``/memory/add`` request; nothing below the
+route knows about devices.
 """
 
 from __future__ import annotations
@@ -31,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .ids import PATH_SAFE_CHARSET, AppScopeId, PathSafeId, ProjectScopeId, SessionId
 
 __all__ = [
+    "DEVICE_ID_CHARSET",
     "DEVICE_OWNER_SEPARATOR",
     "MAX_OWNER_ID_LENGTH",
     "SPEAKER_SLOT_CHARSET",
@@ -38,21 +38,25 @@ __all__ = [
     "DeviceAddResponseData",
     "DeviceSpeaker",
     "DeviceUtterance",
-    "MemoryScope",
     "speaker_owner_id",
 ]
 
-DEVICE_OWNER_SEPARATOR = "::"
+DEVICE_OWNER_SEPARATOR = "@"
 """Separates the device id from the speaker slot in a per-person owner id.
 
-``:`` is outside :data:`~.ids.PATH_SAFE_CHARSET`, so no ``user_id``,
-``sender_id``, ``app_id`` or ``project_id`` a client can send contains it: a
-composed owner id names exactly one (device, speaker) pair and cannot be
-forged through the existing routes.
+Inside :data:`~.ids.PATH_SAFE_CHARSET`, so a composed owner is an ordinary
+``user_id`` / ``sender_id`` on every existing route and a valid directory
+name on every platform (``:`` is not one on Windows). Neither a device id nor
+a slot may contain it, so one owner id names exactly one (device, speaker)
+pair. A client can still send such an id to ``/memory/add`` itself: like every
+other owner id, it is not a credential.
 """
 
 MAX_OWNER_ID_LENGTH = 128
 """The owner-id length the existing routes accept (``sender_id`` max_length)."""
+
+DEVICE_ID_CHARSET = r"^[a-zA-Z0-9_.+-]+$"
+""":data:`~.ids.PATH_SAFE_CHARSET` without the separator."""
 
 SPEAKER_SLOT_CHARSET = r"^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,62}$"
 """A roster slot id: filesystem-safe, no separator, no leading ``.``/``-``."""
@@ -101,10 +105,8 @@ class DeviceAddRequest(BaseModel):
     """A batch of utterances from one device.
 
     Attributes:
-        device_id: The device's id. It is the scope owner of the device's own
-            records and the prefix of every speaker owner id.
-        room: Free-form room label the device reports (``"kitchen"``); kept
-            with the device's own records, never part of a person's owner id.
+        device_id: The device's id: the owner of utterances nobody was
+            identified for, and the prefix of every speaker owner id.
         session_id: The conversation the utterances belong to, as
             ``/memory/add`` takes it.
         app_id / project_id: Scope segments, as ``/memory/add`` takes them.
@@ -113,8 +115,9 @@ class DeviceAddRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    device_id: PathSafeId = Field(..., min_length=1, max_length=MAX_OWNER_ID_LENGTH)
-    room: str | None = Field(default=None, max_length=64)
+    device_id: PathSafeId = Field(
+        ..., min_length=1, max_length=MAX_OWNER_ID_LENGTH, pattern=DEVICE_ID_CHARSET
+    )
     session_id: SessionId = Field(..., min_length=1, max_length=128)
     app_id: AppScopeId = Field(
         default="default", min_length=1, max_length=128, pattern=PATH_SAFE_CHARSET
@@ -141,25 +144,21 @@ class DeviceAddRequest(BaseModel):
         return owners
 
     def projected_messages(self) -> list[dict[str, object]]:
-        """The batch as ``/memory/add`` message rows, one per utterance.
+        """The batch as ``/memory/add`` message rows.
 
-        The projection the implementation consumes before it can reuse the
-        existing write path: ``sender_id`` is the device-qualified owner (the
-        device id alone for an unidentified or non-consenting speaker),
-        ``sender_name`` the speaker's label, ``role`` always ``"user"`` —
-        the device is a human-facing surface, so nothing it hears is an
-        assistant or tool turn.
-
-        The literal projection is not yet accepted by
-        :class:`~.memorize.MessageItemDTO`, whose ``sender_id`` charset has no
-        ``:``: the hardware route (or a widened charset) is the change that
-        lands with the implementation.
+        ``sender_id`` is the device-qualified owner (the device id alone for
+        an unidentified speaker), ``sender_name`` the speaker's label,
+        ``role`` always ``"user"`` — the device is a human-facing surface, so
+        nothing it hears is an assistant or tool turn. A non-consenting
+        speaker's utterances are dropped, not filed under the device.
         """
         rows: list[dict[str, object]] = []
         for utterance in self.utterances:
             speaker = utterance.speaker
-            if speaker is None or not speaker.consented:
+            if speaker is None:
                 sender, name = self.device_id, None
+            elif not speaker.consented:
+                continue
             else:
                 sender = speaker_owner_id(self.device_id, speaker.slot)
                 name = speaker.display_name
@@ -188,25 +187,16 @@ class DeviceAddResponseData(BaseModel):
     """What one device batch wrote.
 
     Attributes:
-        message_count: Utterances accepted (including unattributed ones).
+        message_count: Utterances written, unattributed ones included and
+            non-consenting speakers' left out.
         status: As ``/memory/add`` returns it.
         owners: The per-person owners the batch wrote to; empty when every
             utterance was unattributed or unconsented.
     """
 
     message_count: int
-    status: Literal["accumulated", "extracted", "queued"]
+    status: Literal["accumulated", "extracted"]
     owners: list[str] = Field(default_factory=list)
-
-
-MemoryScope = Literal["speaker", "device", "both"]
-"""Whose memory a device query searches.
-
-``speaker`` — one named person's memory only (``user_id`` =
-:func:`speaker_owner_id`); ``device`` — the device's own records only
-(``user_id`` = the device id); ``both`` — the person's memory, then the
-device's, as one ranked list.
-"""
 
 
 def speaker_owner_id(device_id: str, slot: str) -> str:
@@ -220,7 +210,7 @@ def speaker_owner_id(device_id: str, slot: str) -> str:
         slot: The device's stable per-person slot.
 
     Returns:
-        ``<device_id>::<slot>``, a path-safe owner id of at most 128
+        ``<device_id>@<slot>``, a path-safe owner id of at most 128
         characters.
 
     Raises:

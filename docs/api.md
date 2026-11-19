@@ -27,6 +27,7 @@ business semantics the raw spec does not carry.
   - [GetMemoryType](#getmemorytype)
 - [Endpoints](#endpoints)
   - [POST /api/v2/memory/add](#post-apiv2memoryadd)
+  - [POST /api/v2/memory/device/add](#post-apiv2memorydeviceadd)
   - [POST /api/v2/memory/flush](#post-apiv2memoryflush)
   - [Asynchronous mode](#asynchronous-mode)
   - [GET /api/v2/tasks/{task_id}](#get-apiv2taskstask_id)
@@ -646,6 +647,78 @@ Response (real capture):
         "status": "accumulated"
     }
 }
+```
+
+### POST /api/v2/memory/device/add
+
+`/memory/add` for a hardware device that several people talk to: each
+utterance names the speaker the device recognized, and each person's memory
+is kept under their own owner id `<device_id>@<slot>`. The route only builds
+the `/memory/add` request (one message per utterance, `role: "user"`); the
+pipeline, `202` queueing and errors are `/memory/add`'s. Read, search and
+delete a person with that id as `user_id` on the existing routes; the
+device's own records (utterances nobody was identified for) are under
+`user_id = device_id`. Design and open questions:
+[device-assistant.md](device-assistant.md).
+
+#### Request body
+
+| Field | Type | Required | Default | Constraints |
+|---|---|---|---|---|
+| `device_id` | `string` | yes | — | length 1–128, `^[a-zA-Z0-9_.+-]+$` (no `@`), not `.` / `..` |
+| `session_id` | `string` | yes | — | as `/memory/add` |
+| `app_id` / `project_id` | `string` *(ScopeId)* | no | `"default"` | as `/memory/add` |
+| `utterances` | `array<DeviceUtterance>` | yes | — | 1–500 items, in spoken order |
+
+`DeviceUtterance`:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `speaker` | `DeviceSpeaker \| null` | no | `null` when nobody was identified: the utterance is filed under the device |
+| `text` | `string` | yes | the transcription, non-empty |
+| `timestamp` | `integer` | yes | Unix epoch **milliseconds** |
+
+`DeviceSpeaker`:
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `slot` | `string` | yes | — | the device's stable per-person id (voiceprint slot, roster index), `^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,62}$` |
+| `display_name` | `string \| null` | no | `null` | label only (`sender_name`); never selects whose memory |
+| `consented` | `boolean` | no | `true` | `false`: this utterance is dropped, not written anywhere |
+
+`device_id` + `@` + `slot` longer than 128 characters is a `422` for the
+whole batch.
+
+#### Response body
+
+`200 OK` — as `/memory/add`, plus `owners`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `message_count` | `integer` | Utterances written (declined ones excluded) |
+| `status` | `"accumulated" \| "extracted"` | As `/memory/add` |
+| `owners` | `array<string>` | Per-person owner ids this batch wrote to, first-spoken order |
+
+A batch in which every speaker declined writes nothing and returns
+`message_count: 0`, `status: "accumulated"`, `owners: []`. `202 Accepted` is
+`/memory/add`'s body unchanged.
+
+#### cURL example
+
+```bash
+TS=$(( $(date +%s) * 1000 ))
+curl -X POST http://127.0.0.1:8000/api/v2/memory/device/add \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"device_id\": \"speaker01\",
+    \"session_id\": \"speaker01-2026-11-19\",
+    \"utterances\": [
+      {\"speaker\": {\"slot\": \"spk_a\", \"display_name\": \"Alice\"}, \"text\": \"Remind me to buy milk.\", \"timestamp\": $TS},
+      {\"speaker\": {\"slot\": \"spk_b\"}, \"text\": \"And bread for me.\", \"timestamp\": $((TS+10))},
+      {\"text\": \"Who left the lights on?\", \"timestamp\": $((TS+20))}
+    ]
+  }"
+# then: POST /api/v2/memory/search {"user_id": "speaker01@spk_a", "query": "milk"}
 ```
 
 ### POST /api/v2/memory/flush
