@@ -368,6 +368,9 @@ class PurgeRunner:
 
     async def _save(self, run: _Run, started: float) -> None:
         run.run_seconds += time.monotonic() - started
+        await self._persist(run)
+
+    async def _persist(self, run: _Run) -> None:
         await self._jobs.update_progress(
             run.job_id,
             run_seconds=run.run_seconds,
@@ -446,13 +449,20 @@ class PurgeRunner:
         does not reset it.
         """
         run.at_store = next(iter(run.steps))  # the second pass starts there
-        saved = time.monotonic()
-        while not await self._drained(run):
-            await asyncio.sleep(_DRAIN_POLL_S)
-            if time.monotonic() - saved >= _DRAIN_SAVE_S:
-                await self._save(run, saved)
-                saved = time.monotonic()
-        await self._save(run, saved)
+        base, start = run.run_seconds, time.monotonic()
+        saved = start
+        try:
+            while not await self._drained(run):
+                await asyncio.sleep(_DRAIN_POLL_S)
+                if time.monotonic() - saved >= _DRAIN_SAVE_S:
+                    saved = time.monotonic()
+                    run.run_seconds = base + (saved - start)
+                    await self._persist(run)
+        finally:
+            # Wall time since the wait began, so the writes themselves and the
+            # tail a budget cancel cuts off count too (``_end`` persists it).
+            run.run_seconds = base + (time.monotonic() - start)
+        await self._persist(run)
 
     async def _drained(self, run: _Run) -> bool:
         if (run.fence_tokens or frozenset()) & self._fence.in_flight():

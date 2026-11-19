@@ -404,6 +404,29 @@ async def test_drain_time_counts_toward_the_budget(
     )
 
 
+async def test_the_budget_counts_the_wait_including_its_writes(
+    storage: Storage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wait's time is wall time: a slow job-row write (the Windows CI
+    disk, where this run once recorded 0.77 s of a 1 s budget) is not lost,
+    nor the tail the budget's cancel cuts off."""
+    from everos.infra.persistence.sqlite._repos.purge_job import PurgeJobRepo
+
+    real = PurgeJobRepo.update_progress
+
+    async def slow_write(self: Any, *args: Any, **kwargs: Any) -> None:
+        await asyncio.sleep(0.03)
+        await real(self, *args, **kwargs)
+
+    monkeypatch.setattr(PurgeJobRepo, "update_progress", slow_write)
+    monkeypatch.setattr(_runner, "_DRAIN_SAVE_S", 0.05)
+    p, job_id = await _confirmed(storage, run_budget_seconds=1)
+    forever = p.marks.track(_old())  # never ends
+    forever.__enter__()
+    assert await p.run_to_end(job_id) == "failed"
+    assert (await _row(p, job_id)).run_seconds >= 0.75
+
+
 async def test_a_job_started_too_often_ends_failed(storage: Storage) -> None:
     """D33: a job that keeps killing the server mid-step (no failure counted,
     no running time saved) stops after MAX_ATTEMPTS starts."""
