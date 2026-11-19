@@ -78,6 +78,12 @@ Rules at the edges:
 | Two utterances by one speaker in a batch | One owner (de-duplicated, first-spoken order) | `project_device_batch` |
 | Two speakers in one memcell | Two episode copies, one per owner — the existing fan-out | `_unique_user_senders` |
 
+A device id shares the owner namespace with ordinary user ids of the same
+`app_id` / `project_id`: device `alice` would file its unattributed lines
+into an existing user `alice`'s memory. Give devices their own `project_id`
+(or ids no ordinary user id takes). `device@slot` cannot collide with an
+e-mail-style id: a slot has no `.`.
+
 ### Registering a new speaker
 
 The roster is the device's own state, not EverOS's. A device enrolls a
