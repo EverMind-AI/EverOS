@@ -54,8 +54,15 @@ def _ok(resp: httpx.Response, *codes: int) -> dict[str, Any]:
 
 def agent_chat(user: str, token: str) -> list[dict[str, Any]]:
     """A user-agent exchange with three tool calls (an agent case needs at
-    least three tool rounds)."""
-    msgs = chat(user, token, assistant=AGENT, n=2)
+    least three tool rounds).
+
+    The user is named ``Alice``, the person the fake episode narrative is
+    about: a profile builds only from episodes that name its owner.
+    """
+    msgs = [
+        m | {"sender_name": "Alice"} if m["sender_id"] == user else m
+        for m in chat(user, token, assistant=AGENT, n=2)
+    ]
     at = msgs[-1]["timestamp"]
     for i in range(3):
         call = {
