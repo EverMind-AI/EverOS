@@ -1,20 +1,23 @@
-"""Reflection — Select -> Merge -> Deprecate, in two steps.
+"""Reflection — Select -> Merge -> Re-extract -> Deprecate, in two steps.
 
 Consolidates fragmented cluster members (memcell-derived episodes) into a
-single high-quality merged episode per cluster:
+single high-quality merged episode per cluster. The originals — episodes
+and their atomic facts — may only be deprecated once the merged episode's
+own facts exist, so the cycle is split at that point:
 
 - :class:`ReflectionOrchestrator` selects clusters, merges each one, writes
   the merged episode to md and returns an ``EpisodeExtracted`` carrying a
   :class:`~everos.memory.events.ReflectionContext` — the snapshot the second
   step acts on.
-- :class:`ReflectionFinisher`, run by ``finish_reflection`` on that event,
-  deprecates the replaced members in md (the cascade carries the marks into
-  the index), moves the cluster onto the merged episode and records a
-  ``ReflectionReport``.
+- ``extract_atomic_facts`` extracts the merged episode's facts and passes
+  the context on in ``AtomicFactsExtracted``.
+- :class:`ReflectionFinisher` deprecates the replaced members and their
+  facts in md (the cascade carries the marks into the index), moves the
+  cluster onto the merged episode and records a ``ReflectionReport``.
 
-The second step starts as soon as the merged episode is written; it waits
-for nothing else. If it fails, the merged episode stays and the originals
-stay live, which a later cycle detects as an orphan.
+If fact extraction never succeeds the second step never runs: the merged
+episode stays without facts and the originals stay live, which a later
+cycle detects as an orphan.
 
 See ``local/2026-06-14-reflection-everos-design.md`` for the full design.
 """
@@ -22,7 +25,7 @@ See ``local/2026-06-14-reflection-everos-design.md`` for the full design.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 if TYPE_CHECKING:
@@ -44,6 +47,8 @@ from everos.memory.events import (
 )
 from everos.memory.models import ClusterKind, Episode, ReflectionReport
 from everos.memory.ports import (
+    AtomicFactIndex,
+    AtomicFactStore,
     ClusterStore,
     EpisodeIndex,
     EpisodeStore,
@@ -56,6 +61,7 @@ from everos.memory.ports import (
     all_of,
     eq,
     is_null,
+    one_of,
 )
 
 logger = get_logger(__name__)
@@ -120,7 +126,7 @@ class ReflectionOrchestrator:
 
         Returns:
             One ``EpisodeExtracted`` per merged cluster, carrying the
-            context :class:`ReflectionFinisher` acts on.
+            context :class:`ReflectionFinisher` needs once its facts exist.
         """
         candidates = await self._select_candidates(scope=scope, kind=kind)
         logger.info(
@@ -479,11 +485,13 @@ class ReflectionOrchestrator:
 
 
 class ReflectionFinisher:
-    """Retire what one merge replaced, once the merged episode is written.
+    """Retire what one merge replaced, once the merged episode has its facts.
 
     Args:
         cluster_store: Clusters and their membership.
         episode_store: Episode truth (deprecation).
+        atomic_fact_store: Atomic-fact truth (deprecation).
+        atomic_fact_index: Atomic-fact reads (facts of deprecated episodes).
         report_store: Reflection audit trail.
         embedder: Embedding provider for centroid recomputation.
     """
@@ -493,11 +501,15 @@ class ReflectionFinisher:
         *,
         cluster_store: ClusterStore,
         episode_store: EpisodeStore,
+        atomic_fact_store: AtomicFactStore,
+        atomic_fact_index: AtomicFactIndex,
         report_store: ReflectionReportStore,
         embedder: EmbeddingProvider,
     ) -> None:
         self._cluster_store = cluster_store
         self._episode_store = episode_store
+        self._atomic_fact_store = atomic_fact_store
+        self._atomic_fact_index = atomic_fact_index
         self._report_store = report_store
         self._embedder = embedder
 
@@ -586,6 +598,12 @@ class ReflectionFinisher:
                 merged_entry_id=merged_entry_id,
             )
             return None
+        dep_fact = await self._deprecate_facts(
+            scope=scope,
+            parent_ids=to_deprecate,
+            merged_entry_id=merged_entry_id,
+            only_if=merged_alive,
+        )
         await self._update_cluster_after_merge(
             scope=scope,
             context=context,
@@ -603,12 +621,14 @@ class ReflectionFinisher:
             mode=context.mode,
             source_members=[m for m in context.source_members if m[0] in to_deprecate],
             merged_entry_id=merged_entry_id,
+            deprecated_fact_count=dep_fact,
         )
         await self._report_store.create(report)
         logger.info(
             "reflection_deprecated",
             cluster_id=context.cluster_id,
             deprecated_episode_count=dep_ep,
+            deprecated_fact_count=dep_fact,
         )
         return report
 
@@ -650,6 +670,43 @@ class ReflectionFinisher:
         ):
             return None
         return len(entries)
+
+    async def _deprecate_facts(
+        self,
+        *,
+        scope: Scope,
+        parent_ids: Collection[str],
+        merged_entry_id: str,
+        only_if: SourceCheck,
+    ) -> int:
+        """Mark the live atomic facts of deprecated episodes in their md files.
+
+        ``parent_id`` is an entry id, and entry ids restart per
+        (app, project, day): the scope keeps one project's reflection from
+        deprecating another project's facts.
+
+        Returns:
+            Number of facts marked.
+        """
+        if not parent_ids:
+            return 0
+        hits = await self._atomic_fact_index.find(
+            all_of(
+                one_of("parent_id", sorted(parent_ids)),
+                _owner_filter(scope),
+                is_null("deprecated_by"),
+            )
+        )
+        entries = [
+            (hit.stored.ref.md_path, hit.stored.ref.entry_id)
+            for hit in hits
+            if hit.stored.ref.md_path
+        ]
+        if entries:
+            await self._atomic_fact_store.deprecate(
+                scope, entries=entries, replaced_by=merged_entry_id, only_if=only_if
+            )
+        return len(hits)
 
     async def _update_cluster_after_merge(
         self,

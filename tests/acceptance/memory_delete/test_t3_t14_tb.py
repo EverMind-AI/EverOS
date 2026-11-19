@@ -105,7 +105,14 @@ def test_t14_1_whole_owner_and_escapes(make_server: Any) -> None:
     ]
     owned = {
         i
-        for t in ("episode", "agent_case", "user_profile", "agent_skill")
+        for t in (
+            "episode",
+            "atomic_fact",
+            "foresight",
+            "agent_case",
+            "user_profile",
+            "agent_skill",
+        )
         for i in lance_ids(srv.root, t)
         if i.startswith(("u1", "a1"))
     }
@@ -155,8 +162,8 @@ def test_tb2_1_unknown_and_other_project_ids(make_server: Any) -> None:
     }
 
 
-def test_tb3_1_one_episode(make_server: Any) -> None:
-    """B3: the episode leaves md and the index; nothing else."""
+def test_tb3_1_one_episode_and_its_fact(make_server: Any) -> None:
+    """B3: the episode and its fact leave md and the index; nothing else."""
     srv = make_server()
     seed_world(srv.root)
     srv.start()
@@ -168,7 +175,7 @@ def test_tb3_1_one_episode(make_server: Any) -> None:
     )
     srv.post("/cascade/quiesce", {})
     before = md_entries(srv.root)
-    index_before = lance_ids(srv.root, "episode")
+    index_before = {t: lance_ids(srv.root, t) for t in ("episode", "atomic_fact")}
     tables_before = logical_dump(srv.root)
     profile = srv.root / "default_app/default_project/users/u1/user.md"
     profile_before = profile.read_bytes()
@@ -177,12 +184,19 @@ def test_tb3_1_one_episode(make_server: Any) -> None:
 
     after = md_entries(srv.root)
     gone = [e for e in before if e not in after]
-    assert [(e["kind"], e["entry_id"]) for e in gone] == [
-        ("episodes", target["entry_id"])
+    assert sorted(
+        (e["kind"], e["entry_id"] if e["kind"] == "episodes" else e["parent_id"])
+        for e in gone
+    ) == [
+        (".atomic_facts", target["entry_id"]),
+        ("episodes", target["entry_id"]),
     ]
     episode = f"u1_{target['entry_id']}"
-    assert episode in index_before, "positive control: indexed"
-    assert lance_ids(srv.root, "episode") == index_before - {episode}
+    facts = {f"u1_{e['entry_id']}" for e in gone if e["kind"] == ".atomic_facts"}
+    assert episode in index_before["episode"], "positive control: indexed"
+    assert facts <= index_before["atomic_fact"], "positive control: facts indexed"
+    assert lance_ids(srv.root, "episode") == index_before["episode"] - {episode}
+    assert lance_ids(srv.root, "atomic_fact") == index_before["atomic_fact"] - facts
     tables_after = logical_dump(srv.root)
     for table, before_rows in tables_before.items():
         if table not in ("cluster", "cluster_member"):  # B3 unclusters it

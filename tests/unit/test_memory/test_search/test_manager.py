@@ -5,8 +5,9 @@ recaller is replaced by a hand-rolled stub that returns a small
 candidate list; the manager's job is to:
 
 * honour the ``owner_type`` hard partition,
-* run KEYWORD as sparse-only,
-* run VECTOR as ANN over the episode vectors, radius applied, and refuse
+* run KEYWORD as sparse-only and leave ``atomic_facts`` empty,
+* run VECTOR via MaxSim (ANN atomic_facts -> max-pool -> resolve episodes),
+  fall back to the episode vector when no fact is in scope, and refuse
   when no embedding is wired,
 * let HYBRID run without an LLM by default; require LLM only when the
   caller sets ``enable_llm_rerank=True``,
@@ -35,6 +36,7 @@ from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     AgentCaseRecaller,
     AgentSkillRecaller,
+    AtomicFactRecaller,
     EpisodeRecaller,
 )
 from everos.memory.search.recall.base import RecallerDeps
@@ -45,6 +47,7 @@ from ._records import (
     hit,
     stored_case,
     stored_episode,
+    stored_fact,
     stored_skill,
 )
 
@@ -91,6 +94,11 @@ def _skill_row(sid: str, source_case_ids: Sequence[str] = ()) -> SearchHit[Any]:
         source_case_ids=source_case_ids,
     )
     return hit(stored, 0.65)
+
+
+def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> SearchHit[Any]:
+    """An atomic-fact match hanging off episode entry ``parent_id``."""
+    return hit(_keyed(stored_fact(fid, parent_id=parent_id), fid), score)
 
 
 def _tokenizer() -> Tokenizer:
@@ -148,6 +156,7 @@ def _build_manager(
     skill_sparse: list[SearchHit[Any]] | None = None,
     skill_dense: list[SearchHit[Any]] | None = None,
     skill_by_case: list[SearchHit[Any]] | None = None,
+    atomic_fact_dense: list[SearchHit[Any]] | None = None,
     embedding: _StubEmbedding | None = None,
     reranker: Any = None,
     llm_client: Any = None,
@@ -158,8 +167,10 @@ def _build_manager(
     ``llm_client`` (also the decider) defaults to one that fails the test if
     called.
 
-    ``find`` on the episode index evaluates its filter, and so does the skill
-    index (the case→skill bridge narrows by ``source_case_ids`` membership).
+    ``find`` on the episode index evaluates its filter (the MaxSim parent
+    fetch narrows by entry id), and so does the skill index (the case→skill
+    bridge narrows by ``source_case_ids`` membership); the fact index answers
+    both the fact ANN and the HYBRID fact expansion from ``atomic_fact_dense``.
     """
     deps = RecallerDeps(tokenizer=_tokenizer())
     episodes = [*(episode_sparse or []), *(episode_dense or [])]
@@ -171,6 +182,13 @@ def _build_manager(
                 dense=episode_dense or [],
                 found=episodes,
                 filter_found=True,
+            ),
+        ),
+        atomic_fact_recaller=AtomicFactRecaller(
+            deps,
+            ScriptedIndex(  # type: ignore[arg-type]
+                dense=atomic_fact_dense or [],
+                found=atomic_fact_dense or [],
             ),
         ),
         agent_case_recaller=AgentCaseRecaller(
@@ -233,10 +251,10 @@ async def test_user_keyword_returns_episodes_only() -> None:
 async def test_recall_hit_emitted_only_for_calibrated_methods(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """recall_hit is meaningful only for a calibrated-score method (AGENTIC's
-    cross-encoder). For KEYWORD (unbounded BM25) and HYBRID (an RRF sum) the
-    code must emit top_score but NOT a hit verdict — a fixed threshold against
-    an uncalibrated score is an always-hit signal that inflates the dashboard."""
+    """recall_hit is meaningful only for calibrated-score methods (HYBRID LR
+    / AGENTIC rerank). For KEYWORD (unbounded BM25) the code must emit
+    top_score but NOT a hit verdict — a fixed 0.6 threshold against an
+    unbounded score is an always-hit signal that inflates the dashboard."""
     import everos.memory.search.manager as mgr_mod
 
     calls: list[dict[str, Any]] = []
@@ -251,16 +269,13 @@ async def test_recall_hit_emitted_only_for_calibrated_methods(
     assert calls[0]["top_score"] == 7.5
     assert calls[0]["hit"] is None  # no hit verdict for an uncalibrated method
 
-    # HYBRID: fused scores are an RRF sum, not a calibrated probability, so
-    # no hit verdict either.
+    # HYBRID: calibrated LR score → a real boolean hit verdict is emitted.
     calls.clear()
-    hy_mgr = _build_manager(
-        episode_sparse=[_episode_row("ep_1")], embedding=_StubEmbedding()
-    )
+    hy_mgr = _build_manager(embedding=_StubEmbedding())
     await hy_mgr.search(_user_req(method=SearchMethod.HYBRID))
     assert len(calls) == 1
     assert calls[0]["method"] == "hybrid"
-    assert calls[0]["hit"] is None
+    assert isinstance(calls[0]["hit"], bool)
 
 
 async def test_search_uses_propagated_request_id_when_bound() -> None:
@@ -277,11 +292,22 @@ async def test_search_uses_propagated_request_id_when_bound() -> None:
         reset_request_id(token)
 
 
-async def test_user_keyword_returns_the_matched_episode() -> None:
-    """KEYWORD is sparse-only: the matched episode comes back, nothing else."""
-    mgr = _build_manager(episode_sparse=[_episode_row("ep_1")])
+async def test_user_keyword_leaves_atomic_facts_empty() -> None:
+    """KEYWORD never back-fills facts — only HYBRID produces relevance-scored facts.
+
+    Even if the facts repository would return rows for the matched
+    episode, the keyword path must leave ``atomic_facts=[]``: there is
+    no per-query score for those facts, so emitting them would muddy
+    the contract (mirrors enterprise where event_log is a separate
+    memory_type, not auto-attached to episodic results).
+    """
+    mgr = _build_manager(
+        episode_sparse=[_episode_row("ep_1")],
+        atomic_fact_dense=[_atomic_fact_row("f1", parent_id="ep_1", score=0.9)],
+    )
     resp = await mgr.search(_user_req())
-    assert [ep.id for ep in resp.data.episodes] == ["ep_1"]
+    ep = resp.data.episodes[0]
+    assert ep.atomic_facts == []
 
 
 async def test_user_keyword_no_results() -> None:
@@ -294,6 +320,7 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
     index = ScriptedIndex(sparse=[_episode_row("ep_1")])
     mgr = SearchManager(
         episode_recaller=EpisodeRecaller(RecallerDeps(tokenizer=_tokenizer()), index),  # type: ignore[arg-type]
+        atomic_fact_recaller=MagicMock(),
         agent_case_recaller=MagicMock(),
         agent_skill_recaller=MagicMock(),
         profile_recaller=_StubProfileRecaller(),  # type: ignore[arg-type]
@@ -314,7 +341,7 @@ async def test_user_keyword_filters_compile_pinned_owner() -> None:
     assert "owner_type = 'user'" in rendered
 
 
-# ── VECTOR (episode ANN) ──────────────────────────────────────────────
+# ── VECTOR (MaxSim atomic) ────────────────────────────────────────────
 
 
 async def test_embed_query_rejects_a_width_that_disagrees_with_dim() -> None:
@@ -355,10 +382,13 @@ async def test_vector_method_requires_embedding(
     assert excinfo.value.feature == "vector"
 
 
-async def test_vector_method_returns_the_ann_episodes() -> None:
+async def test_vector_method_returns_episodes_via_maxsim() -> None:
     mgr = _build_manager(
         episode_sparse=[_episode_row("should_not_appear")],
-        episode_dense=[_episode_row("ep_dense", score=0.85)],
+        episode_dense=[_episode_row("ep_dense")],
+        atomic_fact_dense=[
+            _atomic_fact_row("f1", parent_id="ep_dense", score=0.85),
+        ],
         embedding=_StubEmbedding(),
     )
     resp = await mgr.search(_user_req(method=SearchMethod.VECTOR))
@@ -368,8 +398,12 @@ async def test_vector_method_returns_the_ann_episodes() -> None:
 async def test_vector_radius_filter_drops_below_threshold() -> None:
     mgr = _build_manager(
         episode_dense=[
-            _episode_row("ep_low", score=0.3),
-            _episode_row("ep_high", score=0.9),
+            _episode_row("ep_low"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.3),
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
         ],
         embedding=_StubEmbedding(),
     )
@@ -395,15 +429,20 @@ async def test_unlimited_mode_applies_default_radius_for_vector() -> None:
     return arbitrarily low-similarity tail.
     """
     mgr = _build_manager(
-        episode_dense=[  # the engine returns ANN hits best-first
-            _episode_row("ep_high", score=0.9),
-            _episode_row("ep_mid", score=0.55),  # above 0.5
-            _episode_row("ep_low", score=0.3),  # below 0.5
+        episode_dense=[
+            _episode_row("ep_low"),
+            _episode_row("ep_mid"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.3),  # below 0.5
+            _atomic_fact_row("f_mid", parent_id="ep_mid", score=0.55),  # above 0.5
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
         ],
         embedding=_StubEmbedding(),
     )
     resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=-1))
-    # Ordered by the episode's own cosine, descending.
+    # Ordered by max-pooled fact score descending.
     assert [e.id for e in resp.data.episodes] == ["ep_high", "ep_mid"]
 
 
@@ -411,8 +450,12 @@ async def test_unlimited_mode_explicit_radius_overrides_default() -> None:
     """Caller-supplied radius (even ``0.0``) wins over the unlimited default."""
     mgr = _build_manager(
         episode_dense=[
-            _episode_row("ep_low", score=0.2),
-            _episode_row("ep_high", score=0.9),
+            _episode_row("ep_low"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.2),
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
         ],
         embedding=_StubEmbedding(),
     )
@@ -425,8 +468,12 @@ async def test_normal_mode_keeps_full_pool_when_no_radius() -> None:
     """``top_k > 0`` without a radius applies no threshold — truncation handles tail."""
     mgr = _build_manager(
         episode_dense=[
-            _episode_row("ep_low", score=0.2),
-            _episode_row("ep_high", score=0.9),
+            _episode_row("ep_low"),
+            _episode_row("ep_high"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_low", parent_id="ep_low", score=0.2),
+            _atomic_fact_row("f_high", parent_id="ep_high", score=0.9),
         ],
         embedding=_StubEmbedding(),
     )
@@ -435,13 +482,41 @@ async def test_normal_mode_keeps_full_pool_when_no_radius() -> None:
     assert {e.id for e in resp.data.episodes} == {"ep_low", "ep_high"}
 
 
-async def test_vector_orders_by_cosine_and_applies_the_radius() -> None:
-    """ANN over the episode vectors, best first, radius floor applied."""
+async def test_vector_maxsim_max_pools_facts_to_episodes() -> None:
+    """ANN atomic_facts -> max-pool by episode entry_id -> resolve to
+    episode, ordering episodes by the per-episode maximum fact score."""
+    mgr = _build_manager(
+        episode_dense=[
+            _episode_row("ep_A", memcell_id="mc_A"),
+            _episode_row("ep_B", memcell_id="mc_B"),
+        ],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_A1", parent_id="ep_A", score=0.95),
+            _atomic_fact_row("f_A2", parent_id="ep_A", score=0.40),
+            _atomic_fact_row("f_B1", parent_id="ep_B", score=0.75),
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=5))
+    eps = resp.data.episodes
+    # Both episodes returned, ordered by max-pool score desc.
+    assert [e.id for e in eps] == ["ep_A", "ep_B"]
+    assert eps[0].score == pytest.approx(0.95)  # max(0.95, 0.40)
+    assert eps[1].score == pytest.approx(0.75)
+
+
+async def test_vector_falls_back_to_episode_vector_when_no_facts() -> None:
+    """No fact in scope -> ANN over the episode's own vector, radius still applied.
+
+    Used to return an empty list (issue #502): a store with no atomic facts
+    in scope lost vector search silently while keyword kept working.
+    """
     mgr = _build_manager(
         episode_dense=[
             _episode_row("ep_high", score=0.9),
             _episode_row("ep_low", score=0.3),
         ],
+        atomic_fact_dense=[],
         embedding=_StubEmbedding(),
     )
     resp = await mgr.search(_user_req(method=SearchMethod.VECTOR, top_k=5, radius=0.5))
@@ -468,23 +543,27 @@ async def test_hybrid_does_not_call_the_llm_by_default() -> None:
     assert resp.data.episodes == []  # empty stub recallers → empty result
 
 
-async def test_user_hybrid_episode_fuses_both_routes() -> None:
-    """HYBRID episode path: everalgo fusion over the two recall routes.
+async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
+    """HYBRID episode path: heap-expand pipeline (RRF -> LR -> expansion).
 
-    An episode found by both routes outranks one found by a single route,
-    and every result is an episode DTO with its recall pool's record.
+    ep_1 has a fact scoring higher than its LR score -> fact evicts episode.
+    ep_2 has no facts -> episode emitted as-is.
     """
-    both = _episode_row("ep_1", score=0.8, memcell_id="mc_1")
-    sparse_only = _episode_row("ep_2", score=0.7, memcell_id="mc_2")
+    ep1 = _episode_row("ep_1", score=0.8, memcell_id="mc_1")
+    ep2 = _episode_row("ep_2", score=0.7, memcell_id="mc_2")
     mgr = _build_manager(
-        episode_sparse=[both, sparse_only],
-        episode_dense=[both],
+        episode_sparse=[ep1, ep2],
+        episode_dense=[ep1, ep2],
+        atomic_fact_dense=[_atomic_fact_row("f1", parent_id="ep_1", score=0.95)],
         embedding=_StubEmbedding(),
     )
     resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10))
     eps = resp.data.episodes
-    assert {e.id for e in eps} == {"ep_1", "ep_2"}
-    assert eps[0].id == "ep_1"  # in both routes, so fused first
+    assert len(eps) >= 1
+    ep1_result = next((e for e in eps if e.id == "ep_1"), None)
+    assert ep1_result is not None
+    assert len(ep1_result.atomic_facts) == 1
+    assert ep1_result.atomic_facts[0].id == "f1"
 
 
 async def test_agentic_requires_reranker(
@@ -566,6 +645,7 @@ async def test_agentic_episode_delegates_to_search_episodes_agentic(
             summary="s",
             episode="body",
             type="Conversation",
+            atomic_facts=[],
         )
     ]
 
@@ -968,40 +1048,6 @@ async def test_search_emits_top_score_without_hit_for_keyword(
     assert "everos.search.hit" not in attrs
 
 
-def _agentic_manager() -> SearchManager:
-    """A manager whose AGENTIC prerequisites (embedding, reranker) are present."""
-    return _build_manager(
-        embedding=_StubEmbedding(), reranker=_StubReranker(), llm_client=_StubLLM()
-    )
-
-
-def _stub_agentic(monkeypatch: pytest.MonkeyPatch, *, score: float) -> None:
-    """Replace the AGENTIC episode path with one episode at ``score``."""
-    import datetime as _dt
-
-    from everos.memory.search.dto import SearchEpisodeItem
-
-    async def _fake(*_args: Any, **_kwargs: Any) -> list[SearchEpisodeItem]:
-        return [
-            SearchEpisodeItem(
-                id="ep_1",
-                score=score,
-                session_id="s",
-                user_id="alice",
-                timestamp=_dt.datetime(2026, 1, 1, tzinfo=_dt.UTC),
-                sender_ids=["alice"],
-                subject="s",
-                summary="s",
-                episode="body",
-                type="Conversation",
-            )
-        ]
-
-    import everos.memory.search.manager as mgr_mod
-
-    monkeypatch.setattr(mgr_mod, "search_episodes_agentic", _fake)
-
-
 def _hit_threshold(monkeypatch: pytest.MonkeyPatch, threshold: float) -> None:
     monkeypatch.setenv("EVEROS_OBSERVABILITY__RECALL_HIT_THRESHOLD", str(threshold))
     load_settings.cache_clear()
@@ -1010,14 +1056,13 @@ def _hit_threshold(monkeypatch: pytest.MonkeyPatch, threshold: float) -> None:
 async def test_search_emits_hit_when_calibrated_above_threshold(
     _search_spans: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """AGENTIC's cross-encoder score is calibrated, so a top score above
-    recall_hit_threshold sets everos.search.hit = True on the retriever span."""
-    _hit_threshold(monkeypatch, 0.5)
-    _stub_agentic(monkeypatch, score=0.9)
-    mgr = _agentic_manager()
-    await mgr.search(_user_req(method=SearchMethod.AGENTIC))
+    """HYBRID is calibrated ([0, 1]) so a top score >= recall_hit_threshold
+    sets everos.search.hit = True on the retriever span."""
+    _hit_threshold(monkeypatch, 0.0)
+    mgr = _build_manager(embedding=_StubEmbedding())  # no candidates: top 0.0
+    await mgr.search(_user_req(method=SearchMethod.HYBRID))
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
-    assert attrs["everos.search.top_score"] == pytest.approx(0.9)
+    assert attrs["everos.search.top_score"] == pytest.approx(0.0)
     assert attrs["everos.search.hit"] is True
 
 
@@ -1025,11 +1070,10 @@ async def test_search_hit_false_when_calibrated_below_threshold(
     _search_spans: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _hit_threshold(monkeypatch, 0.5)
-    _stub_agentic(monkeypatch, score=0.2)
-    mgr = _agentic_manager()
-    await mgr.search(_user_req(method=SearchMethod.AGENTIC))
+    mgr = _build_manager(embedding=_StubEmbedding())  # no candidates: top 0.0
+    await mgr.search(_user_req(method=SearchMethod.HYBRID))
     attrs = _span_index(_search_spans)["everos.memory.search"].attributes
-    assert attrs["everos.search.top_score"] == pytest.approx(0.2)
+    assert attrs["everos.search.top_score"] == pytest.approx(0.0)
     assert attrs["everos.search.hit"] is False
 
 

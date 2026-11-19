@@ -18,7 +18,11 @@ from .conftest import (
     add_and_flush,
     cascade_progress,
     episode_rows,
+    seed_atomic_fact_for_episode,
 )
+
+_STUB_VECTOR = [0.1] * 1024
+
 
 # ---------------------------------------------------------------------------
 # 1. Memory + every search method -> 200
@@ -37,6 +41,8 @@ async def test_user_search_methods_succeed(
     tier3_runtime: AsyncClient, method: str
 ) -> None:
     await add_and_flush(tier3_runtime, session_id=f"s_tier3_{method}")
+    episode_row = (await episode_rows("u_alice"))[0]
+    await seed_atomic_fact_for_episode(episode_row, vector=_STUB_VECTOR)
 
     resp = await tier3_runtime.post(
         "/api/v1/memory/search",

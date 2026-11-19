@@ -26,10 +26,16 @@ from everalgo.clustering import Cluster as AlgoCluster
 from everalgo.testing import FakeLLMClient
 from everalgo.user_memory import EpisodeReflector
 
-from everos.infra.cascade._projections import EpisodeHandler
+from everos.infra.cascade._projections import AtomicFactHandler, EpisodeHandler
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.index.adapters import EpisodeIndexAdapter
-from everos.infra.persistence.markdown import MarkdownEpisodeStore
+from everos.infra.persistence.index.adapters import (
+    AtomicFactIndexAdapter,
+    EpisodeIndexAdapter,
+)
+from everos.infra.persistence.markdown import (
+    MarkdownAtomicFactStore,
+    MarkdownEpisodeStore,
+)
 from everos.infra.persistence.sqlite import (
     SqliteClusterStore,
     SqliteMemcellStore,
@@ -38,6 +44,7 @@ from everos.infra.persistence.sqlite import (
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted
 from everos.memory.models import (
+    AtomicFact,
     Episode,
     MemCell,
     MemcellRecord,
@@ -98,6 +105,7 @@ class _World:
         self.storage = storage
         self.root = root
         self.episodes = MarkdownEpisodeStore(root)
+        self.facts = MarkdownAtomicFactStore(root)
         self.index = storage.repos
         deps = handler_deps(
             memory_root=root,
@@ -107,6 +115,7 @@ class _World:
         )
         self._handlers = {
             "episodes": EpisodeHandler(deps),
+            ".atomic_facts": AtomicFactHandler(deps),
         }
         clusters = SqliteClusterStore(storage.sqlite.cluster)
         reports = SqliteReflectionReportStore(storage.sqlite.reflection_report)
@@ -122,12 +131,14 @@ class _World:
         self.finisher = ReflectionFinisher(
             cluster_store=clusters,
             episode_store=self.episodes,
+            atomic_fact_store=self.facts,
+            atomic_fact_index=AtomicFactIndexAdapter(storage.repos.atomic_fact),
             report_store=reports,
             embedder=_StubEmbedder(),
         )
 
     async def cascade(self) -> None:
-        """Project every episode md into the index."""
+        """Project every episode and atomic-fact md into the index."""
         for folder, handler in self._handlers.items():
             for md in sorted(self.root.root.rglob(f"{folder}/*.md")):
                 await handler.handle_added_or_modified(
@@ -141,7 +152,7 @@ class _World:
         await self.cascade()
 
     async def seed(self, n: int, *, start: int = 0) -> list[MemoryRef]:
-        """``n`` memcell episodes, indexed, in the cluster."""
+        """``n`` memcell episodes (one atomic fact each), indexed, in the cluster."""
         episodes = [
             Episode(
                 owner_id=OWNER,
@@ -169,6 +180,20 @@ class _World:
                 )
                 for ep in episodes
             ],
+        )
+        await self.facts.append_many(
+            SCOPE,
+            [
+                AtomicFact(
+                    owner_id=OWNER,
+                    content=f"fact of {ep.episode}",
+                    timestamp=ep.timestamp,
+                    session_id="s_test",
+                    parent_id=ref.entry_id,
+                )
+                for ep, ref in zip(episodes, refs, strict=True)
+            ],
+            only_if=NO_SOURCE_CHECK,
         )
         await self.cascade()
         return refs
@@ -254,7 +279,7 @@ async def world_factory(
     yield build
 
 
-async def test_init_merge_deprecates_members(
+async def test_init_merge_deprecates_members_and_their_facts(
     world_factory: Callable[..., _World],
 ) -> None:
     world = world_factory(user_track_script("reflect"))
@@ -272,6 +297,9 @@ async def test_init_merge_deprecates_members(
     )
     for ref in refs:
         assert await world.deprecated_by("episode", ref.entry_id) == merged_id
+    facts = await world.index.atomic_fact.find_where(eq("owner_id", OWNER))
+    assert len(facts) == 3
+    assert {f.deprecated_by for f in facts} == {merged_id}
     assert await world.live_episodes() == [merged_id]
     merged = await world.index.episode.find_where(eq("entry_id", merged_id))
     assert merged[0].parent_type == "cluster"
@@ -319,6 +347,8 @@ async def test_deprecation_survives_an_index_rebuild(
     assert await world.live_episodes() == [merged_id]
     for ref in refs:
         assert await world.deprecated_by("episode", ref.entry_id) == merged_id
+    facts = await world.index.atomic_fact.find_where(eq("owner_id", OWNER))
+    assert {f.deprecated_by for f in facts} == {merged_id}
     session_rows = await world.index.episode.find_where(
         all_of(
             eq("owner_id", OWNER), is_null("deprecated_by"), eq("session_id", "s_test")

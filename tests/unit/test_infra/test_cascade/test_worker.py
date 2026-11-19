@@ -802,7 +802,7 @@ async def test_heartbeat_schedules_every_handler_kind(
     w = CascadeWorker(
         {
             "episode": _OkHandlerWithRepo(fake_a),
-            "agent_case": _OkHandlerWithRepo(fake_b),
+            "atomic_fact": _OkHandlerWithRepo(fake_b),
         },
         retry_backoff_seconds=0,
         optimize_min_interval_seconds=0.01,
@@ -814,7 +814,7 @@ async def test_heartbeat_schedules_every_handler_kind(
     await asyncio.sleep(0.12)
     await w.stop()
     assert fake_a.beats, "heartbeat should have scheduled episode"
-    assert fake_b.beats, "heartbeat should have scheduled agent_case"
+    assert fake_b.beats, "heartbeat should have scheduled atomic_fact"
 
 
 async def test_optimize_prunes_on_first_call_then_throttles(
@@ -1008,7 +1008,7 @@ async def test_rebuild_runs_on_startup_for_every_kind(
     w = CascadeWorker(
         {
             "episode": _OkHandlerWithRepo(fake_a),
-            "agent_case": _OkHandlerWithRepo(fake_b),
+            "atomic_fact": _OkHandlerWithRepo(fake_b),
         },
         retry_backoff_seconds=0,
         optimize_min_interval_seconds=0.01,
@@ -1315,17 +1315,17 @@ def test_worker_health_reports_worst_kind_not_newest_prune(
     w = CascadeWorker(
         {
             "episode": _OkHandlerWithRepo(_FakeLanceRepo()),
-            "agent_case": _OkHandlerWithRepo(_FakeLanceRepo()),
+            "atomic_fact": _OkHandlerWithRepo(_FakeLanceRepo()),
         },
         ledger=_UNUSED_LEDGER,
     )
     w._started_at = now - 10_000.0
-    # agent_case pruned just now; episode has not pruned in 3x the threshold.
+    # atomic_fact pruned just now; episode has not pruned in 3x the threshold.
     fresh = kind_state.KindOptimizerState()
     fresh.last_prune_at = now - 10.0
     dead = kind_state.KindOptimizerState()
     dead.last_prune_at = now - 3 * tuning.PRUNE_STALE_SECONDS_ALERT
-    w._maintenance._optimizer_states["agent_case"] = fresh
+    w._maintenance._optimizer_states["atomic_fact"] = fresh
     w._maintenance._optimizer_states["episode"] = dead
 
     h = w.health()

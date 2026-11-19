@@ -22,6 +22,7 @@ from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.index.adapters import (
     AgentCaseIndexAdapter,
     AgentSkillIndexAdapter,
+    AtomicFactIndexAdapter,
     EpisodeIndexAdapter,
     KnowledgeTopicIndexAdapter,
     ProfileIndexAdapter,
@@ -33,7 +34,7 @@ from everos.infra.persistence.lancedb import (
     AgentSkill as AgentSkillRow,
 )
 from everos.infra.persistence.lancedb import (
-    Episode as EpisodeRow,
+    AtomicFact as AtomicFactRow,
 )
 from everos.infra.persistence.lancedb import (
     UserProfile as UserProfileRow,
@@ -44,6 +45,7 @@ from everos.memory.ports import (
     NO_SOURCE_CHECK,
     AgentCaseIndex,
     AgentSkillIndex,
+    AtomicFactIndex,
     EpisodeIndex,
     KnowledgeTopicIndex,
     Page,
@@ -94,6 +96,9 @@ async def _real_lancedb(
 
 def test_adapters_satisfy_their_ports(storage: Storage) -> None:
     assert isinstance(EpisodeIndexAdapter(storage.repos.episode), EpisodeIndex)
+    assert isinstance(
+        AtomicFactIndexAdapter(storage.repos.atomic_fact), AtomicFactIndex
+    )
     assert isinstance(AgentCaseIndexAdapter(storage.repos.agent_case), AgentCaseIndex)
     assert isinstance(
         AgentSkillIndexAdapter(storage.repos.agent_skill), AgentSkillIndex
@@ -158,42 +163,38 @@ async def test_episode_round_trips_through_markdown_and_the_cascade(
     assert orphans == []
 
 
-async def test_episode_find_with_and_without_limit(storage: Storage) -> None:
-    await storage.repos.episode.upsert(
+async def test_atomic_fact_find_with_and_without_limit(storage: Storage) -> None:
+    await storage.repos.atomic_fact.upsert(
         [
-            EpisodeRow(
-                id=f"u1_ep_{i}",
-                entry_id=f"ep_{i}",
+            AtomicFactRow(
+                id=f"u1_af_{i}",
+                entry_id=f"af_{i}",
                 owner_id="u1",
                 owner_type="user",
                 timestamp=dt.datetime(2025, 5, 14, tzinfo=dt.UTC),
-                parent_id="mc_1",
+                parent_id="ep_1",
                 sender_ids=["u1"],
-                episode=f"episode {i}",
-                episode_tokens=f"episode {i}",
-                md_path="users/u1/episodes/e.md",
+                fact=f"fact {i}",
+                fact_tokens=f"fact {i}",
+                md_path="users/u1/.atomic_facts/f.md",
                 content_sha256="x" * 64,
             )
             for i in range(3)
         ]
     )
-    index = EpisodeIndexAdapter(storage.repos.episode)
+    index = AtomicFactIndexAdapter(storage.repos.atomic_fact)
 
-    unbounded = await index.find(eq("parent_id", "mc_1"))
-    bounded = await index.find(eq("parent_id", "mc_1"), limit=2)
+    unbounded = await index.find(eq("parent_id", "ep_1"))
+    bounded = await index.find(eq("parent_id", "ep_1"), limit=2)
 
     assert sorted(h.stored.ref.id for h in unbounded) == [
-        "u1_ep_0",
-        "u1_ep_1",
-        "u1_ep_2",
+        "u1_af_0",
+        "u1_af_1",
+        "u1_af_2",
     ]
     assert len(bounded) == 2
     assert all(h.stored.ref.md_path for h in bounded)
-    assert {h.stored.item.episode for h in unbounded} == {
-        "episode 0",
-        "episode 1",
-        "episode 2",
-    }
+    assert {h.stored.item.content for h in unbounded} == {"fact 0", "fact 1", "fact 2"}
 
 
 async def test_agent_case_reads_return_domain_cases(storage: Storage) -> None:

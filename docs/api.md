@@ -123,8 +123,7 @@ regardless; index lag never loses data.
 
 The same applies one level up for everything an OME strategy produces
 **after** the extraction call returns: agent cases and skills (agent track),
-the profile, the episode's written summary. `/flush` returns once the episode
-is on disk; the
+profiles, atomic facts. `/flush` returns once the episode is on disk; the
 `extract_agent_case` strategy then runs its own LLM call, and skill
 clustering runs after that, so `/get` with `memory_type: "agent_case"` can
 legitimately report `total_count: 0` for tens of seconds after a flush that
@@ -181,7 +180,8 @@ storage. This is the same rule users see when reading rendered output:
 #### Other conventions
 
 - **Server-generated IDs** follow `<owner>_<kind>_<YYYYMMDD>_<NNN>`,
-  e.g. `alice_ep_20260528_00000001` for an episode. See
+  e.g. `alice_ep_20260528_00000001` for an episode, `alice_af_...`
+  for an atomic fact. See
   [storage_layout.md §4](storage_layout.md) for the encoding.
 - **All endpoints are POST** for `/api/v2/memory/*` even when the
   semantics look like a read (`/search`, `/get`) — the request bodies
@@ -937,11 +937,9 @@ weak matches. Three-level fallback for the effective radius:
 3. With `top_k>0` and no caller-supplied `radius`, no threshold is
    applied (`null`).
 
-**`min_score`** — Optional **post-fusion relevance floor**, accepted in
-`[0.0, 1.0]` and compared against each episode's fused score after ranking.
-Results below it are evicted, independent of `radius` (which is a
-per-recall cosine threshold). The fused score is the fusion's own scale, not
-a probability: a HYBRID result in a large pool scores well below `1.0`.
+**`min_score`** — Optional **post-fusion relevance floor** in
+`[0.0, 1.0]`. Results below this score are evicted after fusion,
+independent of `radius` (which is a per-recall cosine threshold).
 
 **`include_profile`** — When `user_id` is set, also fetch the user's
 profile and include it in `data.profiles`. The profile is not
@@ -949,7 +947,7 @@ ranked; `score` is `null`. Ignored when `agent_id` is set.
 
 **`enable_llm_rerank`** — Opt-in LLM rerank pass for
 `method: "hybrid"`. Applies to `agent_case` and `agent_skill` fusion
-only; the episode hybrid path ignores it and
+only; the episode hybrid path has built-in fact eviction and
 ignores this flag. Adds one LLM call per request. Ignored by
 `keyword` / `vector` (no fusion to rerank) and `agentic` (uses its
 own cross-encoder loop).
@@ -975,7 +973,9 @@ owner kind stay as `[]`.
 
 #### SearchEpisodeItem
 
-User-track conversation episode hit. `score` is the fused retrieval score.
+User-track conversation episode hit. `score` is the fused retrieval
+score; `atomic_facts` lists single-sentence facts that matched the
+query within this episode (already nested, no separate call needed).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -991,11 +991,22 @@ User-track conversation episode hit. `score` is the fused retrieval score.
 | `episode` | `string` | Full extracted narrative |
 | `type` | `"Conversation"` | Reserved; today only conversation-derived episodes ship |
 | `score` | `number` | Fused retrieval score for this episode |
+| `atomic_facts` | `array<SearchAtomicFactItem>` | Sub-facts extracted from the same episode that matched the query |
 
 > **`id` is unique within `(app_id, project_id)`.** The same `id` can appear
 > under two projects (each project keeps its own daily files and sequence);
 > address a row globally by `(app_id, project_id, id)`. Within one response
 > ids never repeat, because a request is always scoped to one project.
+
+#### SearchAtomicFactItem
+
+A single-sentence fact pulled out of an episode during extraction.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | `<user_id>_af_<YYYYMMDD>_<NNN>` |
+| `content` | `string` | The fact as a single sentence |
+| `score` | `number` | Same score scale as the parent episode |
 
 #### SearchProfileItem
 
@@ -1107,7 +1118,14 @@ Response (real capture):
                 "subject": "Alice's Outdoor Activities and Daily Routine on May 28, 2026: Climbing, Coffee, and Biking",
                 "episode": "On May 28, 2026 at 11:30 AM UTC, Alice shared that she loves climbing in Yosemite every spring, highlighting a recurring seasonal activity. She also mentioned that her favorite coffee shop is Blue Bottle located in SOMA, indicating a preferred local spot. Additionally, Alice stated that she bikes to work most days, describing a habitual mode of transportation.",
                 "type": "Conversation",
-                "score": 0.6298899054527283
+                "score": 0.6298899054527283,
+                "atomic_facts": [
+                    {
+                        "id": "alice_af_20260528_00000001",
+                        "content": "Alice said she loves climbing in Yosemite every spring.",
+                        "score": 0.6298899054527283
+                    }
+                ]
             }
         ],
         "profiles": [],
@@ -1190,7 +1208,8 @@ branching on `memory_type`; exactly one is populated.
 #### GetEpisodeItem
 
 Same shape as [SearchEpisodeItem](#searchepisodeitem) **minus**
-`score` (listing is unranked).
+`score` and `atomic_facts` (listing is unranked and does not nest
+sub-facts).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -1325,9 +1344,9 @@ an unknown field) is `422`.
 
 | Request sets | Memories deleted | Conversation state (buffers, memcells, session status) | Clusters, Reflection reports |
 |---|---|---|---|
-| `session_id` | every owner's episodes and agent cases of the session | deleted; a `failed` queued request of the session keeps its row with an empty body | kept |
+| `session_id` | every owner's episodes, atomic facts, foresights and agent cases of the session | deleted; a `failed` queued request of the session keeps its row with an empty body | kept |
 | `user_id` | everything of the user, `user.md` included | kept | the user's clusters and reports deleted |
-| `user_id` + `session_id` | the user's episodes of the session | kept | kept |
+| `user_id` + `session_id` | the user's episodes, atomic facts and foresights of the session | kept | kept |
 | `agent_id` | every case and skill of the agent | kept | the agent's case clusters deleted |
 | `agent_id` + `session_id` | the agent's cases of the session | kept | kept |
 
@@ -1429,7 +1448,7 @@ the requested app/project.
 #### What it deletes
 
 For each id: the episode; every episode Reflection merged into it,
-transitively; their membership in their
+transitively; the atomic facts of all of those; their membership in their
 cluster (the cluster's count, latest timestamp and preview follow the
 remaining members; a cluster left empty is deleted); and their index rows.
 Deleting one source of a merged episode keeps the merged episode.
@@ -1508,7 +1527,7 @@ clears `default_app/default_project/` and the rows stored with
     "nonce": "…", "expires_at": "…", "scope": "project",
     "app_id": "a1", "project_id": "p1",
     "summary": {
-      "markdown": {"episode": 12, "…": 0},
+      "markdown": {"episode": 12, "atomic_fact": 30, "…": 0},
       "markdown_total": 42,
       "sqlite": {"memcell": 6, "cluster": 2, "…": 0},
       "sqlite_total": 8,

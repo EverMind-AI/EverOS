@@ -48,6 +48,7 @@ def _build_manager(
     """
     return SearchManager(
         episode_recaller=None,  # type: ignore[arg-type]
+        atomic_fact_recaller=None,  # type: ignore[arg-type]
         agent_case_recaller=None,  # type: ignore[arg-type]
         agent_skill_recaller=None,  # type: ignore[arg-type]
         profile_recaller=None,  # type: ignore[arg-type]

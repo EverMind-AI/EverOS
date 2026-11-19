@@ -101,7 +101,7 @@ base_url = "https://openrouter.ai/api/v1"
 
 # Per-task overrides. Each [llm.<task>] takes any [llm] field for that task only;
 # every field it leaves unset comes from [llm] (extra is replaced whole, never
-# merged). Tasks: boundary, episode, summary, profile,
+# merged). Tasks: boundary, episode, summary, atomic_fact, foresight, profile,
 # reflection, agent_case, agent_skill, knowledge, search, decider. An unknown task
 # or field fails startup. Env: EVEROS_LLM__<TASK>__<FIELD>, e.g.
 # EVEROS_LLM__BOUNDARY__MODEL. `everos config show` prints what each task resolves to.

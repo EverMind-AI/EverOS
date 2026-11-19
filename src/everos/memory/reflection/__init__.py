@@ -1,8 +1,9 @@
 """Reflection — offline memory consolidation.
 
-Merges fragmented cluster members into higher-quality episodes and
-deprecates the originals. Two steps: the orchestrator merges and writes; the
-finisher deprecates on the merged episode's event.
+Merges fragmented cluster members into higher-quality episodes, re-
+extracts atomic facts, and deprecates the originals. Two steps: the
+orchestrator merges and writes; the finisher deprecates once the merged
+episode's facts exist.
 
 External usage:
     from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator

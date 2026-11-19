@@ -171,6 +171,8 @@ class LLMTask(StrEnum):
     BOUNDARY = "boundary"
     EPISODE = "episode"
     SUMMARY = "summary"
+    ATOMIC_FACT = "atomic_fact"
+    FORESIGHT = "foresight"
     PROFILE = "profile"
     REFLECTION = "reflection"
     AGENT_CASE = "agent_case"
@@ -383,6 +385,10 @@ class LLMSettings(LLMClientSettings):
     summary: LLMTaskSettings = LLMTaskSettings()
     """The episode's display summary, written offline from the stored episode
     (the ``summarize_episode`` strategy) over the placeholder it is stored with."""
+    atomic_fact: LLMTaskSettings = LLMTaskSettings()
+    """Atomic-fact extraction."""
+    foresight: LLMTaskSettings = LLMTaskSettings()
+    """Foresight extraction."""
     profile: LLMTaskSettings = LLMTaskSettings()
     """User-profile extraction."""
     reflection: LLMTaskSettings = LLMTaskSettings()

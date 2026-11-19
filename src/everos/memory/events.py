@@ -17,15 +17,30 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from everos.memory.ports import Event, Scope
 
 
+class UserPipelineStarted(Event):
+    """Fired at the start of :class:`UserMemoryPipeline.run`, once per cell.
+
+    Hot-path emit, so the strategies that read the memcell itself
+    (foresight) can start in parallel with the in-pipeline Episode
+    extraction. Carries the algo-side ``MemCell`` so crash recovery has the
+    full payload (OME serialises events to JSON via Pydantic v2 nested-model
+    handling).
+    """
+
+    memcell_id: str
+    session_id: str
+    app_id: str = "default"
+    project_id: str = "default"
+    memcell: MemCell
+
+
 class AgentPipelineStarted(Event):
     """Fired at the start of :class:`AgentMemoryPipeline.run`, once per cell.
 
     Only emitted in ``mode="agent"`` (the agent pipeline does not run in
     chat mode). Subscribers handle the agent-side processing chain
     (case extraction, agent-skill clustering) in parallel with the user
-    chain. Carries the algo-side ``MemCell`` so crash recovery has the full
-    payload (OME serialises events to JSON via Pydantic v2 nested-model
-    handling).
+    chain. Payload mirrors :class:`UserPipelineStarted`.
     """
 
     memcell_id: str
@@ -48,9 +63,10 @@ class ReflectedEpisode(BaseModel):
 class ReflectionContext(BaseModel):
     """What finishing one Reflection merge needs, captured when it was merged.
 
-    The merge step writes the merged episode and publishes it; the finishing
-    step runs on that event, so the snapshot it acts on travels with the
-    event instead of living in a waiting coroutine.
+    The merge step writes the merged episode and publishes it for fact
+    extraction; the finishing step runs only after the facts exist, so the
+    snapshot it acts on travels with the events instead of living in a
+    waiting coroutine.
 
     Attributes:
         cluster_id: The cluster that was merged.
@@ -97,8 +113,8 @@ class EpisodeExtracted(Event):
     into the files of every user sender; ``copies`` lists the copies actually
     written (a write skipped because the memcell was deleted is not listed,
     and a cell with no written copy emits no event). The copies share the
-    text, timestamp and language, so work done once per episode (the
-    clustering embedding, the summary) consumes this event and
+    text, timestamp and language, so work done once per episode (atomic
+    facts, the clustering embedding, the summary) consumes this event and
     fans out over the copies itself, while work on one owner's state (the
     profile) consumes :class:`EpisodeExtractedForOwner`, which
     ``split_episode_by_owner`` derives from it. Reflection's merged episode
@@ -122,8 +138,9 @@ class EpisodeExtracted(Event):
     project_id: str = "default"
     source: str = "pipeline"
     reflection: ReflectionContext | None = None
-    """Set on Reflection's merged episode (``source="reflection"``); the step
-    that finishes the merge reads it to know what to deprecate."""
+    """Set on Reflection's merged episode (``source="reflection"``); carried
+    through to :class:`AtomicFactsExtracted` so the step that finishes the
+    merge knows what to deprecate."""
     language: str | None = None
     """The episode's detected ``OutputLanguage`` value; the extractions this
     event drives write in it. ``None`` lets each extractor infer its own."""
@@ -169,6 +186,23 @@ class EpisodeExtractedForOwner(Event):
     project_id: str = "default"
     language: str | None = None
     """As :attr:`EpisodeExtracted.language`."""
+
+
+class AtomicFactsExtracted(Event):
+    """Fired by ``extract_atomic_facts`` once an episode's facts are written.
+
+    Fired even when the episode yielded no facts: Reflection finishes a
+    merge on this event, and a merged episode without facts must still
+    retire the members it replaced.
+    """
+
+    episode_entry_id: str
+    owner_id: str
+    app_id: str = "default"
+    project_id: str = "default"
+    source: str = "pipeline"
+    fact_entry_ids: list[str] = Field(default_factory=list)
+    reflection: ReflectionContext | None = None
 
 
 class AgentCaseExtracted(Event):

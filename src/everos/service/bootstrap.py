@@ -122,6 +122,7 @@ from everos.memory.search.manager import SearchManager
 from everos.memory.search.recall import (
     AgentCaseRecaller,
     AgentSkillRecaller,
+    AtomicFactRecaller,
     EpisodeRecaller,
     KnowledgeTopicRecaller,
     ProfileRecaller,
@@ -623,6 +624,7 @@ def _build_memory_service(
         bus=bus,
         search_manager=SearchManager(
             episode_recaller=EpisodeRecaller(recaller_deps, indexes.episode),
+            atomic_fact_recaller=AtomicFactRecaller(recaller_deps, indexes.atomic_fact),
             agent_case_recaller=AgentCaseRecaller(recaller_deps, indexes.agent_case),
             agent_skill_recaller=AgentSkillRecaller(recaller_deps, indexes.agent_skill),
             profile_recaller=ProfileRecaller(indexes.profile),

@@ -1,0 +1,11 @@
+{
+  "foresights": [
+    {
+      "content": "Alice will look for a ryokan near the Philosopher's Path in Kyoto before late April 2026.",
+      "evidence": "Alice said she prefers a traditional ryokan and plans a late-April Kyoto trip.",
+      "start_time": "2026-04-02",
+      "end_time": "2026-04-30",
+      "duration_days": 28
+    }
+  ]
+}

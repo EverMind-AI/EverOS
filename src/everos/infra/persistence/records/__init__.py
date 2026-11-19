@@ -13,6 +13,8 @@ External usage::
 
     from everos.infra.persistence.records import (
         Episode,
+        AtomicFact,
+        Foresight,
         AgentCase,
         AgentSkill,
         UserProfile,
@@ -25,8 +27,10 @@ from ._parent_type import ParentType as ParentType
 from ._provenance_key import EMBEDDING_MODEL_KEY as EMBEDDING_MODEL_KEY
 from .agent_case import AgentCase as AgentCase
 from .agent_skill import AgentSkill as AgentSkill
+from .atomic_fact import AtomicFact as AtomicFact
 from .base import IndexRecord as IndexRecord
 from .episode import Episode as Episode
+from .foresight import Foresight as Foresight
 from .index_record import IndexRecordMeta as IndexRecordMeta
 from .knowledge_topic import KnowledgeTopic as KnowledgeTopic
 from .user_profile import UserProfile as UserProfile
@@ -38,8 +42,10 @@ __all__ = [
     "EMBEDDING_MODEL_KEY",
     "AgentCase",
     "AgentSkill",
+    "AtomicFact",
     "DenseVector",
     "Episode",
+    "Foresight",
     "IndexRecord",
     "IndexRecordMeta",
     "KnowledgeTopic",

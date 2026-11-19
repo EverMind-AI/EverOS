@@ -26,12 +26,26 @@
 
 # ── User-memory pipeline ────────────────────────────────────────────────
 
+# Atomic fact extraction runs once per memcell episode (each
+# EpisodeExtracted) and writes the facts under every user sender of the
+# memcell. Always enabled — search depends on atomic facts for MaxSim
+# retrieval.
+
 # Episode summary (fires on each EpisodeExtracted). Episodes are written
 # with a placeholder summary, the opening of the episode cut with "…";
 # this writes the model's preview in the episode's language over every
 # copy still showing it. One LLM call per memcell ([llm.summary]).
 # Disabled, the placeholder stays.
 # [strategies.summarize_episode]
+# enabled = true
+
+# Foresight extraction (runs per memcell). Heavy LLM call.
+#
+# DISABLED BY DEFAULT since 1.2.3: nothing in EverOS reads foresights yet
+# — no search route surfaces them, no operator consumes them — so
+# running it spends one LLM call per sender per memcell on write-only
+# data. Uncomment to opt in; it works on agent and chat input alike.
+# [strategies.extract_foresight]
 # enabled = true
 
 # Profile clustering trigger (fires on each EpisodeExtracted: embeds the

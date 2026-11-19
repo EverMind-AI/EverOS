@@ -68,6 +68,7 @@ if TYPE_CHECKING:
     from everalgo.llm import LLMClient
 
     from everos.component.rerank import RerankProvider
+    from everos.memory.search.recall.atomic_fact import AtomicFactRecaller
     from everos.memory.search.recall.episode import EpisodeRecaller
 
 
@@ -359,6 +360,7 @@ async def search_episodes_llm_multiround(
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
+    atomic_fact_recaller: AtomicFactRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     llm: LLMClient,
     top_k: int,
@@ -383,6 +385,8 @@ async def search_episodes_llm_multiround(
         app_id / project_id: Scope segments (parity; recall is owner-scoped via
             ``where``).
         episode_recaller: Episode sparse + dense recall.
+        atomic_fact_recaller: Accepted for call-site parity; this scheme recalls at the
+            episode level and does not drill facts.
         embed_query_fn: Async ``(str) -> vector`` query embedder.
         llm: LLM client for the decider.
         top_k: Maximum episodes to return.
@@ -403,6 +407,7 @@ async def search_episodes_llm_multiround(
         app_id=app_id,
         project_id=project_id,
         episode_recaller=episode_recaller,
+        atomic_fact_recaller=atomic_fact_recaller,
         embed_query_fn=embed_query_fn,
         llm=llm,
         top_k=top_k,
@@ -570,6 +575,7 @@ async def _search_episodes_subq(
     app_id: str = "default",
     project_id: str = "default",
     episode_recaller: EpisodeRecaller,
+    atomic_fact_recaller: AtomicFactRecaller,
     embed_query_fn: Callable[[str], Awaitable[list[float]]],
     llm: LLMClient,
     top_k: int,
@@ -941,9 +947,9 @@ def _dataset_from_owner(owner_id: str) -> str:
 
 def _trace_cand_pool(cands: object) -> list[dict[str, object]]:
     """Serialize a candidate pool (dict[id]->Candidate or list) for the full-retrieval
-    attribution trace: id + session_id + score + source + metadata (session /
-    entry_id). Lets a bad case be split into recall-miss vs rerank-miss vs
-    decider-miss."""
+    attribution trace: id + session_id + score + source + metadata (session / entry_id /
+    fact provenance). Lets a bad case be split into recall-miss vs rerank-miss vs
+    decider-miss, and drilled to the atomic fact that surfaced each episode."""
     items = cands.values() if isinstance(cands, dict) else (cands or [])
     out: list[dict[str, object]] = []
     for c in items:

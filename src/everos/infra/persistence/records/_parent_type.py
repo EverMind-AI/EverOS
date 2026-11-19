@@ -3,8 +3,10 @@
 Three values cover the current provenance graph:
 
 * :attr:`ParentType.MEMCELL` — the original ingestion unit; every
-  business row (episode / agent_case) points back to a
-  source MemCell by default.
+  business row (episode / foresight / atomic_fact / agent_case) points
+  back to a source MemCell by default.
+* :attr:`ParentType.EPISODE` — used by atomic facts that are extracted
+  from an episode rather than directly from a MemCell.
 * :attr:`ParentType.CLUSTER` — used by merged episodes produced by the
   Reflection consolidation mechanism.
 
@@ -23,4 +25,5 @@ class ParentType(StrEnum):
     """Provenance label of a memory record's parent."""
 
     MEMCELL = "memcell"
+    EPISODE = "episode"
     CLUSTER = "cluster"

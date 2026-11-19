@@ -5225,6 +5225,31 @@
         "title": "SearchAgentSkillItem",
         "description": "Agent skill hit — always agent-scoped."
       },
+      "SearchAtomicFactItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "score"
+        ],
+        "title": "SearchAtomicFactItem",
+        "description": "A single atomic fact nested inside its parent episode."
+      },
       "SearchData": {
         "properties": {
           "episodes": {
@@ -5338,6 +5363,13 @@
           "score": {
             "type": "number",
             "title": "Score"
+          },
+          "atomic_facts": {
+            "items": {
+              "$ref": "#/components/schemas/SearchAtomicFactItem"
+            },
+            "type": "array",
+            "title": "Atomic Facts"
           }
         },
         "additionalProperties": false,
@@ -5582,7 +5614,7 @@
           "enable_llm_rerank": {
             "type": "boolean",
             "title": "Enable Llm Rerank",
-            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hybrid path ignores this flag. Ignored by keyword / vector / agentic.",
+            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hybrid path has built-in fact eviction and ignores this flag. Ignored by keyword / vector / agentic.",
             "default": false
           },
           "filters": {

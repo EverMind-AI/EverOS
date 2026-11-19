@@ -3,8 +3,8 @@
 Cells / memcell_ids / message_id-mapping / sender lists are produced by
 :mod:`everos.memory.extract.boundary` (which also writes the single
 ``memcell`` sqlite row per cell). This pipeline only handles the
-user-perspective output of one cell: the Episode md and the
-``EpisodeExtracted`` events that announce it.
+user-perspective output of one cell: Episode md, plus the
+``UserPipelineStarted`` and ``EpisodeExtracted`` events that announce it.
 
 Each cell costs one model call (``EpisodeExtractor.aextract``). Every copy
 is written with :func:`~everos.memory.episode_summary.placeholder_summary`
@@ -29,7 +29,7 @@ from everos.core.observability.tracing import capture_output, memory_span
 from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.episode_summary import placeholder_summary
-from everos.memory.events import EpisodeCopy, EpisodeExtracted
+from everos.memory.events import EpisodeCopy, EpisodeExtracted, UserPipelineStarted
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
 from everos.memory.models import Episode, IngestResult
@@ -71,11 +71,21 @@ class UserMemoryPipeline:
     ) -> CellOutcome:
         """Extract the cell's Episode, write one copy per user sender.
 
-        The returned events are one ``EpisodeExtracted`` listing every copy
-        written (none when no copy was).
+        The returned events start with the cell's ``UserPipelineStarted``, so
+        the strategies that read the memcell itself start first, followed by
+        one ``EpisodeExtracted`` listing every copy written (none when no
+        copy was).
         """
         cell, memcell_id = prepared.cell, prepared.memcell_id
-        events: list[Event] = []
+        events: list[Event] = [
+            UserPipelineStarted(
+                memcell_id=memcell_id,
+                session_id=ingested.session_id,
+                app_id=ingested.app_id,
+                project_id=ingested.project_id,
+                memcell=cell,
+            )
+        ]
         md_paths: list[str] = []
         user_senders = _unique_user_senders(cell)
         if user_senders:

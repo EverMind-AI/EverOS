@@ -20,8 +20,10 @@ from everalgo.types import ChatMessage, MemCell
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import Profile as AlgoProfile
 from everalgo.user_memory import (
+    AtomicFactExtractor,
     EpisodeExtractor,
     EpisodeReflector,
+    ForesightExtractor,
     ProfileExtractor,
 )
 
@@ -91,6 +93,16 @@ async def test_blank_episode_script_is_unusable() -> None:
 
 
 @pytest.mark.parametrize(
+    ("script", "count"), [("atomic_facts", 3), ("atomic_facts_empty", 0)]
+)
+async def test_atomic_fact_scripts(script: str, count: int) -> None:
+    facts = await AtomicFactExtractor(
+        llm=user_track_llm(atomic_facts=script)
+    ).aextract_from_text("Alice plans a Kyoto trip.", timestamp=_TS)
+    assert len(facts) == count
+
+
+@pytest.mark.parametrize(
     ("script", "counts"),
     [
         # The trait is a pattern seen once: it waits on ``pending``, and no new
@@ -155,3 +167,11 @@ async def test_reflect_script() -> None:
     ]
     merged = await EpisodeReflector(llm=user_track_llm()).areflect(episodes)
     assert merged.summary == json.loads(user_track_script("reflect"))["summary"]
+
+
+async def test_foresight_script() -> None:
+    (foresight,) = await ForesightExtractor(llm=user_track_llm()).aextract(
+        _CELL, sender_id="u_alice"
+    )
+    expected = json.loads(user_track_script("foresights"))["foresights"][0]
+    assert foresight.foresight == expected["content"]

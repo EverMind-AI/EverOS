@@ -40,6 +40,7 @@ def _make_report(
     source_members: str = "mc_one,mc_two",
     source_count: int = 2,
     merged_entry_id: str = "ep_merged_001",
+    deprecated_fact_count: int = 1,
     status: str = "completed",
 ) -> ReflectionReport:
     return ReflectionReport(
@@ -50,6 +51,7 @@ def _make_report(
         source_members=source_members,
         source_count=source_count,
         merged_entry_id=merged_entry_id,
+        deprecated_fact_count=deprecated_fact_count,
         status=status,
     )
 
@@ -67,8 +69,7 @@ async def test_create_and_get_latest(repo: ReflectionReportRepo) -> None:
     assert latest.mode == "consolidation"
     assert latest.source_count == 2
     assert latest.merged_entry_id == "ep_merged_001"
-    # Every row still fills the column a pre-2.0 store declares NOT NULL.
-    assert latest.deprecated_fact_count == 0
+    assert latest.deprecated_fact_count == 1
     assert latest.status == "completed"
 
 
