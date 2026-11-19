@@ -17,6 +17,7 @@ __all__ = [
     "purge_expired",
     "queue_health",
     "recover_processing",
+    "trim_failed_payloads",
     "wait_any",
     "wait_for_wake",
     "write_status",
@@ -140,6 +141,19 @@ async def purge_expired(inbox: MemorizeInboxStore, *, before: dt.datetime) -> No
         )
     elif deleted:
         logger.info("memorize_queue_purged", count=deleted)
+
+
+async def trim_failed_payloads(inbox: MemorizeInboxStore, *, max_bytes: int) -> None:
+    """Bound the bodies failed rows keep to ``max_bytes``; log, never raise."""
+    try:
+        emptied = await inbox.trim_failed_payloads(max_bytes=max_bytes)
+    except Exception:
+        logger.exception("memorize_queue_trim_failed")
+        return
+    if emptied:
+        logger.warning(
+            "memorize_queue_failed_bodies_dropped", count=emptied, max_bytes=max_bytes
+        )
 
 
 async def queue_health(

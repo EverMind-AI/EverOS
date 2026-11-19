@@ -11,6 +11,7 @@ Exposes the queue primitives the worker and the route need:
 - :meth:`requeue_processing` — startup crash recovery.
 - :meth:`fail_abandoned` — the stuck-row sweep.
 - :meth:`purge_expired` — retention sweep.
+- :meth:`trim_failed_payloads` — bound the bodies failed rows keep.
 - :meth:`list_tasks` — ``GET /tasks`` (filter by session / status, paged).
 """
 
@@ -19,7 +20,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Collection
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import LargeBinary, cast, delete, func, select, update
 
 from everos.infra.persistence.sqlite._base.repository import RepoBase
 from everos.infra.persistence.sqlite._base.session import session_scope
@@ -249,3 +250,29 @@ class MemorizeInboxRepo(RepoBase[MemorizeInbox]):
             await s.commit()
             queued = int(undelivered.rowcount or 0)
             return queued + int(terminal.rowcount or 0), queued
+
+    async def trim_failed_payloads(self, *, max_bytes: int) -> int:
+        """Empty the bodies of ``failed`` rows past the newest ``max_bytes``.
+
+        Newest by ``id``; sizes are UTF-8 bytes. The row, its status and
+        ``last_error`` stay. Returns how many bodies were emptied.
+        """
+        size = func.length(cast(MemorizeInbox.payload_json, LargeBinary))
+        newest_first = MemorizeInbox.id.desc()  # type: ignore[union-attr]
+        kept = (
+            select(
+                MemorizeInbox.id,
+                func.sum(size).over(order_by=newest_first).label("running"),
+            )
+            .where(MemorizeInbox.status == "failed", MemorizeInbox.payload_json != "")
+            .subquery()
+        )
+        over_budget = select(kept.c.id).where(kept.c.running > max_bytes)
+        async with session_scope(self._factory) as s:
+            result = await s.execute(
+                update(MemorizeInbox)
+                .where(MemorizeInbox.id.in_(over_budget))  # type: ignore[union-attr]
+                .values(payload_json="")
+            )
+            await s.commit()
+            return int(result.rowcount or 0)

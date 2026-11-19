@@ -22,6 +22,7 @@ the buffer repo singleton are swapped for temp-bound instances) and a fake
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -824,6 +825,31 @@ async def test_failed_row_keeps_its_body_and_error_in_one_write(
     ]
     row = await repo.find_one(request_id="r1")
     assert row is not None and row.payload_json != ""
+
+
+async def test_sweep_keeps_only_the_newest_failed_bodies_within_budget(
+    repo: MemorizeInboxRepo,
+) -> None:
+    """An outage that fails every batch must not hold every body for a week."""
+    _wiring["deliver"] = _FakeMemorize(failing={"bad1", "bad2"})
+    one_body = len(json.dumps(_payload("bad1"), ensure_ascii=False).encode())
+    w = _worker(_settings(max_failed_payload_bytes=one_body))
+    for n in (1, 2):
+        await w.enqueue(
+            _payload(f"bad{n}"),
+            request_id=f"r{n}",
+            is_final=False,
+            defer_extraction=False,
+        )
+        await w.drain_once()
+
+    await w._sweep()
+
+    old = await repo.find_one(request_id="r1")
+    new = await repo.find_one(request_id="r2")
+    assert old is not None and (old.status, old.payload_json) == ("failed", "")
+    assert old.last_error == "RuntimeError: boom"
+    assert new is not None and json.loads(new.payload_json) == _payload("bad2")
 
 
 async def test_lost_status_write_is_reaped_before_the_next_row(
