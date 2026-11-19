@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .ids import (
+    OWNER_ID_MAX_LENGTH,
     PATH_SAFE_CHARSET,
     AppScopeId,
     PathSafeId,
@@ -50,7 +51,7 @@ class MessageItemDTO(BaseModel):
     sender_id: PathSafeId = Field(
         ...,
         min_length=1,
-        max_length=128,
+        max_length=OWNER_ID_MAX_LENGTH,
         pattern=PATH_SAFE_CHARSET,
     )
     sender_name: str | None = None

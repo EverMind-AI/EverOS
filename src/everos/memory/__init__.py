@@ -20,6 +20,12 @@ business logic (extract / search / reflection / custom_instructions).
 """
 
 from ._partition_locks import user_cluster_lock as user_cluster_lock
+from .device import DEVICE_OWNER_SEPARATOR as DEVICE_OWNER_SEPARATOR
+from .device import MAX_OWNER_ID_LENGTH as MAX_OWNER_ID_LENGTH
+from .device import DeviceBatch as DeviceBatch
+from .device import DeviceLine as DeviceLine
+from .device import project_device_batch as project_device_batch
+from .device import speaker_owner_id as speaker_owner_id
 from .models import AgentCase as AgentCase
 from .models import AtomicFact as AtomicFact
 from .models import CanonicalMessage as CanonicalMessage
@@ -29,12 +35,18 @@ from .models import MemCell as MemCell
 from .models import ToolCall as ToolCall
 
 __all__ = [
+    "DEVICE_OWNER_SEPARATOR",
+    "MAX_OWNER_ID_LENGTH",
     "AgentCase",
     "AtomicFact",
     "CanonicalMessage",
+    "DeviceBatch",
+    "DeviceLine",
     "Episode",
     "IngestResult",
     "MemCell",
     "ToolCall",
+    "project_device_batch",
+    "speaker_owner_id",
     "user_cluster_lock",
 ]

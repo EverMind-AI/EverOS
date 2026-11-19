@@ -77,12 +77,14 @@ async def test_each_speaker_reaches_add_as_their_own_sender(
     }
     ((payload, _, _),) = memory.calls
     assert payload["session_id"] == "s_kitchen"
+    # The slot rides as a fallback label, so a name stored earlier still wins.
     assert [
-        (m["sender_id"], m["sender_name"], m["role"]) for m in payload["messages"]
+        (m["sender_id"], m["sender_name"], m.get("sender_name_fallback"), m["role"])
+        for m in payload["messages"]
     ] == [
-        ("xiaoai01@spk_a", "Zhang San", "user"),
-        ("xiaoai01@spk_b", "spk_b", "user"),
-        ("xiaoai01", None, "user"),
+        ("xiaoai01@spk_a", "Zhang San", "spk_a", "user"),
+        ("xiaoai01@spk_b", None, "spk_b", "user"),
+        ("xiaoai01", None, None, "user"),
     ]
 
 

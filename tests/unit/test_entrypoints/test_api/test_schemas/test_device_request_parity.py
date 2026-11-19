@@ -6,7 +6,7 @@ device-first way to describe the same three things ``/memory/add``,
 halves of the design:
 
 * the device request shapes and how they project onto the existing ones
-  (:meth:`DeviceAddRequest.speaker_owners` is the fan-out the pipeline does);
+  (``everos.memory.project_device_batch`` is the fan-out the pipeline does);
 * **backwards compatibility** — the existing flows' request bodies are
   unchanged, byte for byte, because nothing here alters a field of
   :class:`~.memorize.MemorizeAddRequest`, :class:`~.memorize.MemorizeFlushRequest`,
@@ -26,6 +26,7 @@ from everos.entrypoints.api.schemas import (
     MemorizeAddRequest,
     MemorizeFlushRequest,
 )
+from everos.memory import project_device_batch
 from everos.memory.get.dto import GetRequest
 from everos.memory.search.dto import SearchRequest
 
@@ -121,7 +122,8 @@ def test_the_device_request_projects_onto_the_existing_add_body() -> None:
         }
     )
 
-    messages = request.projected_messages()
+    batch = project_device_batch(request.device_id, request.lines())
+    messages = batch.messages
 
     assert [m["sender_id"] for m in messages] == [
         "dev_kitchen@spk_a",
@@ -129,7 +131,7 @@ def test_the_device_request_projects_onto_the_existing_add_body() -> None:
     ]
     assert [m["sender_name"] for m in messages] == ["Alice", None]
     assert [m["content"] for m in messages] == ["we need milk", "unintelligible"]
-    assert request.speaker_owners() == ["dev_kitchen@spk_a"]
+    assert batch.owners == ["dev_kitchen@spk_a"]
 
 
 def test_the_projection_is_a_valid_add_body_and_owner() -> None:
@@ -146,7 +148,12 @@ def test_the_projection_is_a_valid_add_body_and_owner() -> None:
         }
     )
     add = MemorizeAddRequest.model_validate(
-        {"session_id": "s_kitchen", "messages": request.projected_messages()}
+        {
+            "session_id": "s_kitchen",
+            "messages": project_device_batch(
+                request.device_id, request.lines()
+            ).messages,
+        }
     )
     assert [m.sender_id for m in add.messages] == ["dev_kitchen@spk_a"]
     assert DeleteRequest(user_id="dev_kitchen@spk_a").user_id == "dev_kitchen@spk_a"

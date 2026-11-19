@@ -6,8 +6,10 @@ is written around — "one agent, one human user" — so this page fixes the
 identity rules and the request surface the hardware path has to honour.
 
 Status: **write route shipped**. `POST /api/v2/memory/device/add` accepts a
-device batch ([`schemas/device.py`](../src/everos/entrypoints/api/schemas/device.py))
-and projects it onto `/memory/add`; reads and deletes use the existing routes
+device batch ([`schemas/device.py`](../src/everos/entrypoints/api/schemas/device.py)
+validates its shape); `MemoryService.add_device` applies the ownership rules
+([`memory/device.py`](../src/everos/memory/device.py)) and runs `/memory/add`'s
+write. Reads and deletes use the existing routes
 with the composed owner id as `user_id`. The open questions at the end are
 still open.
 
@@ -39,7 +41,7 @@ slots collides across devices in the same app/project.
 | Speaker | `DeviceUtterance.speaker.slot` | The device's stable per-person id — voiceprint slot, roster index. **Not** a name |
 | Speaker label | `DeviceUtterance.speaker.display_name` | How the person is called in the room. A label only: it never selects a directory |
 | Consent | `DeviceUtterance.speaker.consented` | `false` on any utterance means none of that slot's utterances in the batch is written |
-| Per-person memory owner | derived: `speaker_owner_id(device_id, slot)` = `"<device_id>@<slot>"` | The `user_id` / `sender_id` of that person's episodes, profile and clusters **on that device** |
+| Per-person memory owner | derived: `everos.memory.speaker_owner_id(device_id, slot)` = `"<device_id>@<slot>"` | The `user_id` / `sender_id` of that person's episodes, profile and clusters **on that device** |
 
 **The rule, in one line:** the device is the scope, the speaker is the
 owner, and the owner id is `<device_id>@<slot>`.
@@ -68,12 +70,12 @@ Rules at the edges:
 
 | Situation | Result | Where it is enforced |
 |---|---|---|
-| `speaker` is `None` (nobody identified) | The utterance is filed under the **device** (`sender_id = device_id`). Never guessed onto a person | `DeviceAddRequest.projected_messages()` |
-| Speaker known, `consented = false` | Not written; no owner is produced for them | `projected_messages()`, `speaker_owners()` |
-| `slot` does not start with a letter, holds no digit or `_`, contains `/`, `..`, `@`, or is longer than 63 | 422 at validation | `DeviceSpeaker.slot` pattern + validator |
+| `speaker` is `None` (nobody identified) | The utterance is filed under the **device** (`sender_id = device_id`). Never guessed onto a person | `project_device_batch` |
+| Speaker known, `consented = false` on any of their utterances | None of that slot's utterances in the batch is written; no owner is produced for them | `project_device_batch` |
+| `slot` does not start with a letter, holds no digit or `_`, contains `/`, `.`, `@`, or is longer than 63 | 422 at validation (no `.`: `D@S` never reads as an e-mail id another user could hold) | `DeviceSpeaker.slot` pattern + validator |
 | `device_id` has a path separator or `@`, or is `.` / `..` | 422 at validation | `DeviceAddRequest.device_id` pattern, `PathSafeId` |
 | `device_id` + `@` + `slot` would exceed 128 characters | 422 for the whole batch, before any write | `DeviceAddRequest` after-validator |
-| Two utterances by one speaker in a batch | One owner (`speaker_owners()` de-duplicates, first-spoken order) | `speaker_owners()` |
+| Two utterances by one speaker in a batch | One owner (de-duplicated, first-spoken order) | `project_device_batch` |
 | Two speakers in one memcell | Two episode copies, one per owner — the existing fan-out | `_unique_user_senders` |
 
 ### Registering a new speaker
@@ -149,10 +151,12 @@ so the memory, storage, search and delete code is unchanged.
 | Queued | `202` with `async_mode: true`, or when the session already has queued batches: `/memory/add`'s body plus `owners` (`DeviceAcceptedResponseData`) |
 | All declined | `200` with `message_count: 0`, `status: "accumulated"`, `owners: []`; nothing is written or queued, even with `async_mode` |
 | Errors | `422` — no utterances, a slot or device id outside its rules, an owner id over 128 characters. Inherited from `/memory/add`: `413` body over the queue's payload cap, `429` queue at its per-session or global cap, `409` `PURGE_IN_PROGRESS` while a purge clears the app / project |
-| Projection | `DeviceAddRequest.projected_messages()` → the `messages[]` the pipeline consumes: `sender_id` = `D@S` (or `D`), `sender_name` = label, `role` = `"user"` |
+| Projection | `project_device_batch()` → the `messages[]` the pipeline consumes: `sender_id` = `D@S` (or `D`), `sender_name` = `display_name`, `sender_name_fallback` = slot, `role` = `"user"` |
 
-`display_name` missing: the route sends the **slot** as `sender_name`,
-so the narrative calls the person `S`. Leaving it empty made the owner id
+`display_name` missing: the person keeps the name the store last recorded
+for them; only a person never named is labelled by the **slot** (sent as
+`sender_name_fallback`, which the ingest neither stores nor lets override a
+stored name), so the narrative calls them `S`. Labelling by the owner id
 the label, and on a real model (gpt-4.1-mini, 2026-11-19) the narrative
 shortened `D@S` to `D` -- the device's own id -- so the person's profile
 skipped that episode (it must name the owner). Devices should still send a

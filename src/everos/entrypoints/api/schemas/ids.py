@@ -30,7 +30,13 @@ from typing import Annotated
 
 from pydantic import AfterValidator
 
+from everos.service import DEVICE_OWNER_SEPARATOR, MAX_OWNER_ID_LENGTH
+
 PATH_SAFE_CHARSET = r"^[a-zA-Z0-9_.@+-]+$"
+DEVICE_ID_CHARSET = PATH_SAFE_CHARSET.replace(DEVICE_OWNER_SEPARATOR, "")
+""":data:`PATH_SAFE_CHARSET` without the device owner separator."""
+OWNER_ID_MAX_LENGTH = MAX_OWNER_ID_LENGTH
+"""Longest ``sender_id`` / owner id a route accepts (one definition, the domain's)."""
 _PATH_TRAVERSAL_TOKENS = frozenset({".", ".."})
 
 

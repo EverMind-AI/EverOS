@@ -683,8 +683,8 @@ device's own records (utterances nobody was identified for) are under
 
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `slot` | `string` | yes | — | the device's stable per-person id (voiceprint slot, roster index), `^[a-zA-Z][a-zA-Z0-9_.-]{0,62}$` and holding a digit or `_` (`spk_01`). Keep one device's slots from being prefixes of each other (`spk_01` / `spk_10`, not `spk_1` / `spk_10`): a profile picks its episodes by the label as a substring |
-| `display_name` | `string \| null` | no | `null` | label only (`sender_name`); without it (or blank) the `slot` is the label. Never selects whose memory |
+| `slot` | `string` | yes | — | the device's stable per-person id (voiceprint slot, roster index), `^[a-zA-Z][a-zA-Z0-9_-]{0,62}$` and holding a digit or `_` (`spk_01`). Keep one device's slots from being prefixes of each other (`spk_01` / `spk_10`, not `spk_1` / `spk_10`): a profile picks its episodes by the label as a substring |
+| `display_name` | `string \| null` | no | `null` | label only (`sender_name`); without it (or blank) the person keeps the name last stored for them, and only a person never named is labelled by the `slot`. Never selects whose memory |
 | `consented` | `boolean` | no | `true` | `false` on any utterance drops all of that slot's utterances in the batch; none is written anywhere |
 
 `device_id` + `@` + `slot` longer than 128 characters is a `422` for the

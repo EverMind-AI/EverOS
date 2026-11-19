@@ -13,14 +13,18 @@ Rules, per ``(app_id, project_id, sender_id)``:
   stored one, before any message is named -- so a message earlier in the
   batch than its sender's first named line is named too.
 - A message without a name takes its sender's: the batch's when the sender
-  was named in it, else the stored one; with neither it stays ``None`` and
-  its line falls back to ``sender_id``.
+  was named in it, else the stored one; with neither, the message's
+  ``sender_name_fallback`` (set by the device use case, never by a client:
+  :mod:`everos.memory.device`), which is not stored; with none of those it
+  stays ``None`` and its line falls back to ``sender_id``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
+
+from everos.memory.device import SENDER_NAME_FALLBACK_KEY
 
 if TYPE_CHECKING:
     from everos.memory.ports import SenderNameStore
@@ -40,7 +44,14 @@ async def resolve_sender_names(
         await store.upsert_many(app_id, project_id, named)
     unnamed = {sender_id for sender_id, name in own if name is None} - named.keys()
     known = await store.get_many(app_id, project_id, unnamed) if unnamed else {}
-    return {**known, **named}
+    fallback = {
+        message["sender_id"]: name
+        for message in messages
+        if (name := _clean(message.get(SENDER_NAME_FALLBACK_KEY)))
+        and message["sender_id"] in unnamed
+        and message["sender_id"] not in known
+    }
+    return {**fallback, **known, **named}
 
 
 def sender_name_of(message: Mapping[str, Any], names: Mapping[str, str]) -> str | None:
@@ -49,5 +60,8 @@ def sender_name_of(message: Mapping[str, Any], names: Mapping[str, str]) -> str 
 
 
 def _own_name(message: Mapping[str, Any]) -> str | None:
-    name = message.get("sender_name")
+    return _clean(message.get("sender_name"))
+
+
+def _clean(name: object) -> str | None:
     return (name.strip() or None) if isinstance(name, str) else None

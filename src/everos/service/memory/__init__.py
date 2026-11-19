@@ -32,11 +32,12 @@ __all__ = [
 ]
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from everos.core.errors import PathTraversalError, SessionBusyError
 from everos.core.observability.logging import get_logger
+from everos.memory import DeviceLine, project_device_batch
 
 from ._delete import Deleter
 from ._delete import DeleteResult as DeleteResult
@@ -315,6 +316,40 @@ class MemoryService:
                 defer_extraction=defer_extraction,
             )
         return await self._memorize(payload, defer_extraction=defer_extraction)
+
+    async def add_device(
+        self,
+        *,
+        device_id: str,
+        session_id: str,
+        app_id: str,
+        project_id: str,
+        lines: Sequence[DeviceLine],
+        request_id: str,
+        async_mode: bool,
+    ) -> tuple[MemorizeResult | Queued | None, list[str]]:
+        """One device batch: a sender per person (:mod:`everos.memory.device`),
+        then :meth:`add`.
+
+        Returns the add's outcome -- ``None`` when every speaker declined and
+        nothing was written or queued -- and the per-person owners written to.
+        """
+        batch = project_device_batch(device_id, lines)
+        if not batch.messages:
+            return None, []
+        payload = {
+            "session_id": session_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "messages": batch.messages,
+        }
+        result = await self.add(
+            payload,
+            request_id=request_id,
+            async_mode=async_mode,
+            defer_extraction=False,
+        )
+        return result, batch.owners
 
     async def flush(
         self,

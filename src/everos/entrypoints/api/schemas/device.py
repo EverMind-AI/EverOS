@@ -1,70 +1,45 @@
-"""Identity and request models for a hardware device that serves several people.
+"""Request / response shapes of ``POST /memory/device/add``.
 
-A device runs ONE EverOS agent instance and is spoken to by several people in
-the same room. Two identities therefore travel with every utterance:
-
-* the **device** — the ``device_id``, plus the ``session_id`` the utterances
-  accumulate under;
-* the **speaker** — the person talking, resolved upstream (voiceprint slot,
-  roster index, wake-word profile) to a stable slot id.
-
-The per-person memory owner is derived, not supplied. A user-track episode is
-written once per distinct ``role="user"`` ``sender_id`` of a memcell
-(``everos.memory.extract.pipeline.user_memory._unique_user_senders``), each
-copy under that sender's owner directory, and the profile is keyed the same
-way. Giving every speaker of a device a *device-qualified* owner id therefore
-keeps each person's episodes and profile in their own directory, while
-utterances nobody was identified for stay with the device.
-
-``POST /memory/device/add`` (``routes.memorize``) projects a
-:class:`DeviceAddRequest` onto the ``/memory/add`` request; nothing below the
-route knows about devices.
+Shape and charset validation only. Who owns each utterance -- the owner id,
+the consent rule, the label a narrative uses -- is the domain's
+(:mod:`everos.memory.device`), run by ``MemoryService.add_device``.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .ids import PATH_SAFE_CHARSET, AppScopeId, PathSafeId, ProjectScopeId, SessionId
+from everos.service import DeviceLine, speaker_owner_id
+
+from .ids import (
+    DEVICE_ID_CHARSET,
+    OWNER_ID_MAX_LENGTH,
+    PATH_SAFE_CHARSET,
+    AppScopeId,
+    PathSafeId,
+    ProjectScopeId,
+    SessionId,
+)
 from .memorize import AcceptedResponseData, AddResponseData
 
 __all__ = [
-    "DEVICE_ID_CHARSET",
-    "DEVICE_OWNER_SEPARATOR",
-    "MAX_OWNER_ID_LENGTH",
     "SPEAKER_SLOT_CHARSET",
     "DeviceAcceptedResponseData",
     "DeviceAddRequest",
     "DeviceAddResponseData",
     "DeviceSpeaker",
     "DeviceUtterance",
-    "speaker_owner_id",
 ]
 
-DEVICE_OWNER_SEPARATOR = "@"
-"""Separates the device id from the speaker slot in a per-person owner id.
+SPEAKER_SLOT_CHARSET = r"^[a-zA-Z][a-zA-Z0-9_-]{0,62}$"
+"""A roster slot id: starts with a letter; no ``@`` (the owner separator) and
+no ``.``, so ``device@slot`` never reads as an e-mail address another user id
+could already be.
 
-Inside :data:`~.ids.PATH_SAFE_CHARSET`, so a composed owner is an ordinary
-``user_id`` / ``sender_id`` on every existing route and a valid directory
-name on every platform (``:`` is not one on Windows). Neither a device id nor
-a slot may contain it, so one owner id names exactly one (device, speaker)
-pair. A client can still send such an id to ``/memory/add`` itself: like every
-other owner id, it is not a credential.
-"""
-
-MAX_OWNER_ID_LENGTH = 128
-"""The owner-id length the existing routes accept (``sender_id`` max_length)."""
-
-DEVICE_ID_CHARSET = r"^[a-zA-Z0-9_.+-]+$"
-""":data:`~.ids.PATH_SAFE_CHARSET` without the separator."""
-
-SPEAKER_SLOT_CHARSET = r"^[a-zA-Z][a-zA-Z0-9_.-]{0,62}$"
-"""A roster slot id: filesystem-safe, no separator, starts with a letter.
-
-The slot is the person's label when no ``display_name`` is sent, and a profile
-picks its episodes by whether the narrative contains the label: a numeric slot
-would match every date, a plain word every sentence using it. So a slot must
-also hold a digit or ``_`` (``spk_01``, ``guest2``).
+The slot is the person's label when no ``display_name`` was ever given, and a
+profile picks its episodes by whether the narrative contains the label: a
+numeric slot would match every date, a plain word every sentence using it. So
+a slot must also hold a digit or ``_`` (``spk_01``, ``guest2``).
 """
 
 
@@ -74,10 +49,9 @@ class DeviceSpeaker(BaseModel):
     Attributes:
         slot: The device's stable per-person id (voiceprint slot, roster
             index). Never a name: names change, slots do not.
-        display_name: How the person is called in the room; ``None`` when the
-            device has not been told, and the slot is the label then. Only
-            ever a label — it never selects which memory directory an
-            utterance lands in.
+        display_name: How the person is called in the room; ``None`` (or
+            blank) when the device has not been told. Only ever a label -- it
+            never selects which memory directory an utterance lands in.
         consented: Whether this person agreed to the device keeping their
             memory. ``False`` on any utterance of a batch means none of that
             slot's utterances in the batch is written.
@@ -99,8 +73,8 @@ class DeviceSpeaker(BaseModel):
     @field_validator("display_name")
     @classmethod
     def _blank_name_is_none(cls, value: str | None) -> str | None:
-        # A blank name would label the person by the owner id again.
-        return value.strip() or None if value is not None else None
+        # A blank name must not stand in for a real one downstream.
+        return (value.strip() or None) if value is not None else None
 
 
 class DeviceUtterance(BaseModel):
@@ -139,7 +113,7 @@ class DeviceAddRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     device_id: PathSafeId = Field(
-        ..., min_length=1, max_length=MAX_OWNER_ID_LENGTH, pattern=DEVICE_ID_CHARSET
+        ..., min_length=1, max_length=OWNER_ID_MAX_LENGTH, pattern=DEVICE_ID_CHARSET
     )
     session_id: SessionId = Field(..., min_length=1, max_length=128)
     app_id: AppScopeId = Field(
@@ -157,67 +131,23 @@ class DeviceAddRequest(BaseModel):
         ),
     )
 
-    def speaker_owners(self) -> list[str]:
-        """The per-person owners this batch writes to, in first-spoken order.
-
-        Read off :meth:`projected_messages`, so the two cannot disagree:
-        unknown and non-consenting speakers produce no owner of their own.
-        """
-        return list(
-            dict.fromkeys(
-                str(m["sender_id"])
-                for m in self.projected_messages()
-                if m["sender_id"] != self.device_id
+    def lines(self) -> list[DeviceLine]:
+        """The batch in the domain's terms, for ``MemoryService.add_device``."""
+        return [
+            DeviceLine(
+                text=u.text,
+                timestamp=u.timestamp,
+                slot=u.speaker.slot if u.speaker else None,
+                display_name=u.speaker.display_name if u.speaker else None,
+                consented=u.speaker.consented if u.speaker else True,
             )
-        )
-
-    def _declined_slots(self) -> set[str]:
-        return {
-            u.speaker.slot
             for u in self.utterances
-            if u.speaker is not None and not u.speaker.consented
-        }
-
-    def projected_messages(self) -> list[dict[str, object]]:
-        """The batch as ``/memory/add`` message rows.
-
-        ``sender_id`` is the device-qualified owner (the device id alone for
-        an unidentified speaker), ``sender_name`` the speaker's label (the
-        slot when the device sent no ``display_name``),
-        ``role`` always ``"user"`` — the device is a human-facing surface, so
-        nothing it hears is an assistant or tool turn. A slot that declined
-        anywhere in the batch has all of its utterances dropped, not filed
-        under the device.
-        """
-        declined = self._declined_slots()
-        rows: list[dict[str, object]] = []
-        for utterance in self.utterances:
-            speaker = utterance.speaker
-            if speaker is None:
-                sender, name = self.device_id, None
-            elif speaker.slot in declined:
-                continue
-            else:
-                sender = speaker_owner_id(self.device_id, speaker.slot)
-                # Never let the owner id be the label: a model writing the
-                # narrative shortens "dev@spk_b" to "dev" -- the device's own
-                # id -- and the person's profile then misses the episode.
-                name = speaker.display_name or speaker.slot
-            rows.append(
-                {
-                    "sender_id": sender,
-                    "sender_name": name,
-                    "role": "user",
-                    "timestamp": utterance.timestamp,
-                    "content": utterance.text,
-                }
-            )
-        return rows
+        ]
 
     @model_validator(mode="after")
     def _device_qualifies_every_speaker(self) -> DeviceAddRequest:
         # A device id may not be long enough to prefix a slot: refuse the
-        # batch here rather than halfway through its write.
+        # batch here (422) rather than halfway through its write.
         for utterance in self.utterances:
             if utterance.speaker is not None:
                 speaker_owner_id(self.device_id, utterance.speaker.slot)
@@ -239,39 +169,3 @@ class DeviceAcceptedResponseData(AcceptedResponseData):
     """``202`` body: ``/memory/add``'s, plus the owners the batch will write to."""
 
     owners: list[str] = Field(default_factory=list)
-
-
-def speaker_owner_id(device_id: str, slot: str) -> str:
-    """The memory owner of one person on one device.
-
-    The same person talking to two devices keeps two memories: a device's
-    roster slot is its own identity and is resolved per device.
-
-    Args:
-        device_id: The device's id.
-        slot: The device's stable per-person slot.
-
-    Returns:
-        ``<device_id>@<slot>``, a path-safe owner id of at most 128
-        characters.
-
-    Raises:
-        ValueError: Either half is empty or contains the reserved separator,
-            or the composed id is longer than
-            :data:`MAX_OWNER_ID_LENGTH`.
-    """
-    for name, part in (("device_id", device_id), ("slot", slot)):
-        if not part:
-            raise ValueError(f"{name} must be non-empty")
-        if DEVICE_OWNER_SEPARATOR in part:
-            raise ValueError(
-                f"{name} may not contain {DEVICE_OWNER_SEPARATOR!r}; it is "
-                "reserved for device-qualified owner ids"
-            )
-    owner = f"{device_id}{DEVICE_OWNER_SEPARATOR}{slot}"
-    if len(owner) > MAX_OWNER_ID_LENGTH:
-        raise ValueError(
-            f"device-qualified owner id is {len(owner)} characters; the owner "
-            f"limit is {MAX_OWNER_ID_LENGTH} (shorten the device id or the slot)"
-        )
-    return owner

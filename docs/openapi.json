@@ -130,7 +130,7 @@
           "memory"
         ],
         "summary": "Add Device Memory",
-        "description": "Add one device's utterances, each speaker under their own owner.\n\nA thin projection onto ``/add`` (``schemas.device``): every speaker\nbecomes the sender ``<device_id>@<slot>``, read and deleted afterwards by\nthat id as ``user_id`` on the existing routes.",
+        "description": "Add one device's utterances, each speaker under their own owner.\n\n``MemoryService.add_device`` decides who owns each utterance\n(``everos.memory.device``) and runs ``/add``'s write; a person is then read\nand deleted by ``<device_id>@<slot>`` as ``user_id`` on the existing routes.",
         "operationId": "add_device_memory_api_v1_memory_device_add_post",
         "requestBody": {
           "content": {
@@ -1521,7 +1521,7 @@
           "memory"
         ],
         "summary": "Add Device Memory",
-        "description": "Add one device's utterances, each speaker under their own owner.\n\nA thin projection onto ``/add`` (``schemas.device``): every speaker\nbecomes the sender ``<device_id>@<slot>``, read and deleted afterwards by\nthat id as ``user_id`` on the existing routes.",
+        "description": "Add one device's utterances, each speaker under their own owner.\n\n``MemoryService.add_device`` decides who owns each utterance\n(``everos.memory.device``) and runs ``/add``'s write; a person is then read\nand deleted by ``<device_id>@<slot>`` as ``user_id`` on the existing routes.",
         "operationId": "add_device_memory_api_v2_memory_device_add_post",
         "requestBody": {
           "content": {
@@ -3637,7 +3637,7 @@
             "type": "string",
             "maxLength": 63,
             "minLength": 1,
-            "pattern": "^[a-zA-Z][a-zA-Z0-9_.-]{0,62}$",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,62}$",
             "title": "Slot"
           },
           "display_name": {
@@ -3664,7 +3664,7 @@
           "slot"
         ],
         "title": "DeviceSpeaker",
-        "description": "One person the device can recognize, resolved upstream.\n\nAttributes:\n    slot: The device's stable per-person id (voiceprint slot, roster\n        index). Never a name: names change, slots do not.\n    display_name: How the person is called in the room; ``None`` when the\n        device has not been told, and the slot is the label then. Only\n        ever a label — it never selects which memory directory an\n        utterance lands in.\n    consented: Whether this person agreed to the device keeping their\n        memory. ``False`` on any utterance of a batch means none of that\n        slot's utterances in the batch is written."
+        "description": "One person the device can recognize, resolved upstream.\n\nAttributes:\n    slot: The device's stable per-person id (voiceprint slot, roster\n        index). Never a name: names change, slots do not.\n    display_name: How the person is called in the room; ``None`` (or\n        blank) when the device has not been told. Only ever a label -- it\n        never selects which memory directory an utterance lands in.\n    consented: Whether this person agreed to the device keeping their\n        memory. ``False`` on any utterance of a batch means none of that\n        slot's utterances in the batch is written."
       },
       "DeviceUtterance": {
         "properties": {
