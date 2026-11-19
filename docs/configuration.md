@@ -508,11 +508,12 @@ joins it only behind its session's backlog)
 | `max_pending_per_session` | int | `50` | Unfinished batches per session; beyond this `/add` and `/flush` answer `429`. |
 | `max_pending_total` | int | `200` | Unfinished batches across all sessions; beyond this the answer is `429`. |
 | `max_payload_bytes` | int | `4194304` | One serialised request body; beyond this the answer is `413`. |
+| `max_failed_payload_bytes` | int | `67108864` | Request bodies kept on `failed` rows (for re-sending), newest first; older failed rows past this total (64 MiB) lose their body within one sweep, the row and its error stay. `0` keeps none. |
 | `scan_interval_seconds` | float | `5.0` | Fallback sweep interval; an enqueue wakes the worker immediately. |
 | `max_attempts` | int | `1` | Delivery attempts per batch before it is marked `failed` and skipped. Keep `1` unless duplicate memcells after a partial failure are acceptable: the pipeline is not atomic. |
 | `retry_backoff_seconds` | float | `2.0` | Pause between attempts. |
 | `max_replays` | int | `3` | A batch in flight when the process died is replayed on the next start; after this many replays without finishing it is marked `failed` (`error_code: replays_exhausted`). |
-| `row_retention_hours` | float | `168.0` | Rows of any status are deleted this long after creation (seven days), including rows never delivered; the purge logs a warning for those. Delivered rows drop their request body at once, `failed` rows keep it. |
+| `row_retention_hours` | float | `168.0` | Rows of any status are deleted this long after creation (seven days), including rows never delivered; the purge logs a warning for those. Delivered rows drop their request body at once, `failed` rows keep it within `max_failed_payload_bytes`. |
 
 ### `[memorize.input_log]`
 

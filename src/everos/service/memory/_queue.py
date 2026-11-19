@@ -48,6 +48,7 @@ from ._queue_steps import (
     purge_expired,
     queue_health,
     recover_processing,
+    trim_failed_payloads,
     wait_any,
     wait_for_wake,
     write_status,
@@ -408,7 +409,7 @@ class MemorizeQueueWorker:
             self._status_write_lost = True
 
     async def _sweep(self) -> None:
-        """Expire old rows; fail ``processing`` rows nobody is working on.
+        """Expire old rows; bound failed bodies; fail orphaned ``processing`` rows.
 
         The scheduler knows the rows it has in flight, so any other
         ``processing`` row lost its status write. The outcome is unknown (the
@@ -418,6 +419,9 @@ class MemorizeQueueWorker:
         """
         before = get_utc_now() - dt.timedelta(hours=self._cfg.row_retention_hours)
         await purge_expired(self._inbox, before=before)
+        await trim_failed_payloads(
+            self._inbox, max_bytes=self._cfg.max_failed_payload_bytes
+        )
         # ponytail: in-process bookkeeping; a lease column if workers ever run
         # in more than one process.
         await self._reap_lost()

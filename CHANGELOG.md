@@ -173,6 +173,16 @@ unchanged apart from additions. See Upgrade below.
   of the ingest identity, so a store ingested with an earlier config is not
   reused.
 
+### Fixed
+
+- **Failed `async_mode` batches no longer keep their bodies without bound.**
+  A `failed` queue row kept its request body for the seven-day retention,
+  uncapped, so an outage that failed every batch could hold every body
+  accepted during it on disk. Now only the newest failed bodies up to
+  `memorize.async_queue.max_failed_payload_bytes` (default 64 MiB) are kept;
+  older ones are emptied by the queue's sweep while the row and its
+  `last_error` stay.
+
 ### Removed
 
 - **Foresight.** The `extract_foresight` strategy (off by default since

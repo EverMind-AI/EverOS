@@ -544,6 +544,10 @@ class MemorizeInboxStore(Protocol):
         """Delete finished and stale tasks; return ``(deleted, never_delivered)``."""
         ...
 
+    async def trim_failed_payloads(self, *, max_bytes: int) -> int:
+        """Empty failed tasks' bodies past the newest ``max_bytes``; return how many."""
+        ...
+
 
 @runtime_checkable
 class ReflectionReportStore(Protocol):
