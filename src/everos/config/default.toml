@@ -283,9 +283,9 @@ max_replays = 3
 row_retention_hours = 168.0
 
 [memorize.input_log]
-# First PR ships the log disabled: enabling it also requires the deletion and
-# purge path that removes a scope's lines (issue #537, second PR).
-enabled = false
+# One JSONL line per accepted /add, independent of extraction. Disable to
+# stop new lines; session deletion and purge remove existing ones.
+enabled = true
 retention_days = 30
 # A line larger than this keeps text verbatim but replaces each base64
 # attachment with its length and SHA-256.

@@ -778,12 +778,11 @@ class AsyncQueueSettings(BaseModel):
 class InputLogSettings(BaseModel):
     """``/add`` input log (``[memorize.input_log]``).
 
-    Disabled in the first PR that introduces it: enabling the log also
-    requires the deletion/purge path that removes a scope's lines, which
-    follows in the second PR (issue #537).
+    Enabled by default now that session deletion and purge remove the
+    corresponding lines (issue #537).
     """
 
-    enabled: bool = False
+    enabled: bool = True
     retention_days: int = Field(default=30, ge=1)
     max_inline_bytes: int = Field(default=1024 * 1024, ge=1)
 

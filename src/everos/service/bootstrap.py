@@ -402,6 +402,12 @@ def build_application(
     )
     eraser = FencedIndexEraser(index.repositories, fence, sqlite.md_change_state)
     marks = MARKS.for_root(root.root)
+    input_log = InputLogWriter(
+        root=root.root,
+        settings=settings.memorize.input_log,
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
     memory = _build_memory_service(
         settings,
         providers,
@@ -410,7 +416,7 @@ def build_application(
         OmeEventBus(engine),
         eraser,
         marks,
-        root,
+        input_log,
     )
     engine.set_run_gate(PurgeRunGate(marks))
     purge = PurgeService(
@@ -424,6 +430,7 @@ def build_application(
         index_store=settings.index.backend,
         engine=engine,
         fence=fence,
+        input_log=input_log,
     )
     vector_tables = index.repositories.with_vectors()
     return Application(
@@ -626,19 +633,14 @@ def _build_memory_service(
     bus: EventBus,
     index_eraser: IndexEraser,
     purge_marks: PurgeMarks,
-    root: MemoryRoot,
+    input_log: InputLogWriter,
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     return MemoryService(
         index_eraser=index_eraser,
         purge_marks=purge_marks,
-        input_log=InputLogWriter(
-            root=root.root,
-            settings=settings.memorize.input_log,
-            app_dir=app_dir_name,
-            project_dir=project_dir_name,
-        ),
+        input_log=input_log,
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
         settings=settings,
         boundary=BoundaryDetection(
