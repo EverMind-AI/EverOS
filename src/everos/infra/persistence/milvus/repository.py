@@ -26,7 +26,6 @@ from everos.core.locks import LOCKS
 from everos.core.observability.logging import get_logger
 from everos.core.utils.datetime import ensure_utc
 from everos.infra.persistence.index.schema import (
-    IndexFieldKind,
     IndexSchema,
     schema_for,
 )
@@ -434,23 +433,19 @@ class MilvusRepoBase[T: BaseModel]:
         where: Filter | None,
         *,
         limit: int,
-        vector_field: str = "vector",
         with_vectors: bool = False,  # accepted; Milvus rows keep their shape
     ) -> list[dict[str, Any]]:
         if not vector:
             return []
-        field = self.index_schema.field(vector_field)
-        if field.kind is not IndexFieldKind.DENSE_VECTOR:
-            raise ValueError(f"{vector_field!r} is not a dense-vector field")
-        self._codec.validate_vector(field, vector)
+        self._codec.validate_vector(self.index_schema.field("vector"), vector)
         await self.ensure_collection()
         client = await self._connection.client()
-        present = eq(present_field(vector_field), True)
+        present = eq(present_field("vector"), True)
         results = await _run(
             client.search,
             self.collection_name,
             data=[list(vector)],
-            anns_field=vector_field,
+            anns_field="vector",
             filter=self._expr(all_of(where, present)),
             limit=min(limit, _SEARCH_TOPK_MAX),
             output_fields=self._layout.output_fields(include_vectors=False),

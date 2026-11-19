@@ -152,10 +152,10 @@ async def test_normal_projection_and_repair_match(storage: Storage, kind: str) -
 
 
 @pytest.mark.parametrize("subject", [" padded subject ", "   ", ""])
-async def test_episode_subject_normalization_remains_source_specific(
+async def test_an_episode_embeds_its_body_only_whatever_its_subject(
     storage: Storage, subject: str
 ) -> None:
-    """Keep the existing raw-index repair behavior for historical subject text."""
+    """Indexing and repair embed the body; the subject is never embedded."""
     embedding = RecordingEmbedding()
     tokenizer = build_tokenizer()
     deps = handler_deps(
@@ -165,13 +165,11 @@ async def test_episode_subject_normalization_remains_source_specific(
         tokenizer=tokenizer,
     )
     normal = await _normal_row("episode", deps, subject=subject)
-    assert embedding.texts == (
-        ["episode body", subject.strip()] if subject.strip() else ["episode body"]
-    )
+    assert embedding.texts == ["episode body"]
+    assert normal.subject_vector is None
     raw = normal.model_dump()
     raw["vector"] = None
     raw["subject_vector"] = None
     pending = _extract_row(raw, VECTOR_PROJECTIONS["episode"], tokenizer)
     assert isinstance(pending, _NullVectorRow)
-    assert pending.subject_text == (subject or None)
-    assert pending.needs_subject == bool(subject)
+    assert pending.text == "episode body"

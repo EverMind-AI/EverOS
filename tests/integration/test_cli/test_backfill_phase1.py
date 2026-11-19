@@ -237,16 +237,13 @@ async def test_failed_row_is_tallied_and_does_not_abort_the_phase(
     assert "1 rows failed embedding" in out
 
 
-async def test_episode_subject_vector_also_backfilled(
+async def test_episode_subject_vector_is_not_backfilled(
     backfill_runtime: Path,
     capsys: pytest.CaptureFixture[str],
     storage_view: StorageView,
 ) -> None:
-    """Episode is the only table with a second, independent embed
-    (``subject_vector`` — see ``EpisodeHandler._build_row``). A row that
-    has a ``subject`` must come out of Phase 1 with *both* vectors set,
-    exercising ``_embed_subject_batch``'s secondary ``embed_batch`` call.
-    """
+    """``subject_vector`` is retired: Phase 1 fills an episode's ``vector``
+    and leaves the subject column empty, even when the row has a subject."""
     await storage_view.repos.episode.add(
         [_episode("epsub", text="episode body", subject="What is the meaning of X?")]
     )
@@ -258,7 +255,7 @@ async def test_episode_subject_vector_also_backfilled(
     row = await storage_view.repos.episode.get_by_id("u1_epsub")
     assert row is not None
     assert row.vector is not None and len(row.vector) == _DIM
-    assert row.subject_vector is not None and len(row.subject_vector) == _DIM
+    assert row.subject_vector is None
     assert "phase 1 complete" in out
 
 

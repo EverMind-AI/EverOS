@@ -130,7 +130,7 @@ def _entry(sections: dict[str, str]) -> ParsedEntry:
         (
             EpisodeHandler,
             {"Subject": "Sub", "Summary": "s", "Content": "hello world"},
-            ("hello world", "Sub"),
+            ("hello world",),
         ),
         (EpisodeHandler, {"Summary": "s", "Content": "hello world"}, ("hello world",)),
     ],
@@ -155,10 +155,7 @@ async def test_embed_texts_and_vectors_round_trip(  # type: ignore[no-untyped-de
     )
     assert list(row.vector) == vectors[0]
     if handler_cls is EpisodeHandler:
-        subject_vector = vectors[1] if len(vectors) > 1 else None
-        assert (
-            None if row.subject_vector is None else list(row.subject_vector)
-        ) == subject_vector
+        assert row.subject_vector is None
 
 
 async def _write_episodes(
@@ -201,14 +198,12 @@ async def test_one_file_pass_issues_one_embed_batch(  # type: ignore[no-untyped-
 
     assert outcome.upserted == 3
     assert embedder.single == []
-    assert embedder.batches == [["aa", "S1", "bbbb", "cccccc", "S3xyz"]]
+    assert embedder.batches == [["aa", "bbbb", "cccccc"]]
     by_text = {row.episode: row for row in repo.rows}
     assert by_text["aa"].vector[0] == 2.0
-    assert by_text["aa"].subject_vector[0] == 2.0
     assert by_text["bbbb"].vector[0] == 4.0
-    assert by_text["bbbb"].subject_vector is None
     assert by_text["cccccc"].vector[0] == 6.0
-    assert by_text["cccccc"].subject_vector[0] == 5.0
+    assert all(row.subject_vector is None for row in repo.rows)
 
 
 async def test_missing_provider_writes_null_vectors_through_batch_path(  # type: ignore[no-untyped-def]

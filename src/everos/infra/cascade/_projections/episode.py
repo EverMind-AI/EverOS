@@ -21,15 +21,14 @@ writers must match):
 
 ``sections``:
 
-- ``Subject`` (optional): one-line topic — embedded into
-  ``subject_vector`` and appended to the BM25 tokenization source.
+- ``Subject`` (optional): one-line topic — appended to the BM25
+  tokenization source. Not embedded: ``subject_vector`` stays ``None``.
 - ``Summary`` (optional): condensed narrative.
 - ``Content``: full episode narrative — fed to the embedder AND the
   tokenizer for the ``episode_tokens`` BM25 field.
 
-Embedding is a soft dependency: when unavailable, both ``vector`` and
-``subject_vector`` are written as ``None`` and the row stays
-BM25/scalar-searchable only.
+Embedding is a soft dependency: when unavailable, ``vector`` is written
+as ``None`` and the row stays BM25/scalar-searchable only.
 """
 
 from __future__ import annotations
@@ -68,12 +67,8 @@ class EpisodeHandler(BaseDailyLogHandler):
       (cascade Q2 discussion)."""
 
     def _embed_texts(self, entry: ParsedEntry) -> tuple[str, ...]:
-        s = entry.structured
-        text = s.sections.get("Content", "").strip()
-        subject_text = s.sections.get("Subject", "").strip()
-        return VECTOR_PROJECTIONS[self.kind].texts(
-            {"episode": text, "subject": subject_text}
-        )
+        text = entry.structured.sections.get("Content", "").strip()
+        return VECTOR_PROJECTIONS[self.kind].texts({"episode": text})
 
     async def _build_row(
         self,

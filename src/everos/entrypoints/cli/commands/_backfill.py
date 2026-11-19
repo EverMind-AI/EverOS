@@ -93,8 +93,8 @@ label. ``3`` marks a Phase 2/3 short-circuit because another process
 holds the OME jobstore lock (typically ``everos server start``). ``4``
 marks a partial-success run: every phase ran to completion, but at
 least one row failed embedding even after the per-row fallback —
-operators consult the ``cascade_backfill_row_embed_failed`` /
-``..._row_subject_embed_failed`` log events for the failed row ids.
+operators consult the ``cascade_backfill_row_embed_failed`` log events
+for the failed row ids.
 ``130`` is the SIGINT convention (128 + signal number 2)."""
 
 

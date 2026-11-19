@@ -35,9 +35,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is scored on, as it floors the episode vector lane. This replaces the
   heap-expand ranking, whose `top_k` counted episodes and facts together.
 - **Episode `agentic` search reads at most 500 atomic facts per MaxSim lane**,
-  however many facts an owner has. When the cluster scope comes back empty
-  (no cluster yet, or no base hit in one), Round 1 runs on the un-scoped
-  hybrid instead of returning nothing.
+  however many facts an owner has, and recalls each episode by its own body
+  vector and BM25 alongside its facts. The cluster scope holds clustered
+  episodes only, and at most 100 of them: the base hits first, then the
+  members closest to the query by body vector. This replaces the un-scoped
+  hybrid fallback for scopes over 1,000 episodes. When the cluster scope comes
+  back empty (no cluster yet, or no base hit in one), Round 1 runs on the
+  un-scoped hybrid instead of returning nothing.
+- **Episodes embed their body only.** Indexing and `everos backfill` no
+  longer embed an episode's subject, one embedding call fewer per episode,
+  and nothing searches the subject vector. The `subject_vector` column stays
+  in the index schema, left empty, so existing stores open with no migration
+  or rebuild.
+- **Episode `vector` search reads 200 atomic facts** whatever the `top_k`, and
+  returns at most 50 episodes when `top_k` is `-1`.
+- **Agent case and skill `hybrid` search recall `top_k * 2` per lane**, and 50
+  when `top_k` is `-1`, so the rerank picks the 10 it returns from a wider
+  pool. The skill cross-encoder scores the best of the fused skills, as many
+  as one lane holds. Agent case `agentic` search returns at most 10 cases when
+  `top_k` is `-1`, as skill search does.
 - **One `EpisodeExtracted` per memcell.** The event announces a memcell's
   episode once and lists every owner's copy in `copies` (each with its
   `owner_id`, `entry_id` and `owner_name`), instead of one event per copy.

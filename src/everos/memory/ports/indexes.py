@@ -52,12 +52,6 @@ class EpisodeIndex(Protocol):
         self, vector: Sequence[float], where: Filter, *, limit: int
     ) -> list[SearchHit[Episode]]: ...
 
-    async def dense_search_subject(
-        self, vector: Sequence[float], where: Filter, *, limit: int
-    ) -> list[SearchHit[Episode]]:
-        """ANN over the subject embedding; episodes without one never match."""
-        ...
-
     async def find(
         self, where: Filter, *, limit: int | None = None
     ) -> list[SearchHit[Episode]]:

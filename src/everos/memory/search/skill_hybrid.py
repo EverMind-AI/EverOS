@@ -1,5 +1,8 @@
 """Skill HYBRID cross-encoder lane: rrf → cross-encoder rerank → shape.
 
+The cross-encoder scores the best ``rerank_pool`` fused skills -- one lane's
+size -- however many the two lanes bring together.
+
 Used when ``enable_llm_rerank`` is off. The LLM-rerank lane lives in
 :meth:`SearchManager._search_agent_skills` so the flag stays wired only
 at the orchestration layer. Passage shape + skill instruction live in
@@ -34,6 +37,7 @@ async def search_agent_skills_hybrid(
     dense: RecallResult[AgentSkill],
     reranker: RerankProvider,
     top_k: int,
+    rerank_pool: int,
 ) -> list[SearchAgentSkillItem]:
     """Skill HYBRID retrieval: rrf → cross-encoder rerank → shape.
 
@@ -43,11 +47,12 @@ async def search_agent_skills_hybrid(
         dense: Vector ANN recall over the skill index.
         reranker: Cross-encoder rerank provider (not LLM-based).
         top_k: Maximum skills to return after rerank.
+        rerank_pool: Fused skills sent to the cross-encoder, best first.
 
     Returns:
         Ranked list of at most ``top_k`` ``SearchAgentSkillItem`` objects.
     """
-    fused = _fuse(sparse.candidates, dense.candidates)
+    fused = _fuse(sparse.candidates, dense.candidates)[:rerank_pool]
     reranked = await _cross_encoder_rerank(query, fused, reranker, top_k)
     return shape_agent_skills(reranked, merge_stored(sparse, dense))
 
