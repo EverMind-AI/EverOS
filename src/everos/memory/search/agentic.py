@@ -9,8 +9,11 @@ Implements the cluster main path from ``benchmarks/common/stages/search.py``
         -> aagentic_retrieve (base=cluster_scoped, round2=hybrid_full)
 
 Hyperparameters match benchmark ``config.py`` defaults and are frozen as
-module-level constants — no env/TOML knobs at this layer.
-Oversized cluster expansions fall back to bounded hybrid recall before rerank.
+module-level constants — no env/TOML knobs at this layer. Each MaxSim lane
+reads at most 500 atomic facts. Oversized cluster expansions fall back to
+bounded hybrid recall before rerank, and so does an empty cluster scope (no
+cluster yet, or no base hit in one): ``aagentic_retrieve`` returns nothing on
+an empty Round 1, so Round 2 would never get the chance.
 
 id contract: candidates flowing through the pipeline are episodes keyed
 by ``entry_id`` (the MaxSim parent fetch and the cluster corpus both key
@@ -67,10 +70,9 @@ _ROUND2_CAP: int = 40
 _MULTI_QUERY_COUNT: int = 3
 _REFINEMENT_STRATEGY: str = "multi_query"
 
-# Child-pool sizing for amaxsim_retrieve. The benchmark passes
-# len(full_fact_corpus); EverOS doesn't know the corpus size upfront,
-# so we pass a large sentinel and let the LanceDB limit clamp naturally.
-_FACT_CHILD_CANDIDATES: int = 100_000
+# Child-pool size per MaxSim lane: bounds the fact ANN however many facts an
+# owner has.
+_FACT_CHILD_CANDIDATES: int = 500
 
 # Qwen3-Reranker task instruction for the search scene (benchmark
 # ``config.reranker_instruction``). Steers the cross-encoder toward fact /
@@ -211,6 +213,8 @@ async def search_episodes_agentic(
         # No recall span here: cluster_scoped delegates to hybrid_full, which
         # owns the recall span (and does the embedding). Wrapping it too
         # produced a duplicate, same-name everos.search.recall nested in itself.
+        if not clusters:
+            return await hybrid_full(q, k)
         candidates = await acluster_retrieve(
             q,
             base_retrieve=hybrid_full,
@@ -219,6 +223,8 @@ async def search_episodes_agentic(
             all_docs=all_docs,
             cluster_top_k=_CLUSTER_TOP_K,
         )
+        if not candidates:
+            return await hybrid_full(q, k)
         if len(candidates) > _CLUSTER_EXPANSION_LIMIT:
             logger.warning(
                 "agentic_cluster_expansion_capped",

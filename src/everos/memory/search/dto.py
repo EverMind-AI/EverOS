@@ -102,10 +102,11 @@ class SearchRequest(BaseModel):
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     """Post-fusion relevance floor for the episode HYBRID path.
 
-    Applied after heap-expand against the LR-calibrated score in ``[0, 1]``:
-    items scoring below this value are dropped. Independent of ``radius``
-    (which gates raw cosine at recall time); ``None`` disables the floor.
-    Only the episode hybrid path consumes it — other methods ignore it.
+    Applied after hierarchy scoring against the LR-calibrated episode score
+    in ``[0, 1]``: episodes scoring below this value are dropped. Independent
+    of ``radius`` (which gates raw cosine at recall time); ``None`` disables
+    the floor. Only the episode hybrid path consumes it — other methods
+    ignore it.
     """
     include_profile: bool = False
     enable_llm_rerank: bool = Field(
@@ -113,7 +114,7 @@ class SearchRequest(BaseModel):
         description=(
             "Opt-in LLM rerank pass for HYBRID. Applies to agent_case "
             "and agent_skill fusion only; the episode hybrid path "
-            "has built-in fact eviction and ignores this flag. "
+            "ranks with its own LR-calibrated scoring and ignores this flag. "
             "Ignored by keyword / vector / agentic."
         ),
     )

@@ -25,6 +25,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from everalgo.rank.fusion import cosine_to_lr_score
 
 from everos.component.tokenizer import Tokenizer
 from everos.config import load_settings
@@ -543,11 +544,11 @@ async def test_hybrid_does_not_call_the_llm_by_default() -> None:
     assert resp.data.episodes == []  # empty stub recallers → empty result
 
 
-async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
-    """HYBRID episode path: heap-expand pipeline (RRF -> LR -> expansion).
+async def test_user_hybrid_episode_attaches_the_fact_it_ranked_on() -> None:
+    """HYBRID episode path: three lanes fused, each episode scored.
 
-    ep_1 has a fact scoring higher than its LR score -> fact evicts episode.
-    ep_2 has no facts -> episode emitted as-is.
+    ep_1's fact (0.95) beats its own vector (0.8) -> the fact is attached.
+    ep_2 has no facts -> the episode comes back on its own.
     """
     ep1 = _episode_row("ep_1", score=0.8, memcell_id="mc_1")
     ep2 = _episode_row("ep_2", score=0.7, memcell_id="mc_2")
@@ -558,12 +559,73 @@ async def test_user_hybrid_episode_fuses_and_evicts_facts() -> None:
         embedding=_StubEmbedding(),
     )
     resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10))
-    eps = resp.data.episodes
-    assert len(eps) >= 1
-    ep1_result = next((e for e in eps if e.id == "ep_1"), None)
-    assert ep1_result is not None
-    assert len(ep1_result.atomic_facts) == 1
-    assert ep1_result.atomic_facts[0].id == "f1"
+    by_id = {e.id: e for e in resp.data.episodes}
+    assert [f.id for f in by_id["ep_1"].atomic_facts] == ["f1"]
+    assert by_id["ep_1"].atomic_facts[0].score == by_id["ep_1"].score
+    assert by_id["ep_2"].atomic_facts == []
+
+
+async def test_hybrid_top_k_counts_episodes_each_with_one_fact() -> None:
+    """``top_k`` counts episodes; an episode nests at most its best fact.
+
+    ep_0's two facts outscore every other item, yet they take one slot, not
+    two: the second slot goes to another episode.
+    """
+    eps = [_episode_row(f"ep_{i}", score=0.5) for i in range(3)]
+    facts = [
+        _atomic_fact_row("f00", parent_id="ep_0", score=0.95),
+        _atomic_fact_row("f01", parent_id="ep_0", score=0.94),
+        _atomic_fact_row("f10", parent_id="ep_1", score=0.6),
+        _atomic_fact_row("f20", parent_id="ep_2", score=0.55),
+    ]
+    mgr = _build_manager(
+        episode_sparse=eps,
+        episode_dense=eps,
+        atomic_fact_dense=facts,
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=2))
+    by_id = {e.id: [f.id for f in e.atomic_facts] for e in resp.data.episodes}
+    assert len(by_id) == 2
+    assert by_id["ep_0"] == ["f00"]
+    assert all(len(f) == 1 for f in by_id.values())
+
+
+@pytest.mark.parametrize(("fact_score", "kept"), [(0.6, True), (0.4, False)])
+async def test_hybrid_radius_floors_the_fact_lane(
+    fact_score: float, kept: bool
+) -> None:
+    """``radius`` floors the atomic-fact lane on its max-pooled cosine, as it
+    floors the episode-vector lane: ep_far's own vector is below it, so only
+    its fact can bring it in."""
+    mgr = _build_manager(
+        episode_dense=[_episode_row("ep_near", 0.9), _episode_row("ep_far", 0.3)],
+        atomic_fact_dense=[
+            _atomic_fact_row("f_far", parent_id="ep_far", score=fact_score)
+        ],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10, radius=0.5))
+    assert ("ep_far" in [e.id for e in resp.data.episodes]) is kept
+
+
+async def test_hybrid_radius_floors_the_facts_an_episode_is_scored_on() -> None:
+    """A fact below ``radius`` neither lifts its episode's score nor is attached.
+
+    ep_1 comes in on BM25 alone (its own cosine, 0.3, is under the floor); its
+    fact, at 0.4, is under it too, so the episode is scored on BM25 only.
+    """
+    ep = _episode_row("ep_1", score=0.3)
+    mgr = _build_manager(
+        episode_sparse=[ep],
+        episode_dense=[ep],
+        atomic_fact_dense=[_atomic_fact_row("f1", parent_id="ep_1", score=0.4)],
+        embedding=_StubEmbedding(),
+    )
+    resp = await mgr.search(_user_req(method=SearchMethod.HYBRID, top_k=10, radius=0.5))
+    [episode] = resp.data.episodes
+    assert episode.atomic_facts == []
+    assert episode.score == pytest.approx(cosine_to_lr_score(0.0, 0.3))
 
 
 async def test_agentic_requires_reranker(

@@ -3,8 +3,9 @@
 Atomic facts are ~28x denser than episodes, so a long episode whose single
 mean-pooled vector dilutes a specific topic is recovered through the
 matching fact's own embedding. When no fact in scope carries a parent --
-extraction disabled, not caught up, or failing -- the recall falls back to
-ANN over the episode's own vector instead of returning nothing.
+extraction disabled, not caught up, or failing -- the VECTOR route falls
+back to ANN over the episode's own vector instead of returning nothing; the
+HYBRID fact lane does not, since HYBRID already has an episode-vector lane.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ async def maxsim_episode_recall(
     episodes: EpisodeRecaller,
     top_k: int,
     fact_limit: int,
-    fallback_limit: int,
+    fallback_limit: int | None,
     owner_id: str,
 ) -> RecallResult[Episode]:
     """Top ``top_k`` episodes by their best-matching atomic fact.
@@ -42,7 +43,8 @@ async def maxsim_episode_recall(
         episodes: Episode recall (parent fetch and fallback).
         top_k: Episodes to keep after max-pooling.
         fact_limit: Fact pool size for the ANN.
-        fallback_limit: Episode pool size when the fact pool has no parent.
+        fallback_limit: Episode pool size when the fact pool has no parent;
+            ``None`` returns nothing instead.
         owner_id: Owner searched, for the fallback log line.
 
     Returns:
@@ -57,6 +59,8 @@ async def maxsim_episode_recall(
         if entry_id and fact.score > best.get(entry_id, -1.0):
             best[entry_id] = fact.score
     if not best:
+        if fallback_limit is None:
+            return RecallResult.empty()
         fallback = await episodes.dense_recall(vector, where, limit=fallback_limit)
         logger.info(
             "vector_recall_fact_pool_empty",

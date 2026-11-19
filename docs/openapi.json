@@ -5614,7 +5614,7 @@
           "enable_llm_rerank": {
             "type": "boolean",
             "title": "Enable Llm Rerank",
-            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hybrid path has built-in fact eviction and ignores this flag. Ignored by keyword / vector / agentic.",
+            "description": "Opt-in LLM rerank pass for HYBRID. Applies to agent_case and agent_skill fusion only; the episode hybrid path ranks with its own LR-calibrated scoring and ignores this flag. Ignored by keyword / vector / agentic.",
             "default": false
           },
           "filters": {
