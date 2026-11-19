@@ -15,6 +15,7 @@ loader / merger / env reader).
 
 from .hints import missing_config_error as missing_config_error
 from .settings import LLM_TASK_DEFAULTS as LLM_TASK_DEFAULTS
+from .settings import RETIRED_LLM_TASKS as RETIRED_LLM_TASKS
 from .settings import AsyncQueueSettings as AsyncQueueSettings
 from .settings import BoundaryDetectionSettings as BoundaryDetectionSettings
 from .settings import CascadeSettings as CascadeSettings
@@ -42,6 +43,7 @@ from .settings import resolve_root as resolve_root
 
 __all__ = [
     "LLM_TASK_DEFAULTS",
+    "RETIRED_LLM_TASKS",
     "AsyncQueueSettings",
     "BoundaryDetectionSettings",
     "DeciderSettings",

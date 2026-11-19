@@ -159,3 +159,24 @@ def test_the_task_names_are_stable() -> None:
         "search",
         "decider",
     ]
+
+
+def test_a_retired_task_section_is_dropped_not_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Configs written before foresight was removed still load: the section is
+    dropped and reported for the startup warning, from TOML and from env."""
+    monkeypatch.setenv("EVEROS_LLM__FORESIGHT__API_KEY", "sk-old")
+    settings = _load(tmp_path, '[llm.foresight]\nmodel = "nano"\n')
+    assert settings.llm.retired_tasks == ("foresight",)
+    assert "foresight" not in settings.llm.model_dump()
+
+
+def test_a_retired_task_does_not_hide_an_unknown_one(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError) as caught:
+        _load(tmp_path, '[llm.foresight]\nmodel = "nano"\n[llm.boundry]\nmodel = "x"\n')
+    assert "'boundry'" in str(caught.value)
+
+
+def test_a_clean_config_reports_no_retired_task(tmp_path: Path) -> None:
+    assert _load(tmp_path, '[llm]\nmodel = "m"\n').llm.retired_tasks == ()

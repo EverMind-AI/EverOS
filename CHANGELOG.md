@@ -103,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | If you | Then |
 |---|---|
 | enabled `extract_foresight` in `ome.toml` | remove the block; it is ignored with a `config_override_unknown_strategy` warning |
-| set `[llm.foresight]` or `EVEROS_LLM__FORESIGHT__*` | remove it: an unknown task fails startup |
+| set `[llm.foresight]` or `EVEROS_LLM__FORESIGHT__*` | remove it: it is ignored, and startup logs an `llm.task.retired` warning |
 | ran foresight and want its data gone | a purge or a whole-user `/memory/delete` still removes the `.foresights/` files with the directory, but a session deletion no longer rewrites them and nothing deletes rows from the `foresight` index table (LanceDB) / collection (Milvus) any more: drop those by hand |
 | subscribe to `UserPipelineStarted` in your own strategy | subscribe to `EpisodeExtracted` (one per memcell, after the episode is written; it carries `memcell_id`, not the `MemCell`) |
 | disabled `extract_user_profile` in `ome.toml` | also disable `split_episode_by_owner`: it only feeds the profile |
