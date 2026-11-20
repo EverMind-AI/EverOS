@@ -36,6 +36,7 @@ from everalgo.llm import LLMOutputError
 from everalgo.types import ChatMessage, ConversationItem, MemCell
 
 from everos.config import BoundaryDetectionSettings
+from everos.core.errors import BoundaryLLMError, LLMServiceError
 from everos.core.observability.tracing import memory_span
 from everos.core.utils.datetime import from_timestamp
 from everos.memory.custom_instructions import CustomInstructions
@@ -262,7 +263,12 @@ class BoundaryDetection:
         # A generation span, so the call's token usage is costed (a span-typed
         # observation's usage is dropped).
         with memory_span("everos.memcell.boundary", observation_type="generation"):
-            cuts = await retry_llm_output(attempt, operator="boundary", mode=mode)
+            try:
+                cuts = await retry_llm_output(attempt, operator="boundary", mode=mode)
+            except TimeoutError as err:
+                raise BoundaryLLMError("boundary detection timed out") from err
+            except LLMServiceError as err:
+                raise BoundaryLLMError(str(err)) from err
         return apply_cuts(merged, items, cuts)
 
     async def _segment_step(
@@ -323,7 +329,12 @@ class BoundaryDetection:
                 )
 
         with memory_span("everos.memcell.boundary", observation_type="generation"):
-            return await retry_llm_output(attempt, operator="boundary", mode=mode)
+            try:
+                return await retry_llm_output(attempt, operator="boundary", mode=mode)
+            except TimeoutError as err:
+                raise BoundaryLLMError("boundary detection timed out") from err
+            except LLMServiceError as err:
+                raise BoundaryLLMError(str(err)) from err
 
     async def _commit_cells(
         self,
