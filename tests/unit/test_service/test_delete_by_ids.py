@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Collection, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
+from types import TracebackType
 from typing import Any
 
 import pytest
@@ -12,6 +14,7 @@ from everos.config import MemorizeSettings
 from everos.core.errors import DeletionIncompleteError
 from everos.infra.persistence.factories import build_stores
 from everos.infra.persistence.markdown import MarkdownEpisodeStore, MarkdownReader
+from everos.memory import user_cluster_lock
 from everos.memory.deps import Stores
 from everos.memory.models import AtomicFact, Cluster, Episode
 from everos.memory.ports import NO_SOURCE_CHECK, MemoryRef, Scope
@@ -239,6 +242,68 @@ async def test_dangling_member_detached_and_empty_cluster_deleted(
     await _by_ids(_deleter(stores), a.id)
 
     assert await stores.cluster.get("cl_1") is None
+
+
+class _ClusterLockProbe:
+    """The real owner lock, with a flag the fake cluster read can observe."""
+
+    def __init__(self) -> None:
+        self.inner: AbstractAsyncContextManager[None] | None = None
+        self.held = False
+
+    async def __aenter__(self) -> _ClusterLockProbe:
+        assert self.inner is not None
+        await self.inner.__aenter__()
+        self.held = True
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
+        self.held = False
+        assert self.inner is not None
+        return await self.inner.__aexit__(exc_type, exc, tb)
+
+
+async def test_cluster_committed_after_reverse_lookup_is_still_detached(
+    stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#597: a clustering pass can commit after the delete's reverse lookup.
+
+    The lock probe makes the cluster visible only while the deletion holds the
+    owner's clustering lock, which is the state a racing clustering pass leaves
+    behind. The deletion must re-discover it there, or the deleted episode stays
+    a member forever.
+    """
+    gone, keep = await _episodes(stores, _U1, "gone", "keep")
+    await _cluster(stores, [gone, keep])
+
+    probe = _ClusterLockProbe()
+
+    def lock_factory(app_id: str, project_id: str, owner_id: str) -> _ClusterLockProbe:
+        probe.inner = user_cluster_lock(app_id, project_id, owner_id)
+        return probe
+
+    monkeypatch.setattr("everos.service.memory._delete.user_cluster_lock", lock_factory)
+    find = stores.cluster.find_cluster_for_member
+
+    async def find_after_lock(
+        scope: Scope, member_type: str, member_id: str
+    ) -> str | None:
+        if not probe.held:
+            return None
+        return await find(scope, member_type, member_id)
+
+    monkeypatch.setattr(stores.cluster, "find_cluster_for_member", find_after_lock)
+
+    await _by_ids(_deleter(stores), gone.id)
+
+    cluster = await stores.cluster.get("cl_1")
+    assert cluster is not None
+    assert cluster.members == [keep.entry_id]
 
 
 async def test_unknown_ids_skipped_and_logged_without_note(stores: Stores) -> None:
