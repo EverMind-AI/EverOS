@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-20
+
+EverOS 1.7.1 writes each conversation's memory in its own language: a short
+call names the language of every memcell before its episode is written, and
+the episode, its summary, its atomic facts and a first profile follow it.
+Episode summaries are now written offline from the stored episode, a
+memcell's atomic facts and clustering embedding are computed once for all of
+its owners, and episode `hybrid` search ranks over three recall lanes, with
+bounded recall pools for `agentic` and `vector` search. A new
+`POST /memory/device/add` route lets one hardware device keep separate memory
+for each person it hears. Foresight, off by default since 1.2.3, is removed.
+
+What changes for an existing setup: `hybrid` search's `top_k` now counts
+episodes, each carrying at most one atomic fact; a store that ran foresight
+has its foresight data removed on first start; and the Python API for
+building `UserMemoryPipeline` and `ReflectionOrchestrator`, and for
+implementing `EpisodeStore`, changed. HTTP request bodies and the CLI are
+unchanged apart from additions. See Upgrade below.
+
 ### Added
 
 - **An episode's language is named before it is written.** Each memcell with
@@ -2763,7 +2782,8 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/EverMind-AI/EverOS/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/EverMind-AI/EverOS/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/EverMind-AI/EverOS/compare/v1.5.1...v1.6.0
 [1.3.1]: https://github.com/EverMind-AI/everos/compare/v1.3.0...v1.3.1
