@@ -105,6 +105,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.foresights/` folder removed (logged as `retired_kind_data_removed`):
   nothing reads them, and purge and deletion no longer reach them.
 
+### Fixed
+
+- **`everos demo` keeps the conversation on its newest line.** The conversation
+  panel follows every new line, also after the reader scrolled up; on a slow
+  machine it could stay at the top.
+
 ### Upgrade
 
 | If you | Then |

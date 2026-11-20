@@ -1,9 +1,39 @@
-# Running the benchmarks
+# Benchmarks
 
 One runner, four benchmarks, four stages: ADD, SEARCH, ANSWER, JUDGE.
 Per-benchmark rules live in `benchmarks/adapters/<name>.py`.
 
 > Also available in Chinese: [README.zh.md](README.zh.md).
+
+## Results
+
+Each benchmark's published number, from its config in `benchmarks/configs/`.
+
+| Benchmark | Questions | Accuracy | Decider | Answer model |
+|---|---|---|---|---|
+| [LoCoMo](locomo.md) | 1,540 | **94.61\*** | -- (`agentic` uses none) | `openai/gpt-4.1-mini` |
+| LongMemEval | 500 | **94.00** | `qwen3.6-27B` | `google/gemini-3.6-flash` |
+| EverMemBench | 2,400 | **66.67** | `qwen3.6-27B` | `google/gemini-3-flash-preview` |
+| SubtleMemory | 1,522 | **71.75** | `qwen3.6-27B` | `openai/gpt-5.4` |
+
+\* Re-judged: the 99 questions whose gold answer the LoCoMo audit disputes are graded against
+its corrected answers.
+
+> **Accuracy** is a micro accuracy for every benchmark in this table:
+> `sum(correct) / sum(total)` over all graded questions. The per-category lines in
+> `report.txt` are reported, never averaged into it, so a category with few questions
+> moves the headline less than a large one does.
+>
+> **EverMemBench** -- most rows of its published comparison table are the macro mean of
+> their category columns, a different statistic from the micro accuracy here.
+>
+> **SubtleMemory** — routes each question between two answer contracts on whether
+> fact extraction found a conflict; the adapter does this automatically.
+
+### More results
+
+- [LoCoMo](locomo.md): accuracy and search time of every retrieval method across models,
+  batch or step boundary detection, and write latency per stage.
 
 ## Quick start
 
@@ -32,11 +62,14 @@ so a failed first attempt costs nothing.
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
 - `bash` and `curl` (macOS or Linux; on Windows use WSL2, see
   [docs/windows.md](../docs/windows.md))
-- An [OpenRouter](https://openrouter.ai) key (extraction, answer and judge models).
-  With it alone you can run `--methods keyword`.
-- A [DeepInfra](https://deepinfra.com) key for EverOS's default embedding and rerank
-  models. LoCoMo searches with `agentic`, which needs both; the other three benchmarks
-  search with `llm_multiround`, which needs embedding only.
+- An [OpenRouter](https://openrouter.ai) key for the LLMs: extraction, answer and judge,
+  and the search-time calls of `agentic` and `llm_multiround`. With it alone you can run
+  `--methods keyword`.
+- A [DeepInfra](https://deepinfra.com) key, when the retrieval methods you run need
+  EverOS's default embedding (`Qwen/Qwen3-Embedding-4B`) or rerank
+  (`Qwen/Qwen3-Reranker-4B`) model: `vector`, `hybrid` and `llm_multiround` need
+  embedding, `agentic` needs both, `keyword` needs neither. See
+  [Which keys you need](#which-keys-you-need).
 
 ---
 
@@ -94,7 +127,7 @@ works as shipped.
 |---|---|---|
 | `EVEROS_LLM__API_KEY` | OpenRouter key | the EverOS servers: extraction (ADD) and the retrieval decider |
 | `EVEROS_EMBEDDING__API_KEY` | DeepInfra key | the EverOS servers: embedding (Qwen3-Embedding-4B by default) -- every retrieval method except `keyword` |
-| `EVEROS_RERANK__API_KEY` | DeepInfra key | the EverOS servers: rerank (Qwen3-Reranker-4B by default) -- `agentic`, LoCoMo's method; without it every agentic search fails |
+| `EVEROS_RERANK__API_KEY` | DeepInfra key | the EverOS servers: rerank (Qwen3-Reranker-4B by default) -- `agentic` only; without it every `agentic` search fails |
 | `ANSWER_API_KEY` | OpenRouter key | ANSWER |
 | `JUDGE_API_KEY` | OpenRouter key | JUDGE |
 
@@ -106,16 +139,19 @@ A benchmark therefore needs what its retrieval method needs -- `methods` in
 `configs/<dataset>.toml` (`agentic` for LoCoMo, `llm_multiround` for the other three),
 or `--methods` for one run:
 
-| Retrieval method | OpenRouter key | DeepInfra key: embedding | DeepInfra key: rerank |
+| Retrieval method | OpenRouter key: LLMs | DeepInfra key: embedding, `Qwen/Qwen3-Embedding-4B` | DeepInfra key: rerank, `Qwen/Qwen3-Reranker-4B` |
 |---|---|---|---|
-| `agentic` (LoCoMo) | yes | yes | yes |
-| `llm_multiround` (the other three) | yes | yes | -- |
-| `vector`, `hybrid` | yes | yes | -- |
 | `keyword` (BM25 only) | yes | -- | -- |
+| `vector`, `hybrid` | yes | yes | -- |
+| `llm_multiround` | yes | yes | -- |
+| `agentic` | yes | yes | yes |
+
+Every method needs the LLMs for extraction, answers and judging; `agentic` and
+`llm_multiround` also call one while they search.
 
 Without an embedding provider EverOS also skips reflection and skill extraction during
 ADD, so a `keyword` run measures a smaller pipeline, and its score is not comparable
-to [6. Results](#6-results). The run checks exactly these requirements for the
+to [Results](#results). The run checks exactly these requirements for the
 methods you chose, before anything starts.
 
 Models, `top_k`, retrieval settings and concurrency are set in
@@ -135,7 +171,7 @@ refused for datasets whose sessions carry their own ids.
 
 **Optional -- a separate retrieval decider** (`llm_multiround` only). Each config comes
 pre-filled with the decider behind its published number (the Decider column in
-[6. Results](#6-results); for LoCoMo, [its methods table](#by-retrieval-method)).
+[Results](#results); for LoCoMo, [Batch or step](locomo.md#batch-or-step)).
 To use it, set `BENCH_DECIDER_BASE_URL` to an OpenAI-compatible endpoint that serves it
 and `BENCH_DECIDER_API_KEY` to its key; set `BENCH_DECIDER_MODEL` only to run another
 model. LoCoMo's decider is on OpenRouter: `BENCH_DECIDER_BASE_URL=https://openrouter.ai/api/v1`
@@ -164,7 +200,7 @@ DATASET=locomo bash benchmarks/reproduce.sh --smoke
 A smoke run ingests the first 50 messages of conversation 0, answers up to 10 sampled
 questions (LongMemEval has one question per conversation, so one) and judges each
 once. It exercises every stage end to end; its score is not comparable to
-[6. Results](#6-results), and `report.txt` says so on its first lines. Use it to check
+[Results](#results), and `report.txt` says so on its first lines. Use it to check
 the setup and to watch what one conversation costs with your provider before a full
 run. The report counts answer and judge tokens only; extraction and embedding usage
 shows on your providers' dashboards.
@@ -220,7 +256,7 @@ starts, so two runs never share a store.
 
 `locomo-step` is LoCoMo with step boundary detection and prompt-only replies on every
 EverOS call: `configs/locomo-step.toml` is `locomo.toml` with those two server settings
-changed. See [Batch or step](#batch-or-step) for what each one costs and scores.
+changed. See [Batch or step](locomo.md#batch-or-step) for what each one costs and scores.
 
 Without the wrapper, the same smoke test is:
 
@@ -269,7 +305,7 @@ earlier search, answer and judge files as `*.superseded.jsonl`.
 | `No rerank provider is configured` | set `EVEROS_RERANK__API_KEY`, or choose a method other than `agentic` |
 | `decider ... did not answer` | the decider of an `llm_multiround` run refused the probe request; the message says why. See the decider option in [3. Configure](#3-configure) |
 | `llm_multiround round(s) fell back to a fixed core` | the decider failed on those rounds; the server log's `llm_multiround_decider_error` lines say why. Fix that, then search again under a new `RUN` |
-| `decider  no endpoint for ...` | a warning, not an error (`llm_multiround` only): the run continues on the extraction model and its score is not comparable to [6. Results](#6-results) |
+| `decider  no endpoint for ...` | a warning, not an error (`llm_multiround` only): the run continues on the extraction model and its score is not comparable to [Results](#results) |
 | `Refusing to start: these stores already hold memories` | delete the listed store for a clean run, or pass `--reuse-store` |
 | `No SubtleMemory personas under ...` | `bash benchmarks/download_data.sh subtlememory` |
 
@@ -306,7 +342,7 @@ side by side, overall and per category:
 | Line | Grades | Use it for |
 |---|---|---|
 | `Accuracy` | every answer against the dataset's gold | comparing with other systems' published results, which use it |
-| `Re-judged` | the same answers, with the questions a third-party audit disputes graded against the audit's corrected answers | the LoCoMo numbers in [6. Results](#6-results) (marked \*): a question with a wrong gold answer measures the dataset, not the system |
+| `Re-judged` | the same answers, with the questions a third-party audit disputes graded against the audit's corrected answers | the LoCoMo numbers in [Results](#results) (marked \*): a question with a wrong gold answer measures the dataset, not the system |
 
 Re-judging changes only the gold: nothing is searched or answered again, and the
 disputed answers are graded by the same judge model, the same number of times, with
@@ -350,81 +386,6 @@ find benchmarks/data -mindepth 1 ! -name .gitkeep -delete
 rm -f benchmarks/.env
 ps -eo pid,command | grep "[e]veros server start"    # stray servers, if any
 ```
-
-## 6. Results
-
-Each benchmark's published number. LoCoMo's comes from `benchmarks/configs/locomo-step.toml`, the
-others from `benchmarks/configs/<dataset>.toml`.
-
-| Benchmark | Questions | Accuracy | Decider | Answer model |
-|---|---|---|---|---|
-| LoCoMo | 1,540 | **94.61\*** | -- (`agentic` uses none) | `openai/gpt-4.1-mini` |
-| LongMemEval | 500 | **94.00** | `qwen3.6-27B` | `google/gemini-3.6-flash` |
-| EverMemBench | 2,400 | **66.67** | `qwen3.6-27B` | `google/gemini-3-flash-preview` |
-| SubtleMemory | 1,522 | **71.75** | `qwen3.6-27B` | `openai/gpt-5.4` |
-
-> **Accuracy** is a micro accuracy for every benchmark in this table:
-> `sum(correct) / sum(total)` over all graded questions. The per-category lines in
-> `report.txt` are reported, never averaged into it, so a category with few questions
-> moves the headline less than a large one does.
->
-> **EverMemBench** -- most rows of its published comparison table are the macro mean of
-> their category columns, a different statistic from the micro accuracy here.
->
-> **SubtleMemory** — routes each question between two answer contracts on whether
-> fact extraction found a conflict; the adapter does this automatically.
-
-### LoCoMo
-
-**EverOS scores 94.61%\* on LoCoMo.**
-
-#### By retrieval method
-
-| Retrieval method | Step boundary detection (`locomo-step`) | Batch boundary detection (`locomo`, default) |
-|---|---|---|
-| `agentic` | **94.61\*** | 94.35\* |
-| `llm_multiround` | 94.29\* | 94.29\* |
-| `hybrid` | 93.64\* | 93.38\* |
-| `vector` | 92.73\* | 92.08\* |
-| `keyword` | 91.04\* | 92.27\* |
-
-\* Re-judged: the 99 questions whose gold answer the LoCoMo audit disputes are graded against
-its corrected answers.
-
-Best of three `agentic` runs per config; every other method searched that run's stores once.
-Extraction and answers by `openai/gpt-4.1-mini`, judging by `openai/gpt-4o-mini` three times,
-`llm_multiround`'s decider `deepseek/deepseek-v4-flash-0731` with thinking off; everalgo-core
-0.7.0, everalgo-boundary 0.5.0.
-
-### Batch or step
-
-The two LoCoMo configs differ in two EverOS settings, and EverOS ships the first pair as its
-defaults:
-
-| | `locomo` (default) | `locomo-step` |
-|---|---|---|
-| Boundary detection, `[boundary_detection] strategy` | `batch`: one call per add | `step`: one call per message |
-| Reply format, `[llm] response_format_mode` | `json_schema`: the provider holds each reply to its schema | `prompt_only`: the prompt asks for the schema |
-| `agentic`, best of three runs | 94.35\* | **94.61\*** |
-| Boundary calls per run | 544 | about 5,250 |
-| ADD with 10 servers | about 4 minutes | about 17–22 minutes |
-| Episodes stored | about 320 | about 550 |
-| Agent conversations (tool calls) | supported | chat messages only |
-
-- **`locomo` is faster and more stable.** Batch needs a tenth of step's boundary calls and
-  ingests about five times faster. Strict replies always match the schema they were asked for;
-  they need a provider that supports `json_schema`.
-- **`locomo-step` scores higher.** Its best `agentic` run is 0.26 points above batch's, within
-  LoCoMo's run-to-run spread of about one point. A prompt-only reply that does not parse is
-  asked for again.
-
-Choose step for chat memory when slower ingest is acceptable; keep the defaults for agents and
-for fast ingest. In an EverOS deployment, see
-[`[boundary_detection]`](../docs/configuration.md#boundary_detection) and
-[`[llm]`](../docs/configuration.md#llm).
-
-\* Re-judged, as above.
-
 
 ---
 

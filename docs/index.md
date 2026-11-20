@@ -55,6 +55,7 @@ specific thing (drain a queue, recover from a stuck row, etc.).
 | [windows.zh.md](windows.zh.md) | Chinese mirror of the Windows / WSL2 guide |
 | [github-sync.md](github-sync.md) | Guardrails for refreshing GitHub from internal exports without overwriting GitHub-only workflow files |
 | [benchmarks/README.md](../benchmarks/README.md) | Benchmarks (LoCoMo, LongMemEval, EverMemBench, SubtleMemory) — get the data, configure, smoke-test, reproduce |
+| [benchmarks/locomo.md](../benchmarks/locomo.md) | LoCoMo results in detail — accuracy and search time across models and retrieval methods, batch or step boundary detection, write latency |
 
 ## Engineering / Internal
 

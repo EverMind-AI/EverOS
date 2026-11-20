@@ -197,6 +197,9 @@ inherits too, so a template's `api_key = ""` cannot mask `[llm]`'s key.
 | `search` | Search-time calls: agentic retrieval and the LLM rerank lane |
 | `decider` | The multi-round retrieval decider (`llm_multiround`) |
 
+LoCoMo accuracy and write / search latency for several models per stage are in
+[benchmarks/locomo.md](../benchmarks/locomo.md#results-by-model-and-retrieval-method).
+
 The task names are a stable interface. Environment variables nest one more
 level: `EVEROS_LLM__<TASK>__<FIELD>`, e.g. `EVEROS_LLM__BOUNDARY__MODEL`.
 `everos config show` prints what every task resolves to -- model, endpoint host
@@ -390,11 +393,22 @@ unaffected: nothing is probed, compared, or recorded.
 
 ### `[rerank]`
 
+Every model section names its service by `base_url`. The LLM, multimodal and
+embedding sections need nothing more: their endpoints all speak the
+OpenAI-compatible protocol. Rerank endpoints share no request format, so
+`[rerank]` also takes `provider`, which picks the format `base_url` speaks:
+
+| `provider` | Request | `api_key` |
+|---|---|---|
+| `deepinfra` (default) | `POST {base_url}/{model}`, DeepInfra's inference API; EverOS wraps the query and documents in the Qwen3-Reranker template | Required |
+| `vllm` | `POST {base_url}/rerank` with `model`, `query` and `documents`, an OpenAI-compatible rerank endpoint such as vLLM's | Optional, for a self-hosted server |
+| `dashscope` | `POST {base_url}/api/v1/services/rerank/text-rerank/text-rerank`, DashScope's native text-rerank API for `gte-rerank-v2`; `base_url` is the host, not the `compatible-mode` path | Required |
+
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
-| `provider` | string | `"deepinfra"` | No | Rerank provider: `deepinfra` or `vllm`. |
+| `provider` | string | `"deepinfra"` | No | Request format of the rerank endpoint: `deepinfra`, `vllm` or `dashscope` (see above). |
 | `model` | string | — | **Yes** | Reranker model identifier. |
-| `api_key` | string | — | **Yes** | API key. |
+| `api_key` | string | — | Except `vllm` | API key; a self-hosted `vllm` server may take none. |
 | `base_url` | string | — | **Yes** | Rerank endpoint URL. |
 | `timeout_seconds` | float | `30.0` | No | Request timeout. |
 | `max_retries` | int | `3` | No | Retry count on failure. |
@@ -421,16 +435,10 @@ everalgo's `BoundaryDetector` default.
 | LoCoMo ingest, 10 servers | about 4 minutes | about 17–22 minutes |
 | Episodes stored for LoCoMo | about 320 | about 550, each shorter |
 | Agent conversations (tool calls) | supported | chat messages only |
-| LoCoMo `agentic`, best of three runs | 94.35%\* | 94.61%\* |
 
-The two scores are within LoCoMo's run-to-run spread of about one point. They
-were measured with the reply format of each benchmark config: `batch` with the
-default `[llm] response_format_mode = "json_schema"`, which keeps every reply to
-its schema, and `step` with `"prompt_only"` for every call
-([benchmarks/README.md](../benchmarks/README.md#batch-or-step)).
-
-\* Graded against the corrected answers of the LoCoMo gold audit for the 99
-questions it disputes.
+`step`'s lead on LoCoMo is within the benchmark's run-to-run spread of about one
+point. Both scores, and the reply format each config was measured with, are in
+[benchmarks/locomo.md](../benchmarks/locomo.md#batch-or-step).
 
 ### `[memorize]`
 

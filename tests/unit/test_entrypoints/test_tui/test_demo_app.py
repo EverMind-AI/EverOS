@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from everos.entrypoints.tui.demo.app import EverOSDemoApp
@@ -29,6 +31,11 @@ from everos.entrypoints.tui.demo.widgets.dot_sphere import (
     _state_to_stage,
 )
 from everos.entrypoints.tui.demo.widgets.sphere import SPHERE_STATES
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from textual.pilot import Pilot
 
 _YELLOW = "#F9B91C"
 
@@ -399,19 +406,17 @@ async def test_conversation_panel_scrolls_when_log_overflows() -> None:
         for i in range(8):
             app._record_line("you", f"memory {i}")
             app._record_line("everos", f"a long recalled answer for round {i}")
-        # Each _record_line defers its scroll_end past the layout refresh that
-        # Static.update() triggers; one pause is not always enough to drain 16
-        # of them, and a late one landing after scroll_home re-pins the bottom.
-        await pilot.pause()
-        await pilot.pause()
-
         panel = app.query_one("#conversation", VerticalScroll)
-        assert panel.max_scroll_y > 0  # content overflows and is scrollable
-        assert panel.scroll_y == panel.max_scroll_y  # newest line auto-pinned
+
+        def pinned_to_newest() -> bool:
+            return panel.max_scroll_y > 0 and panel.scroll_y == panel.max_scroll_y
+
+        await _pause_until(pilot, pinned_to_newest)
         panel.scroll_home(animate=False)
-        await pilot.pause()
-        await pilot.pause()
-        assert panel.scroll_y == 0  # user can scroll back to the start
+        await _pause_until(pilot, lambda: panel.scroll_y == 0)
+        # A new turn brings a reader who scrolled up back to the newest line.
+        app._record_line("you", "one more memory")
+        await _pause_until(pilot, pinned_to_newest)
 
 
 async def test_slash_clear_wipes_the_conversation_log() -> None:
@@ -591,3 +596,18 @@ def _css_block(css: str, selector: str) -> str:
     start = css.index(f"{selector} {{")
     end = css.index("}", start)
     return css[start:end]
+
+
+async def _pause_until(
+    pilot: Pilot[None], condition: Callable[[], bool], *, max_pauses: int = 50
+) -> None:
+    """Pause the app until ``condition`` holds, failing after ``max_pauses``.
+
+    Layout and deferred callbacks settle after a scheduling-dependent number of
+    message-pump turns, so a fixed pause count is flaky on slow runners.
+    """
+    for _ in range(max_pauses):
+        if condition():
+            return
+        await pilot.pause()
+    assert condition(), f"condition still false after {max_pauses} pauses"

@@ -464,8 +464,11 @@ class EverOSDemoApp(App[None]):
         self.query_one("#conversation-log", Static).update(
             _conversation_text(self._log)
         )
-        # Keep the newest line in view as the log grows past the panel height.
-        self.query_one("#conversation", VerticalScroll).scroll_end(animate=False)
+        # Keep the newest line in view. An anchored panel is pinned to the bottom
+        # by the layout pass that sizes the new line; a deferred scroll_end() can
+        # run before that pass and land on the stale height. Re-anchoring every
+        # line also brings back a reader who scrolled up.
+        self.query_one("#conversation", VerticalScroll).anchor()
 
     def _enter_done(self, message: Text) -> None:
         # Cap reached: keep the input usable (so /live, /quit still work and the
