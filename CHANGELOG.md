@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaced by `message_ids`. Buffered messages from an earlier version keep
   their old ids; a batch sent before the upgrade and resent after it is not
   recognized as a resend.
+- **Failed `async_mode` batches no longer keep their bodies without bound.**
+  A `failed` queue row kept its request body for the seven-day retention,
+  uncapped, so an outage that failed every batch could hold every body
+  accepted during it on disk. Now only the newest failed bodies up to
+  `memorize.async_queue.max_failed_payload_bytes` (default 64 MiB) are kept;
+  older ones are emptied by the queue's sweep while the row and its
+  `last_error` stay. The sweep (this trim and the retention purge) now runs
+  every `scan_interval_seconds` while the worker is busy too, not only
+  between drains.
 
 ### Security
 
@@ -176,16 +185,6 @@ unchanged apart from additions. See Upgrade below.
   also turn `split_episode_by_owner` off. The OME strategy switches are part
   of the ingest identity, so a store ingested with an earlier config is not
   reused.
-
-### Fixed
-
-- **Failed `async_mode` batches no longer keep their bodies without bound.**
-  A `failed` queue row kept its request body for the seven-day retention,
-  uncapped, so an outage that failed every batch could hold every body
-  accepted during it on disk. Now only the newest failed bodies up to
-  `memorize.async_queue.max_failed_payload_bytes` (default 64 MiB) are kept;
-  older ones are emptied by the queue's sweep while the row and its
-  `last_error` stay.
 
 ### Removed
 

@@ -280,7 +280,8 @@ max_payload_bytes = 4194304
 # Request bodies kept on failed rows (for re-sending), newest first; older
 # failed rows past this total lose their body, the row itself stays. 0 keeps none.
 max_failed_payload_bytes = 67108864
-# Fallback sweep interval. Enqueue wakes the worker immediately.
+# Sweep interval (retention purge, failed-body trim), busy or idle. Enqueue
+# wakes the worker immediately.
 scan_interval_seconds = 5.0
 # Delivery attempts per row before it is marked failed and skipped. Keep 1
 # unless duplicate memcells after a partial failure are acceptable: the
