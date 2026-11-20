@@ -129,8 +129,7 @@ CI runs on GitHub Actions ([.github/workflows/](../.github/workflows/)). Every
 `uses:` pins an action to a full commit SHA with its version in a trailing
 comment (`actions/checkout@<sha> # v7.0.1`): a tag or branch can be moved to
 other code, a commit cannot. Dependabot updates the SHA and the comment
-together, and the repository refuses unpinned actions. Every pull request into
-`main` must pass:
+together. Every pull request into `main` must pass:
 
 | Check | Command | Guards |
 |---|---|---|
