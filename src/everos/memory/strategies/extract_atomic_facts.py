@@ -56,6 +56,7 @@ async def extract_atomic_facts(
         session_id=event.session_id,
         count=len(algo_facts),
         owners=len(event.copies),
+        language=event.language,
     )
     return list(done)
 

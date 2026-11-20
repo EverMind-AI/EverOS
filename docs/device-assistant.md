@@ -122,7 +122,7 @@ For device `D`, speaker slot `S`, in scope `app_id`/`project_id`:
 └── .index/                              # sqlite + lancedb: one row set, owner-scoped
 ```
 
-- The episode **text** of a memcell is shared (one model call), but its
+- The episode **text** of a memcell is shared (one episode call), but its
   **copies** are per owner: what S said and what T said land in two
   directories, each readable on its own.
 - The device directory holds exactly what belongs to no person: unattributed

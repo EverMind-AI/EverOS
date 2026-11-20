@@ -1,8 +1,9 @@
 """Every LLM consumer the bootstrap wires gets its own task's client.
 
 Each task is given a model of its own, then each consumer is asked which model
-its client names: boundary detection, the episode and summary calls, agentic
-search, the decider, the case gate, knowledge extraction, and the strategy
+its client names: boundary detection, the language decision, the episode and
+summary calls, agentic search, the decider, the case gate, knowledge
+extraction, and the strategy
 dependencies (each strategy picking its own attribute is pinned beside it, in
 ``tests/unit/test_memory/test_strategies``). Startup logs where every task's
 settings came from, never the key, and warns when the deprecated ``[decider]``
@@ -70,6 +71,7 @@ def test_each_consumer_gets_its_own_tasks_client(
     build_application(settings)
 
     assert _model(boundary[0][-1]["llm"]) == "m-boundary"
+    assert _model(pipeline[0][-1]["language_llm"]) == "m-language"
     assert _model(pipeline[0][-1]["episode_llm"]) == "m-episode"
     assert _model(search[0][-1]["llm_client"]) == "m-search"
     assert _model(search[0][-1]["decider_client"]) == "m-decider"

@@ -49,6 +49,7 @@ _WINDOW = re.compile(r"<message_count>\n(\d+)\n</message_count>")
 
 USER_TRACK_OPERATORS: Mapping[str, str] = {
     "boundary": "Reply",  # everalgo-boundary names its batch reply model `Reply`
+    "language": "_LanguageReply",
     "episode": "_EpisodeReply",
     "episode_summary": "_SummaryReply",
     "atomic_facts": "_AtomicFactsReply",

@@ -171,6 +171,7 @@ class LLMTask(StrEnum):
     """
 
     BOUNDARY = "boundary"
+    LANGUAGE = "language"
     EPISODE = "episode"
     SUMMARY = "summary"
     ATOMIC_FACT = "atomic_fact"
@@ -185,6 +186,15 @@ class LLMTask(StrEnum):
 
 LLM_TASK_DEFAULTS: Final[Mapping[LLMTask, Mapping[str, Any]]] = MappingProxyType(
     {
+        LLMTask.LANGUAGE: MappingProxyType(
+            {
+                "temperature": 0.0,
+                "max_tokens": 64,
+                "timeout_seconds": 3.0,
+                "sdk_max_retries": 0,
+                "invalid_reply_retries": 0,
+            }
+        ),
         LLMTask.DECIDER: MappingProxyType(
             {
                 "timeout_seconds": 60.0,
@@ -197,10 +207,17 @@ LLM_TASK_DEFAULTS: Final[Mapping[LLMTask, Mapping[str, Any]]] = MappingProxyType
 """Fields a task takes from its own default, not from ``[llm]``, when its section
 leaves them unset.
 
-Only the decider has any. It runs inside a search request, so one round's
-deadline and retry budget are bounded by the caller waiting on it, not by
-``[llm]``'s background-extraction values. The values are the ones ``[decider]``
-shipped with. The output cap is not among them: the decider inherits ``[llm]``'s
+The language decision runs in the write path, before every memcell's episode,
+and a failed one only leaves the episode's language to the episode model. So
+it gets one bounded attempt: the reply is a one-word label (64 tokens, no room
+for a model that thinks first), and a slow or unusable reply is given up after
+3 seconds rather than resent -- the SDK retries are 0 so the deadline is the
+whole wait.
+
+The decider runs inside a search request, so one round's deadline and retry
+budget are bounded by the caller waiting on it, not by ``[llm]``'s
+background-extraction values. The values are the ones ``[decider]`` shipped
+with. The output cap is not among them: the decider inherits ``[llm]``'s
 ``max_tokens``, so a model that thinks before it answers has room to.
 ``sdk_max_retries`` is 0 because ``[decider].retries`` already retries
 at its own layer and the two multiply -- four decider attempts times three SDK
@@ -379,11 +396,11 @@ class LLMSettings(LLMClientSettings):
 
     Configuring ``[llm]`` alone runs everything. A task section
     (:class:`LLMTaskSettings`) overrides any field for that one task; what it
-    leaves unset comes from ``[llm]``, except the decider fields listed in
-    :data:`LLM_TASK_DEFAULTS`. The section names are :class:`LLMTask`'s values;
-    an unknown section or field fails the load, naming the valid ones, except a
-    retired task's (:data:`RETIRED_LLM_TASKS`), which is dropped and reported in
-    :attr:`retired_tasks`.
+    leaves unset comes from ``[llm]``, except the language and decider fields
+    listed in :data:`LLM_TASK_DEFAULTS`. The section names are
+    :class:`LLMTask`'s values; an unknown section or field fails the load,
+    naming the valid ones, except a retired task's (:data:`RETIRED_LLM_TASKS`),
+    which is dropped and reported in :attr:`retired_tasks`.
 
     Env binding (via parent ``Settings``):
         EVEROS_LLM__MODEL, EVEROS_LLM__API_KEY, EVEROS_LLM__BASE_URL ... one
@@ -393,6 +410,9 @@ class LLMSettings(LLMClientSettings):
 
     boundary: LLMTaskSettings = LLMTaskSettings()
     """Boundary detection: cutting a session's messages into memcells."""
+    language: LLMTaskSettings = LLMTaskSettings()
+    """Naming each memcell's conversation language, which its episode and the
+    extractions after it are written in."""
     episode: LLMTaskSettings = LLMTaskSettings()
     """Episode extraction from each memcell."""
     summary: LLMTaskSettings = LLMTaskSettings()

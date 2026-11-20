@@ -2,7 +2,7 @@
 
 One rule: every field is taken from the first section that sets it -- the task's
 own section, then (decider only) the deprecated ``[decider]`` fields, then the
-task's own defaults (decider only), then ``[llm]``. ``extra`` is one value,
+task's own defaults (language and decider only), then ``[llm]``. ``extra`` is one value,
 replaced whole. The cases below pin that rule, the source each field reports,
 which tasks share a provider, and that ``temperature`` / ``max_tokens`` are
 defaults a call can still override -- read off the wire, because a provider that
@@ -138,6 +138,33 @@ _INHERIT_CASES: list[tuple[str, dict[str, Any], LLMTask, dict[str, Any]]] = [
             "response_format_mode": "json_object",
             "model": "base-model",
         },
+    ),
+    (
+        "language keeps its own five defaults",
+        {
+            "timeout_seconds": 300.0,
+            "max_tokens": 8000,
+            "sdk_max_retries": 5,
+            "invalid_reply_retries": 4,
+            "temperature": 0.3,
+            "extra": {"extra_body": {"a": 1}},
+        },
+        LLMTask.LANGUAGE,
+        {
+            "temperature": 0.0,
+            "max_tokens": 64,
+            "timeout_seconds": 3.0,
+            "sdk_max_retries": 0,
+            "invalid_reply_retries": 0,
+            "extra": {"extra_body": {"a": 1}},
+            "model": "base-model",
+        },
+    ),
+    (
+        "language section beats its defaults",
+        {"language": LLMTaskSettings(model="small", timeout_seconds=10.0)},
+        LLMTask.LANGUAGE,
+        {"model": "small", "timeout_seconds": 10.0, "max_tokens": 64},
     ),
     (
         "decider section beats its defaults",
@@ -294,11 +321,13 @@ def _providers(settings: Settings) -> dict[LLMTask, Any]:
     return build_llm_task_providers(configs)
 
 
-def test_by_default_ten_tasks_share_one_provider_and_the_decider_has_its_own() -> None:
+def test_by_default_the_tasks_share_one_provider_but_language_and_decider() -> None:
+    """The language task's own defaults make it a configuration of its own."""
     providers = _providers(_settings())
-    shared = {id(p) for task, p in providers.items() if task is not LLMTask.DECIDER}
+    own = {LLMTask.LANGUAGE, LLMTask.DECIDER}
+    shared = {id(p) for task, p in providers.items() if task not in own}
     assert len(shared) == 1
-    assert id(providers[LLMTask.DECIDER]) not in shared
+    assert len({id(providers[task]) for task in own} | shared) == 3
 
 
 def test_tasks_configured_alike_share_and_the_rest_split() -> None:
@@ -306,7 +335,7 @@ def test_tasks_configured_alike_share_and_the_rest_split() -> None:
     providers = _providers(_settings({"boundary": nano, "summary": nano}))
     assert providers[LLMTask.BOUNDARY] is providers[LLMTask.SUMMARY]
     assert providers[LLMTask.BOUNDARY] is not providers[LLMTask.EPISODE]
-    assert len({id(p) for p in providers.values()}) == 3
+    assert len({id(p) for p in providers.values()}) == 4
 
 
 def test_the_decider_is_never_shared_even_when_configured_alike() -> None:
@@ -382,11 +411,20 @@ async def test_unset_defaults_leave_both_out_of_the_request(
 ) -> None:
     """Only ``[llm]`` configured: each extraction request is what it was before."""
     providers = _providers(_settings())
-    for task in set(LLMTask) - {LLMTask.DECIDER}:
+    for task in set(LLMTask) - {LLMTask.LANGUAGE, LLMTask.DECIDER}:
         await _send(providers[task])
     assert {tuple(sorted(body)) for body in wire} == {
         ("messages", "model", "response_format")
     }
+
+
+async def test_the_language_task_sends_its_own_temperature_and_cap(
+    wire: list[dict[str, Any]],
+) -> None:
+    """Only ``[llm]`` configured: the one-word language reply is still bounded."""
+    await _send(_providers(_settings())[LLMTask.LANGUAGE])
+    (body,) = wire
+    assert (body["temperature"], body["max_tokens"]) == (0.0, 64)
 
 
 async def test_the_decider_sends_its_reply_cap_and_extra(

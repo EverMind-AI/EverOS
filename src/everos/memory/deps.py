@@ -95,6 +95,7 @@ class LLMClients:
 
     Args:
         boundary: Cuts a session's messages into memcells.
+        language: Names each memcell's conversation language.
         episode: Extracts each memcell's episode.
         summary: Writes the episode's display summary.
         atomic_fact: Extracts atomic facts.
@@ -108,6 +109,7 @@ class LLMClients:
     """
 
     boundary: LLMClient
+    language: LLMClient
     episode: LLMClient
     summary: LLMClient
     atomic_fact: LLMClient

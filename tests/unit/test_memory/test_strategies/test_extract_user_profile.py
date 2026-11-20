@@ -520,18 +520,26 @@ async def test_a_narrative_the_extractor_refuses_is_skipped() -> None:
 
 
 @pytest.mark.parametrize(
-    ("stored", "event_language", "expected"),
+    ("stored", "event_language", "expected", "source"),
     [
-        pytest.param(None, "Chinese", "Chinese", id="no-profile-init-freezes"),
-        pytest.param("English", "Chinese", "English", id="frozen-wins-unchanged"),
-        pytest.param("", "Chinese", "Chinese", id="unfrozen-takes-event"),
-        pytest.param("", None, None, id="unknown-stays-unknown"),
+        pytest.param(None, "Chinese", "Chinese", "event", id="no-profile-init-freezes"),
+        pytest.param(
+            "English", "Chinese", "English", "frozen", id="frozen-wins-unchanged"
+        ),
+        pytest.param("", "Chinese", "Chinese", "event", id="unfrozen-takes-event"),
+        pytest.param("", None, None, None, id="unknown-stays-unknown"),
     ],
 )
 async def test_profile_language_is_frozen_once_known(
-    stored: str | None, event_language: str | None, expected: str | None
+    stored: str | None,
+    event_language: str | None,
+    expected: str | None,
+    source: str | None,
 ) -> None:
-    """``stored``: ``None`` = no profile yet, ``""`` = one with no language."""
+    """``stored``: ``None`` = no profile yet, ``""`` = one with no language.
+
+    The run's log line says which language was used and where it came from.
+    """
     deps = make_deps()
     _seed(deps, _scope())
     if stored is not None:
@@ -541,11 +549,16 @@ async def test_profile_language_is_frozen_once_known(
             timestamp=_TS - 1,
             primary_language=stored or None,
         )
-    with _extractor(return_value=_algo_profile()) as extract:
+    with (
+        _extractor(return_value=_algo_profile()) as extract,
+        structlog.testing.capture_logs() as logs,
+    ):
         await extract_user_profile(_event(language=event_language), deps)
 
     assert extract.call_args.kwargs["output_language"] == expected
     assert deps.stores.profile.profiles[_scope()].primary_language == expected
+    (line,) = [e for e in logs if e["event"] == "user_profile_extracted"]
+    assert (line["language"], line["language_from"]) == (expected, source)
 
 
 async def test_primary_language_does_not_reach_the_algo_profile() -> None:

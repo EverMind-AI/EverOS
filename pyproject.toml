@@ -96,12 +96,13 @@ dependencies = [
     #
     # All eight everalgo packages (including the four transitive ones) ship on one
     # contract line -- currently the 2026-11-13 line (everalgo-core 0.7.0),
-    # still on the `LLMClient.achat` contract of everalgo-core 0.6.0. The
+    # still on the `LLMClient.achat` contract of everalgo-core 0.6.0;
+    # everalgo-user-memory 0.10.1 only adds `LanguageDetector` to it. The
     # packages declare loose ranges on one another, so a fresh
     # `pip install everos` would otherwise mix lines the suite has never run
     # together. Pin every one with `==` and raise them together, with a run of
     # the release smoke against a PyPI-resolved install.
-    "everalgo-user-memory==0.9.0",
+    "everalgo-user-memory==0.10.1",
     "everalgo-agent-memory==0.6.0",
     "everalgo-rank==0.5.0",
     "everalgo-knowledge==0.3.0",

@@ -35,6 +35,7 @@ from everos.infra.persistence.index.adapters import (
 from everos.infra.persistence.markdown import (
     MarkdownAtomicFactStore,
     MarkdownEpisodeStore,
+    MarkdownProfileStore,
 )
 from everos.infra.persistence.sqlite import (
     SqliteClusterStore,
@@ -126,6 +127,7 @@ class _World:
             episode_index=EpisodeIndexAdapter(storage.repos.episode),
             memcell_store=self.memcells,
             report_store=reports,
+            profile_store=MarkdownProfileStore(root),
             reflector=EpisodeReflector(llm=reflector_llm),
         )
         self.finisher = ReflectionFinisher(

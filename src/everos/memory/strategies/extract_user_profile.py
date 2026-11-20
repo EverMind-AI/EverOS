@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Collection
+from typing import Literal
 
 from everalgo.types import Profile as AlgoProfile
 from everalgo.user_memory import ProfileExtractor
@@ -107,7 +108,7 @@ async def _fold(
     existing = await deps.stores.profile.read(scope)
     waiting = await _waiting_episodes(scope, existing, event, deps)
     batch = [*own, *waiting]
-    language = _profile_language(existing, event)
+    language, language_from = _profile_language(existing, event)
     new_profile = await _extract(
         event, deps, episodes=batch, existing=existing, language=language
     )
@@ -123,6 +124,8 @@ async def _fold(
         episodes=len(batch),
         mode="UPDATE" if existing is not None else "INIT",
         written=new_profile is not None,
+        language=language,
+        language_from=language_from,
     )
 
 
@@ -201,16 +204,19 @@ async def _extract(
 
 def _profile_language(
     existing: Profile | None, event: EpisodeExtractedForOwner
-) -> str | None:
-    """The language to write the profile in, frozen once known.
+) -> tuple[str | None, Literal["frozen", "event"] | None]:
+    """The language to write the profile in, frozen once known, and its source.
 
-    A stored profile's ``primary_language`` wins and is never changed
-    automatically; changing it is a manual edit. Until one is stored, the
-    triggering episode's language is used and then frozen.
+    A stored profile's ``primary_language`` wins (``"frozen"``) and is never
+    changed automatically; changing it is a manual edit. Until one is stored,
+    the triggering episode's language is used (``"event"``) and then frozen.
+    ``(None, None)`` when neither has one: the model picks the language.
     """
     if existing is not None and existing.primary_language:
-        return existing.primary_language
-    return event.language
+        return existing.primary_language, "frozen"
+    if event.language:
+        return event.language, "event"
+    return None, None
 
 
 EXTRACT_USER_PROFILE_SPEC = StrategySpec(

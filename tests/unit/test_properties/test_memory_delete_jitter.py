@@ -440,6 +440,7 @@ async def _add(world: _World, session: str, owners: tuple[str, ...]) -> None:
         episode_store=world.stores.episode,
         memcell_store=world.stores.memcell,
         instructions=bundled_instructions(),
+        language_llm=llm,
         episode_llm=llm,
     )
     # The extraction model; sometimes slow enough for a whole session
@@ -544,6 +545,7 @@ async def _reflect(world: _World, owner: str) -> None:
         episode_index=_MdIndex(world),  # type: ignore[arg-type]
         memcell_store=stores.memcell,
         report_store=stores.reflection_report,
+        profile_store=stores.profile,
         reflector=reflector,
     )
     merged = await orchestrator.run(scope=_scope(owner))
@@ -931,6 +933,34 @@ async def _check(world: _World) -> None:
     seed=0,
     crash=None,
     disk_full_at=None,
+)
+@example(  # a skill listed, then removed by an agent deletion before it was read
+    first=[
+        ("del_owner_session", "u1", "s1"),
+        ("skill",),
+        ("add", "s2", ("u2", "u3")),
+        ("reflect", "u3"),
+        ("del_session", "s1", False),
+        ("del_owner", "u3"),
+        ("skill",),
+        ("facts", "u3"),
+        ("facts", "u1"),
+        ("cluster", "u1"),
+        ("del_session", "s1", True),
+    ],
+    second=[
+        ("cluster", "u3"),
+        ("del_owner", "u3"),
+        ("cluster", "u3"),
+        ("del_id", "u1"),
+        ("del_owner_session", "u1", "s2"),
+        ("cluster", "u1"),
+        ("skill",),
+        ("del_owner", "g1"),
+    ],
+    seed=257,
+    crash=None,
+    disk_full_at=2,
 )
 def test_deletions_and_writers_keep_their_invariants(
     first: list[tuple[Any, ...]],

@@ -19,6 +19,10 @@ If fact extraction never succeeds the second step never runs: the merged
 episode stays without facts and the originals stay live, which a later
 cycle detects as an orphan.
 
+A merge is written in the owner's profile language, else the members'
+majority language (:mod:`._language`); the merged episode and its event carry
+the language it was written in, so its facts follow it.
+
 See ``local/2026-06-14-reflection-everos-design.md`` for the full design.
 """
 
@@ -54,6 +58,7 @@ from everos.memory.ports import (
     EpisodeStore,
     Filter,
     MemcellStore,
+    ProfileStore,
     ReflectionReportStore,
     Scope,
     SourceCheck,
@@ -62,6 +67,11 @@ from everos.memory.ports import (
     eq,
     is_null,
     one_of,
+)
+from everos.memory.reflection._language import (
+    LanguageChoice,
+    merged_language,
+    steer_language,
 )
 
 logger = get_logger(__name__)
@@ -89,6 +99,8 @@ class ReflectionOrchestrator:
         episode_index: Episode reads (members, orphans).
         memcell_store: Whether a source episode's memcell still exists.
         report_store: Reflection audit trail (which clusters were merged).
+        profile_store: The owner's profile, whose frozen language every merge
+            of the owner is written in.
         reflector: Algorithm-side EpisodeReflector (areflect).
         custom_instructions: Appended to the reflector's rules; ``None`` for none.
     """
@@ -101,6 +113,7 @@ class ReflectionOrchestrator:
         episode_index: EpisodeIndex,
         memcell_store: MemcellStore,
         report_store: ReflectionReportStore,
+        profile_store: ProfileStore,
         reflector: EpisodeReflector,
         custom_instructions: str | None = None,
     ) -> None:
@@ -109,6 +122,7 @@ class ReflectionOrchestrator:
         self._episode_index = episode_index
         self._memcell_store = memcell_store
         self._report_store = report_store
+        self._profile_store = profile_store
         self._reflector = reflector
         self._custom_instructions = custom_instructions
 
@@ -137,10 +151,11 @@ class ReflectionOrchestrator:
         if not candidates:
             return []
 
+        owner_language = await self._owner_language(scope)
         merged: list[EpisodeExtracted] = []
         for cluster_id in candidates:
             event = await self._process_cluster_safely(
-                cluster_id=cluster_id, scope=scope
+                cluster_id=cluster_id, scope=scope, owner_language=owner_language
             )
             if event is not None:
                 merged.append(event)
@@ -154,7 +169,7 @@ class ReflectionOrchestrator:
         return merged
 
     async def _process_cluster_safely(
-        self, *, cluster_id: str, scope: Scope
+        self, *, cluster_id: str, scope: Scope, owner_language: str | None
     ) -> EpisodeExtracted | None:
         """Merge one cluster, catching errors to allow the cycle to continue.
 
@@ -162,7 +177,9 @@ class ReflectionOrchestrator:
             The merged episode's event on success, ``None`` on skip or error.
         """
         try:
-            return await self._process_cluster(cluster_id=cluster_id, scope=scope)
+            return await self._process_cluster(
+                cluster_id=cluster_id, scope=scope, owner_language=owner_language
+            )
         except AppError:
             logger.warning(
                 "reflection_cluster_skipped",
@@ -204,9 +221,14 @@ class ReflectionOrchestrator:
     # ── Per-cluster processing ────────────────────────────────────────────
 
     async def _process_cluster(
-        self, *, cluster_id: str, scope: Scope
+        self, *, cluster_id: str, scope: Scope, owner_language: str | None
     ) -> EpisodeExtracted | None:
         """Merge one cluster and write the merged episode.
+
+        Args:
+            cluster_id: The cluster to merge.
+            scope: The owner scope it belongs to.
+            owner_language: The owner's profile language; ``None`` without one.
 
         Returns:
             The merged episode's event, ``None`` on skip.
@@ -230,11 +252,13 @@ class ReflectionOrchestrator:
             return None
         await self._detect_orphans(cluster_id, scope)
 
+        steer = steer_language(owner_language, episodes)
         mode, algo_result = await self._reflect_cluster(
-            episodes=episodes, owner_id=scope.owner_id
+            episodes=episodes, owner_id=scope.owner_id, output_language=steer.value
         )
         if algo_result is None:
             return None
+        language = merged_language(steer, algo_result.episode)
 
         unchanged = await self._sources_alive(scope=scope, episodes=episodes)
         if unchanged is None:
@@ -246,6 +270,7 @@ class ReflectionOrchestrator:
             scope=scope,
             algo_result=algo_result,
             last_ts=last_ts,
+            language=language,
             only_if=unchanged,
         )
         if merged_entry_id is None:
@@ -256,6 +281,8 @@ class ReflectionOrchestrator:
             mode=mode,
             source_count=len(members),
             merged_entry_id=merged_entry_id,
+            language=language.value,
+            language_from=language.source,
         )
         return EpisodeExtracted(
             memcell_id=merged_entry_id,
@@ -266,6 +293,7 @@ class ReflectionOrchestrator:
             app_id=scope.app_id,
             project_id=scope.project_id,
             source="reflection",
+            language=language.value,
             reflection=ReflectionContext(
                 cluster_id=cluster_id,
                 mode=mode,
@@ -284,7 +312,11 @@ class ReflectionOrchestrator:
         )
 
     async def _reflect_cluster(
-        self, *, episodes: list[StoredEpisode], owner_id: str
+        self,
+        *,
+        episodes: list[StoredEpisode],
+        owner_id: str,
+        output_language: str | None,
     ) -> tuple[ReflectionMode, AlgoEpisode | None]:
         """Determine reflection mode and call the algo reflector.
 
@@ -302,6 +334,7 @@ class ReflectionOrchestrator:
             merged_entry_ids=merged_entry_ids,
             is_update=is_update,
             owner_id=owner_id,
+            output_language=output_language,
         )
         return mode, algo_result
 
@@ -329,6 +362,7 @@ class ReflectionOrchestrator:
         scope: Scope,
         algo_result: AlgoEpisode,
         last_ts: int,
+        language: LanguageChoice,
         only_if: SourceCheck,
     ) -> str | None:
         """Write the merged episode to markdown; return its entry id.
@@ -344,6 +378,7 @@ class ReflectionOrchestrator:
             subject=algo_result.subject,
             parent_id=cluster_id,
             parent_type="cluster",
+            language=language.value,
         )
         refs = await self._episode_store.append_many(scope, [merged], only_if=only_if)
         return refs[0].entry_id if refs else None
@@ -384,6 +419,24 @@ class ReflectionOrchestrator:
 
     # ── Helpers ───────────────────────────────────────────────────────────
 
+    async def _owner_language(self, scope: Scope) -> str | None:
+        """The owner's frozen profile language; ``None`` without a readable one.
+
+        An unreadable ``user.md`` (a broken hand edit) must not stop the
+        owner's merges, nor, through the cron run, every other owner's: they
+        fall back to the members' vote.
+        """
+        try:
+            profile = await self._profile_store.read(scope)
+        except Exception:
+            logger.warning(
+                "reflection_profile_unreadable",
+                owner_id=scope.owner_id,
+                exc_info=True,
+            )
+            return None
+        return profile.primary_language if profile is not None else None
+
     async def _detect_orphans(self, cluster_id: str, scope: Scope) -> None:
         """Log warning if orphan merged episodes exist for this cluster."""
         where = all_of(
@@ -414,6 +467,7 @@ class ReflectionOrchestrator:
         merged_entry_ids: list[str],
         is_update: bool,
         owner_id: str,
+        output_language: str | None,
     ) -> AlgoEpisode | None:
         """Call the algo reflector (INIT or UPDATE mode).
 
@@ -423,6 +477,8 @@ class ReflectionOrchestrator:
                 (parent_type=cluster). Empty for INIT.
             is_update: Whether this is an UPDATE (vs INIT) reflection.
             owner_id: Owner for logging on failure.
+            output_language: The language to merge in; ``None`` lets the
+                reflector choose.
 
         Returns:
             An algo Episode result, or ``None`` on failure.
@@ -440,9 +496,12 @@ class ReflectionOrchestrator:
                         algo_episodes=algo_episodes,
                         episodes=episodes,
                         merged_entry_ids=merged_entry_ids,
+                        output_language=output_language,
                     )
                 return await self._reflector.areflect(
-                    algo_episodes, custom_instructions=self._custom_instructions
+                    algo_episodes,
+                    custom_instructions=self._custom_instructions,
+                    output_language=output_language,
                 )
         except AppError:
             logger.warning(
@@ -465,6 +524,7 @@ class ReflectionOrchestrator:
         algo_episodes: list[AlgoEpisode],
         episodes: list[StoredEpisode],
         merged_entry_ids: list[str],
+        output_language: str | None,
     ) -> AlgoEpisode | None:
         """Run UPDATE-mode reflection by splitting old/new episodes.
 
@@ -481,6 +541,7 @@ class ReflectionOrchestrator:
             new_algo_eps,
             old_episode=old_algo_eps[0],
             custom_instructions=self._custom_instructions,
+            output_language=output_language,
         )
 
 

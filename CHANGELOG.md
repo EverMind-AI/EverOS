@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An episode's language is named before it is written.** Each memcell with
+  a user sender first gets one short call on the new `language` LLM task
+  (everalgo `LanguageDetector`), which names the language of its
+  conversation -- Chinese, Japanese or English, any other language as English
+  -- from the sentences the participants write to each other, not from
+  pasted code or documents, names, or a few words of another language mixed
+  in. The episode is extracted in that language and stores
+  it, and its summary, atomic facts and (on first build) profile follow it.
+  A failed or slow call leaves the language to the episode model, as before,
+  and the episode stores the language its text is written in; a memcell with
+  no chat text makes no call. `[llm.language]` defaults to temperature 0,
+  64 output tokens, a 3-second timeout and no retries, so the call adds at
+  most 3 seconds per memcell to a synchronous `/add`. See
+  `docs/how-memory-works.md` and `docs/configuration.md`.
 - **OME strategies `summarize_episode` and `split_episode_by_owner`**, both on
   by default and named so in `ome.toml`. `summarize_episode` writes each
   episode's display summary (below); `split_episode_by_owner` hands each
@@ -30,6 +44,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Reflection merges in the owner's profile language.** Without one, the
+  merged episodes vote with their stored languages and a language held by
+  more than 60% of them is used; a closer split leaves it to the reflector
+  and the language is read off the merged text. The merged episode stores
+  that language and its atomic facts are written in it; before, the merge
+  chose its own language and stored none.
+- **Log lines name the language each step writes in.**
+  `episode_language_decided` / `episode_language_undecided` (`reason`
+  `no_chat` or `failed`) per memcell; `episode_written` with `language` and
+  `language_from` (`decided` or `text`); `atomic_facts_extracted` gains
+  `language`; `user_profile_extracted` gains `language` and `language_from`
+  (`frozen` or `event`); `reflection_merged` gains `language` and
+  `language_from` (`profile`, `vote` or `text`).
+- **`everalgo-user-memory` 0.9.0 -> 0.10.1**, which only adds
+  `LanguageDetector`.
 - **Episode `hybrid` search ranks three recall lanes.** BM25 and the episode
   vector are fused with an atomic-fact lane (200 facts max-pooled onto at most
   50 episodes) by two RRF passes, and each kept episode is scored on the
@@ -110,6 +139,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`everos demo` keeps the conversation on its newest line.** The conversation
   panel follows every new line, also after the reader scrolled up; on a slow
   machine it could stay at the top.
+- **Agent-skill extraction no longer fails when the agent is deleted
+  mid-run.** A `SKILL.md` (or a skill's reference or script) removed between
+  being found and being read now reads as absent instead of raising
+  `FileNotFoundError`, which failed the `extract_agent_skill` run.
 
 ### Upgrade
 
@@ -123,6 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | want no summary call at all | disable `summarize_episode`; episodes keep their placeholder summary |
 | read `owner_id`, `episode_entry_id` or `owner_name` from `EpisodeExtracted` in your own strategy | read `copies` (one entry per owner), or subscribe to `EpisodeExtractedForOwner` |
 | build `UserMemoryPipeline` or implement `EpisodeStore` in Python | drop `summary_llm`; add `replace_summary` |
+| build `UserMemoryPipeline` or `ReflectionOrchestrator` in Python | pass `language_llm`, or `profile_store` |
+| point `[llm]` at a model that thinks before it answers | set `[llm.language]` to a model with thinking off: thinking runs out of its 64 tokens, and every episode falls back to the model's own language choice (`episode_language_undecided`, `reason="failed"`) |
 
 Stop the old server normally so it finishes its queued background runs. A
 profile run still pending under the 1.7.0 event when the old server stopped

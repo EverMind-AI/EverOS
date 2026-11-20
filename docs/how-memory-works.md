@@ -149,11 +149,22 @@ index catches up asynchronously.
   and reflection prompts with
   [custom instructions](custom_instructions.md).
 - Episode markdown is written **synchronously** — when `/flush` returns
-  `extracted`, the episode file is already on disk. A memcell costs one
-  extraction call: the episode is copied into the files of every user
-  sender of the memcell, each copy with a placeholder summary (the
+  `extracted`, the episode file is already on disk. A memcell costs two
+  calls: a short one names the language of its conversation, then the
+  episode is extracted in that language and copied into the files of every
+  user sender of the memcell, each copy with a placeholder summary (the
   episode's opening, cut and closed with `…`) that the OME replaces with
   a model-written preview shortly after.
+- **Language.** The language call answers Chinese, Japanese or English (any
+  other language is written in English), judging the sentences the
+  participants write to each other rather than pasted code or documents,
+  names, or a few words of another language mixed in. The episode
+  stores that language, and its summary and atomic facts are written in it;
+  the profile takes the language of the first episode it is built from and
+  keeps it, and a Reflection merge follows the profile's language (else the
+  language most of the merged episodes share). When the language call fails
+  or times out, the episode model picks the language and the episode stores
+  the one its text is written in.
 - Everything else (atomic facts, profile, agent cases/skills)
   is produced **asynchronously** by the OME — see
   [the OME section](#the-offline-memory-engine-ome).

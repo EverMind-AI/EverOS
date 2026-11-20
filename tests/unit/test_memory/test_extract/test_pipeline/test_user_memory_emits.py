@@ -1,9 +1,10 @@
 """``UserMemoryPipeline.run_cell``: one episode per cell, one copy per user sender.
 
 The episode operator is real (everalgo ``EpisodeExtractor``); the model answers
-from the user-track canned scripts. A cell costs one model call: every copy is
-written with the placeholder summary, and one ``EpisodeExtracted`` lists the
-copies written.
+from the user-track canned scripts. A cell costs two model calls: the language
+decision, then the episode written in that language. Every copy is written with
+the placeholder summary and the decided language (else the one read off the
+episode text), and one ``EpisodeExtracted`` lists the copies written.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from datetime import timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import structlog
 from everalgo.llm import LLMOutputError
 from everalgo.testing import FakeLLMClient
 from everalgo.types import ChatMessage, MemCell
@@ -74,6 +76,7 @@ def _pipeline(
         episode_store=episode_store,  # type: ignore[arg-type]  # recording double
         memcell_store=memcells,
         instructions=bundled_instructions(),
+        language_llm=llm,  # type: ignore[arg-type]  # FakeLLMClient
         episode_llm=llm,  # type: ignore[arg-type]  # FakeLLMClient
     )
 
@@ -139,6 +142,33 @@ async def test_every_copy_is_written_with_the_placeholder_summary() -> None:
     assert [s.item.episode for s in episodes.records] == [_EPISODE["content"]] * 2
 
 
+async def test_the_decided_language_writes_the_episode_and_is_pinned() -> None:
+    """The episode is asked for in the decided language, and every copy and the
+    event carry it -- even over the language its text reads as."""
+    llm = memorize_llm(
+        episode_content="The user booked a trip to Lisbon.", language="language_chinese"
+    )
+    episode_store = _recording_store()
+
+    with structlog.testing.capture_logs() as logs:
+        outcome = await _pipeline(llm, episode_store).run_cell(
+            _INGESTED, _prepared("u1", "u2")
+        )
+
+    (episode_call,) = _calls_for(llm, "_EpisodeReply")
+    assert f"Write every output field in Chinese{_NAMED}" in str(episode_call.messages)
+    (event,) = outcome.events
+    written = [call.args[1] for call in episode_store.append.await_args_list]
+    assert event.language == "Chinese"
+    assert [ep.language for ep in written] == ["Chinese", "Chinese"]
+    assert _written_log(logs) == {
+        "memcell_id": "mc_a",
+        "owners": 2,
+        "language": "Chinese",
+        "language_from": "decided",
+    }
+
+
 @pytest.mark.parametrize(
     ("content", "language"),
     [
@@ -147,25 +177,44 @@ async def test_every_copy_is_written_with_the_placeholder_summary() -> None:
         ("2026-05-17 12:00", None),
     ],
 )
-async def test_episode_and_event_carry_the_detected_language(
+async def test_an_undecided_language_is_read_off_the_episode_text(
     content: str, language: str | None
 ) -> None:
-    """The episode's language is detected once and pinned on every copy."""
-    episode_store = MagicMock()
-    episode_store.append = AsyncMock(return_value=_REF)
+    """A failed decision leaves the language to the model; what it wrote in is
+    detected once and pinned on every copy."""
+    llm = memorize_llm(episode_content=content, language="language_unusable")
+    episode_store = _recording_store()
 
-    outcome = await _pipeline(
-        memorize_llm(episode_content=content), episode_store
-    ).run_cell(_INGESTED, _prepared("u1", "u2"))
+    with structlog.testing.capture_logs() as logs:
+        outcome = await _pipeline(llm, episode_store).run_cell(
+            _INGESTED, _prepared("u1", "u2")
+        )
 
-    (event,) = [e for e in outcome.events if isinstance(e, EpisodeExtracted)]
+    (episode_call,) = _calls_for(llm, "_EpisodeReply")
+    assert _NAMED not in str(episode_call.messages)
+    (event,) = outcome.events
     written = [call.args[1] for call in episode_store.append.await_args_list]
     assert event.language == language
     assert [ep.language for ep in written] == [language, language]
+    assert _written_log(logs)["language_from"] == "text"
 
 
-async def test_one_call_one_event_lists_every_user_sender() -> None:
-    """One model call per cell and one event naming each copy's own entry id."""
+_NAMED = ", whatever language the input is in"
+"""How everalgo's rule for a caller-named language continues past the name."""
+
+
+def _calls_for(llm: FakeLLMClient, reply: str) -> list[object]:
+    return [call for call in llm.calls if call.response_format.__name__ == reply]
+
+
+def _written_log(logs: list[dict[str, object]]) -> dict[str, object]:
+    (line,) = [entry for entry in logs if entry["event"] == "episode_written"]
+    return {k: line[k] for k in ("memcell_id", "owners", "language", "language_from")}
+
+
+async def test_two_calls_one_event_lists_every_user_sender() -> None:
+    """The language decision, then one episode call per cell, and one event
+    naming each copy's own entry id."""
     llm = user_track_llm()
     episodes = InMemoryEpisodeStore()
 
@@ -177,7 +226,7 @@ async def test_one_call_one_event_lists_every_user_sender() -> None:
     ]
     assert [c.owner_id for c in event.copies] == ["u1", "u2"]
     assert outcome.md_paths == [s.ref.md_path for s in episodes.records]
-    assert _requested(llm) == ["_EpisodeReply"]
+    assert _requested(llm) == ["_LanguageReply", "_EpisodeReply"]
 
 
 async def test_a_copy_whose_write_was_skipped_is_not_listed() -> None:
@@ -194,7 +243,10 @@ async def test_a_copy_whose_write_was_skipped_is_not_listed() -> None:
 
 
 async def test_a_blank_episode_is_tried_again_then_fails_the_cell() -> None:
-    """A blank reply is unusable: retried, then the cell fails, nothing written."""
+    """A blank reply is unusable: retried, then the cell fails, nothing written.
+
+    The language is decided once, before the attempts, not once per attempt.
+    """
     llm = user_track_llm(episode="episode_blank")
     episode_store = MagicMock()
     episode_store.append = AsyncMock(return_value=_REF)
@@ -202,6 +254,7 @@ async def test_a_blank_episode_is_tried_again_then_fails_the_cell() -> None:
     with pytest.raises(LLMOutputError):
         await _pipeline(llm, episode_store).run_cell(_INGESTED, _prepared("u1"))
 
+    assert _requested(llm).count("_LanguageReply") == 1
     assert _requested(llm).count("_EpisodeReply") == OUTPUT_ATTEMPTS
     episode_store.append.assert_not_awaited()
 
@@ -212,8 +265,9 @@ def _requested(llm: FakeLLMClient) -> list[str]:
 
 
 async def test_run_emits_extract_and_persist_spans() -> None:
-    """run_cell opens an everos.extract generation span (where LLM token
-    usage lands) and an everos.persist.markdown span around the md write."""
+    """run_cell opens generation spans for the language decision and the
+    episode (where LLM token usage lands) and an everos.persist.markdown span
+    around the md write."""
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
         InMemorySpanExporter,
@@ -235,11 +289,9 @@ async def test_run_emits_extract_and_persist_spans() -> None:
         await _pipeline(user_track_llm()).run_cell(_INGESTED, _prepared("u1"))
         force_flush()
         spans = {s.name: s for s in exporter.get_finished_spans()}
-        assert "everos.extract" in spans
         assert "everos.persist.markdown" in spans
-        assert spans["everos.extract"].attributes["langfuse.observation.type"] == (
-            "generation"
-        )
+        for name in ("everos.extract.language", "everos.extract"):
+            assert spans[name].attributes["langfuse.observation.type"] == ("generation")
     finally:
         shutdown_tracing()
 
@@ -318,6 +370,7 @@ async def test_the_episode_request_shows_times_in_the_configured_zone() -> None:
         episode_store=_recording_store(),
         memcell_store=_alive_memcells(),
         instructions=bundled_instructions(),
+        language_llm=user_track_llm(),
         episode_llm=llm,
         tz=timezone(timedelta(hours=8)),
     )

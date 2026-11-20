@@ -163,15 +163,20 @@ async def test_reflection_context_is_carried_through() -> None:
 async def test_facts_are_written_in_the_episode_language(
     language: str | None,
 ) -> None:
-    """The event's language is the extractor's output language; ``None`` lets
-    the extractor infer its own."""
+    """The event's language is the extractor's output language, and the run's
+    log line names it; ``None`` lets the extractor infer its own."""
     deps = make_deps()
-    with patch(_EXTRACTOR) as extractor_cls:
+    with (
+        patch(_EXTRACTOR) as extractor_cls,
+        structlog.testing.capture_logs() as captured,
+    ):
         extractor_cls.return_value.aextract_from_text = AsyncMock(return_value=[])
         await extract_atomic_facts(_event(language=language), deps)
 
     call = extractor_cls.return_value.aextract_from_text.call_args
     assert call.kwargs["output_language"] == language
+    record = next(e for e in captured if e.get("event") == "atomic_facts_extracted")
+    assert record["language"] == language
 
 
 async def test_reflection_fact_skips_memcell_check() -> None:

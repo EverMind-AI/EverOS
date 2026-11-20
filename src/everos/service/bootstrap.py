@@ -636,6 +636,7 @@ def _build_memory_service(
             episode_store=stores.episode,
             memcell_store=stores.memcell,
             instructions=deps.instructions,
+            language_llm=providers.llms.language,
             episode_llm=providers.llms.episode,
             tz=deps.tz,
         ),
