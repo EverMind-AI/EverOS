@@ -22,6 +22,7 @@ from .settings import CascadeSettings as CascadeSettings
 from .settings import DeciderSettings as DeciderSettings
 from .settings import EmbeddingSettings as EmbeddingSettings
 from .settings import IndexSettings as IndexSettings
+from .settings import InputLogSettings as InputLogSettings
 from .settings import LanceDBSettings as LanceDBSettings
 from .settings import LLMClientSettings as LLMClientSettings
 from .settings import LLMSettings as LLMSettings
@@ -49,6 +50,7 @@ __all__ = [
     "DeciderSettings",
     "EmbeddingSettings",
     "IndexSettings",
+    "InputLogSettings",
     "LLMClientSettings",
     "LLMSettings",
     "LLMTask",

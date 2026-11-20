@@ -775,6 +775,19 @@ class AsyncQueueSettings(BaseModel):
     row_retention_hours: float = Field(default=7 * 24.0, gt=0, le=366 * 24.0)
 
 
+class InputLogSettings(BaseModel):
+    """``/add`` input log (``[memorize.input_log]``).
+
+    Disabled in the first PR that introduces it: enabling the log also
+    requires the deletion/purge path that removes a scope's lines, which
+    follows in the second PR (issue #537).
+    """
+
+    enabled: bool = False
+    retention_days: int = Field(default=30, ge=1)
+    max_inline_bytes: int = Field(default=1024 * 1024, ge=1)
+
+
 class MemorizeSettings(BaseModel):
     """Memorize use-case configuration.
 
@@ -803,12 +816,14 @@ class MemorizeSettings(BaseModel):
         EVEROS_MEMORIZE__SESSION_LOCK_TIMEOUT_SECONDS
         EVEROS_MEMORIZE__DELETE_WAIT_SECONDS
         EVEROS_MEMORIZE__ASYNC_QUEUE__*  (see :class:`AsyncQueueSettings`)
+        EVEROS_MEMORIZE__INPUT_LOG__*    (see :class:`InputLogSettings`)
     """
 
     mode: Literal["chat", "agent"] = "agent"
     session_lock_timeout_seconds: float = Field(default=360.0, gt=0)
     delete_wait_seconds: float = Field(default=10.0, gt=0)
     async_queue: AsyncQueueSettings = AsyncQueueSettings()
+    input_log: InputLogSettings = InputLogSettings()
 
 
 class AgentMemorySettings(BaseModel):

@@ -282,6 +282,15 @@ max_replays = 3
 # Rows (any status) are deleted this many hours after they were created.
 row_retention_hours = 168.0
 
+[memorize.input_log]
+# First PR ships the log disabled: enabling it also requires the deletion and
+# purge path that removes a scope's lines (issue #537, second PR).
+enabled = false
+retention_days = 30
+# A line larger than this keeps text verbatim but replaces each base64
+# attachment with its length and SHA-256.
+max_inline_bytes = 1048576
+
 [agent_memory]
 # Put everalgo's correctness gate in front of agent-case extraction: the
 # extraction LLM judges whether the work in a conversation was completed

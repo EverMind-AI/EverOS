@@ -76,6 +76,10 @@ async def add_memory(
 ) -> SuccessEnvelope[AddResponseData] | SuccessEnvelope[AcceptedResponseData]:
     """Add messages into the user-memory + agent-memory pipelines."""
     app.purge.refuse_writes_to(req.app_id, req.project_id)
+    await app.memory.log_add(
+        req.model_dump(mode="json", exclude_unset=True),
+        request_id=request_id,
+    )
     result = await app.memory.add(
         req.model_dump(exclude={"async_mode", "defer_extraction"}),
         request_id=request_id,

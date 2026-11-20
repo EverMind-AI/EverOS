@@ -123,6 +123,9 @@ class StubMemoryService:
         self.delete = AsyncMock()
         self.delete_by_ids = AsyncMock(return_value=0)
 
+    async def log_add(self, payload: dict[str, Any], *, request_id: str) -> None:
+        return None
+
     async def finish_interrupted_deletions(self, *, skip: Any = None) -> int:
         self.lifecycle.append("memory.finish_interrupted_deletions")
         return 0

@@ -481,6 +481,20 @@ joins it only behind its session's backlog)
 | `max_replays` | int | `3` | A batch in flight when the process died is replayed on the next start; after this many replays without finishing it is marked `failed` (`error_code: replays_exhausted`). |
 | `row_retention_hours` | float | `168.0` | Rows of any status are deleted this long after creation (seven days), including rows never delivered; the purge logs a warning for those. Delivered rows drop their request body at once, `failed` rows keep it. |
 
+### `[memorize.input_log]`
+
+An append-only JSONL record of accepted `/add` requests, independent of
+extraction (issue #537). The first PR ships it **disabled**; deletion and
+purge integration, plus the default-on switch, follow separately.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | When on, one line per accepted `/add` goes to `<root>/<app>/<project>/.input_log/YYYY-MM-DD.jsonl`. `/flush` is not logged. |
+| `retention_days` | int | `30` | Daily files older than this are removed when the scope next writes. |
+| `max_inline_bytes` | int | `1048576` | A line larger than this keeps text verbatim but replaces each `base64` attachment with its byte length and SHA-256. |
+
+A failed log write is reported at error level and **never fails `/add`**.
+
 ### `[agent_memory]`
 
 | Field | Type | Default | Description |

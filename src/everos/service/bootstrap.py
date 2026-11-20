@@ -97,7 +97,12 @@ from everos.infra.ome import (
     OmeLock,
     to_ome_strategy,
 )
-from everos.infra.persistence import MemoryRoot, purge_scope
+from everos.infra.persistence import (
+    MemoryRoot,
+    app_dir_name,
+    project_dir_name,
+    purge_scope,
+)
 from everos.infra.persistence.factories import (
     build_derived_index,
     build_indexes,
@@ -137,7 +142,7 @@ from everos.memory.search.recall import (
 from everos.memory.strategies import STRATEGY_SPECS
 from everos.service._warmup import warm_token_counter
 from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
-from everos.service.memory import MemoryService
+from everos.service.memory import InputLogWriter, MemoryService
 from everos.service.ops import BackfillDeps, Capabilities, OpsService
 from everos.service.purge import PurgeRunGate, PurgeService
 
@@ -398,7 +403,14 @@ def build_application(
     eraser = FencedIndexEraser(index.repositories, fence, sqlite.md_change_state)
     marks = MARKS.for_root(root.root)
     memory = _build_memory_service(
-        settings, providers, deps, tokenizer, OmeEventBus(engine), eraser, marks
+        settings,
+        providers,
+        deps,
+        tokenizer,
+        OmeEventBus(engine),
+        eraser,
+        marks,
+        root,
     )
     engine.set_run_gate(PurgeRunGate(marks))
     purge = PurgeService(
@@ -614,12 +626,19 @@ def _build_memory_service(
     bus: EventBus,
     index_eraser: IndexEraser,
     purge_marks: PurgeMarks,
+    root: MemoryRoot,
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     return MemoryService(
         index_eraser=index_eraser,
         purge_marks=purge_marks,
+        input_log=InputLogWriter(
+            root=root.root,
+            settings=settings.memorize.input_log,
+            app_dir=app_dir_name,
+            project_dir=project_dir_name,
+        ),
         raw_file_builder=partial(build_raw_file, settings_source=load_settings),
         settings=settings,
         boundary=BoundaryDetection(
