@@ -126,7 +126,10 @@ stores and indexes, `make_ops` / `make_memory_service` /
 ## Continuous integration
 
 CI runs on GitHub Actions ([.github/workflows/](../.github/workflows/)). Every
-pull request into `main` must pass:
+`uses:` pins an action to a full commit SHA with its version in a trailing
+comment (`actions/checkout@<sha> # v7.0.1`): a tag or branch can be moved to
+other code, a commit cannot. Dependabot updates the SHA and the comment
+together. Every pull request into `main` must pass:
 
 | Check | Command | Guards |
 |---|---|---|
