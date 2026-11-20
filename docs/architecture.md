@@ -421,11 +421,13 @@ budget and failure-classification checks described above.
 Daemon that watches markdown changes and syncs to the configured derived
 index backend:
 
-- inotify / FSEvents file watcher (cross-platform via `watchdog`)
-- 500ms debounce
+- inotify / FSEvents file watcher (cross-platform via `watchdog`); events
+  enqueue immediately, with no debounce window
 - Entry-level diff (added / changed / removed)
 - Per-entry index upsert / delete (text + vector columns update together)
-- LSN-based crash recovery via the SQLite `md_change_state` queue
+- Crash recovery: startup resets orphaned `processing` rows with
+  `recover_orphan_processing`, then the periodic scanner reconciles the
+  tree against the ledger
 - Handlers for all seven business kinds: episode, atomic_fact,
   user_profile, agent_case, agent_skill, knowledge_document, knowledge_topic
 
