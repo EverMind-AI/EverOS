@@ -25,10 +25,15 @@ def test_builds_openai_provider() -> None:
 
 def test_passes_response_format_mode_and_retries() -> None:
     provider = build_llm_provider(
-        _config(response_format_mode="prompt_only", invalid_reply_retries=4)
+        _config(
+            response_format_mode="prompt_only",
+            invalid_reply_retries=4,
+            truncated_reply_retries=2,
+        )
     )
     assert provider._response_format_mode == "prompt_only"
     assert provider._invalid_reply_retries == 4
+    assert provider._truncated_reply_retries == 2
 
 
 def test_passes_endpoint_fields_to_the_sdk_client() -> None:

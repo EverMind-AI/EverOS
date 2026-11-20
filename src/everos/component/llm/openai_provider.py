@@ -14,14 +14,16 @@ method per step:
    ``model_dump()``, multimodal parts included (§3.2).
 2. ``_send`` -- one SDK call; transport retries are the SDK's ``max_retries``.
    ``asyncio.CancelledError`` is never caught (§3.3).
-3. ``_check_upstream`` -- a flagged refusal, ``length`` / ``content_filter``
-   or absent content raises (§3.4, §3.5); no choice and ``abort`` / ``error``
-   fail only this attempt.
+3. ``_check_upstream`` -- a flagged refusal, ``content_filter`` or absent
+   content raises (§3.4, §3.5); a ``length`` cut-off, no choice and ``abort``
+   / ``error`` fail only this attempt.
 4. ``_validate`` -- ``model_validate_json`` against the caller's
    ``response_format``; a mismatch fails only this attempt (§7.1). A reply
    that validates once its trailing commas are removed is returned repaired.
-5. ``_request_valid_reply`` -- at most ``1 + invalid_reply_retries`` attempts
-   of the identical request, each completion reported to the observer.
+5. ``_request_valid_reply`` -- the identical request again after a failed
+   attempt, within two budgets: ``truncated_reply_retries`` after a ``length``
+   cut-off, ``invalid_reply_retries`` after any other. Each completion is
+   reported to the observer.
 """
 
 from __future__ import annotations
@@ -49,12 +51,19 @@ logger = get_logger(__name__)
 
 ResponseFormatMode = Literal["json_schema", "json_object", "prompt_only"]
 
-# The identical request hits the same output cap or the same filter again.
-_CUT_SHORT_REASONS: Final = frozenset({"length", "content_filter"})
+# The identical request meets the same filter again.
+_FILTERED_REASONS: Final = frozenset({"content_filter"})
+
+# The generation reached the output cap. A sampled reply that ran away usually
+# finishes when sent again; one long by nature reaches the cap again, which only
+# a larger max_tokens fixes, and no retry raises it (§3.1).
+_CAPPED_REASONS: Final = frozenset({"length"})
 
 # vLLM-style gateways report these when the server gave up on a generation it
 # could have finished, so the identical request may well succeed.
 _ABORTED_REASONS: Final = frozenset({"abort", "error"})
+
+type _ResendableReason = Literal["invalid_reply", "transport", "cut_short"]
 
 
 class _AttemptFailedError(Exception):
@@ -70,11 +79,11 @@ class _AttemptFailedError(Exception):
         self,
         message: str,
         *,
-        reason: Literal["invalid_reply", "transport"],
+        reason: _ResendableReason,
         error_count: int | None = None,
     ) -> None:
         super().__init__(message)
-        self.reason: Literal["invalid_reply", "transport"] = reason
+        self.reason: _ResendableReason = reason
         self.error_count = error_count
 
 
@@ -104,12 +113,16 @@ class OpenAIProvider:
             ``prompt_only`` nothing (the prompt alone asks for JSON).
         invalid_reply_retries: Extra attempts after an attempt whose reply
             fails validation, carries no choice, or was aborted upstream.
+        truncated_reply_retries: Extra attempts after an attempt whose reply
+            reached the output cap (``finish_reason`` ``length``), counted
+            apart from ``invalid_reply_retries``.
         observer: Notified of every completion received, failed ones included.
         http_client: Passed to ``openai.AsyncOpenAI``; tests inject an
             ``httpx.AsyncClient`` over ``httpx.MockTransport`` here.
 
     Raises:
-        ValueError: If ``invalid_reply_retries`` is negative.
+        ValueError: If ``invalid_reply_retries`` or ``truncated_reply_retries``
+            is negative.
     """
 
     def __init__(
@@ -125,19 +138,23 @@ class OpenAIProvider:
         extra: Mapping[str, Any] | None = None,
         response_format_mode: ResponseFormatMode = "json_schema",
         invalid_reply_retries: int = 1,
+        truncated_reply_retries: int = 1,
         observer: LLMCallObserver | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        if invalid_reply_retries < 0:
-            raise ValueError(
-                f"invalid_reply_retries must be >= 0, got {invalid_reply_retries}"
-            )
+        for name, retries in (
+            ("invalid_reply_retries", invalid_reply_retries),
+            ("truncated_reply_retries", truncated_reply_retries),
+        ):
+            if retries < 0:
+                raise ValueError(f"{name} must be >= 0, got {retries}")
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._extra: dict[str, Any] = dict(extra or {})
         self._response_format_mode: ResponseFormatMode = response_format_mode
         self._invalid_reply_retries = invalid_reply_retries
+        self._truncated_reply_retries = truncated_reply_retries
         self._observer: LLMCallObserver = observer or NullObserver()
         client_kwargs: dict[str, Any] = {
             "api_key": api_key,
@@ -212,25 +229,37 @@ class OpenAIProvider:
     async def _request_valid_reply(
         self, request: dict[str, Any], response_format: type[BaseModel]
     ) -> str:
-        """Send ``request`` until a reply passes every check, a bounded number of times.
+        """Send ``request`` until a reply passes every check, within two budgets.
+
+        A reply cut off at the output cap spends ``truncated_reply_retries``;
+        every other failed attempt spends ``invalid_reply_retries``. Neither
+        spends the other's, so a runaway generation cannot use up the resend an
+        unparsable reply needs, nor the other way round.
 
         Raises:
             LLMCallError: As in :meth:`achat`.
         """
-        attempts = 1 + self._invalid_reply_retries
-        failure: _AttemptFailedError | None = None
-        for attempt in range(1, attempts + 1):
+        retries_left = {
+            "cut_short": self._truncated_reply_retries,
+            "other": self._invalid_reply_retries,
+        }
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 return await self._attempt(request, response_format, attempt)
-            except _AttemptFailedError as exc:
-                failure = exc
-                self._log_failed_attempt(exc, attempt, attempts)
-        # Chained to the last ValidationError, if that is what failed last.
-        raise LLMCallError(
-            f"no usable reply in {attempts} attempts (model={self._model!r}, "
-            f"response_format_mode={self._response_format_mode!r}): {failure}",
-            reason=failure.reason if failure else "invalid_reply",
-        ) from (failure.__cause__ if failure else None)
+            except _AttemptFailedError as failure:
+                budget = "cut_short" if failure.reason == "cut_short" else "other"
+                self._log_failed_attempt(failure, attempt, retries_left[budget])
+                if not retries_left[budget]:
+                    # Chained to the ValidationError, if that is what failed.
+                    raise LLMCallError(
+                        f"no usable reply in {attempt} attempts "
+                        f"(model={self._model!r}, response_format_mode="
+                        f"{self._response_format_mode!r}): {failure}",
+                        reason=failure.reason,
+                    ) from failure.__cause__
+                retries_left[budget] -= 1
 
     async def _attempt(
         self, request: dict[str, Any], response_format: type[BaseModel], attempt: int
@@ -273,15 +302,16 @@ class OpenAIProvider:
         )
 
     def _log_failed_attempt(
-        self, failure: _AttemptFailedError, attempt: int, attempts: int
+        self, failure: _AttemptFailedError, attempt: int, retries_left: int
     ) -> None:
+        """Log a failed attempt; ``retries_left`` is its budget's, 0 = giving up."""
         logger.warning(
             "llm_attempt_failed",
             reason=failure.reason,
             detail=str(failure),
             error_count=failure.error_count,
             attempt=attempt,
-            attempts=attempts,
+            retries_left=retries_left,
             model=self._model,
             response_format_mode=self._response_format_mode,
         )
@@ -291,8 +321,9 @@ def _check_upstream(completion: ChatCompletion) -> str:
     """Return the reply text unless the upstream reported it unusable.
 
     Raises:
-        _AttemptFailedError: No choice, or a generation aborted upstream.
-        LLMCallError: A flagged refusal, a cut-short generation, or no content.
+        _AttemptFailedError: No choice, a generation that reached the output
+            cap, or one aborted upstream.
+        LLMCallError: A flagged refusal, a filtered generation, or no content.
     """
     # OpenRouter answers some upstream rejections with a 200 and no choices.
     if not completion.choices:
@@ -307,8 +338,14 @@ def _check_upstream(completion: ChatCompletion) -> str:
             f"upstream refused (model={completion.model!r})", reason="refusal"
         )
     # Before the content too: a reply cut right after its closing brace parses.
-    if choice.finish_reason in _CUT_SHORT_REASONS:
+    if choice.finish_reason in _FILTERED_REASONS:
         raise LLMCallError(
+            f"generation cut short (model={completion.model!r}, "
+            f"finish_reason={choice.finish_reason!r})",
+            reason="cut_short",
+        )
+    if choice.finish_reason in _CAPPED_REASONS:
+        raise _AttemptFailedError(
             f"generation cut short (model={completion.model!r}, "
             f"finish_reason={choice.finish_reason!r})",
             reason="cut_short",

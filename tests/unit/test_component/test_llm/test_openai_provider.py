@@ -104,15 +104,63 @@ async def test_refusal_raises_refusal() -> None:
     assert info.value.reason == "refusal"
 
 
-@pytest.mark.parametrize("finish_reason", ["length", "content_filter"])
-async def test_cut_short_raises_without_retry(finish_reason: str) -> None:
-    upstream = _Upstream(_completion(_VALID, finish_reason=finish_reason))
+async def test_a_filtered_reply_raises_cut_short_without_a_resend() -> None:
+    upstream = _Upstream(_completion(_VALID, finish_reason="content_filter"))
     with pytest.raises(LLMCallError) as info:
-        await _provider(upstream, invalid_reply_retries=3).achat(
+        await _provider(
+            upstream, invalid_reply_retries=3, truncated_reply_retries=3
+        ).achat(_prompt(), response_format=_Reply)
+    assert info.value.reason == "cut_short"
+    assert len(upstream.bodies) == 1
+
+
+async def test_a_reply_cut_off_at_the_cap_is_sent_again_unchanged() -> None:
+    """The resend is the identical request: ``max_tokens`` is never raised."""
+    upstream = _Upstream(_completion(_VALID, finish_reason="length"), _completion())
+    text = await _provider(upstream, truncated_reply_retries=1).achat(
+        _prompt(), response_format=_Reply, max_tokens=512
+    )
+    assert text == _VALID
+    assert len(upstream.bodies) == 2
+    assert upstream.bodies[0] == upstream.bodies[1]
+    assert upstream.bodies[1]["max_tokens"] == 512
+
+
+async def test_a_reply_cut_off_past_its_budget_raises_cut_short() -> None:
+    upstream = _Upstream(
+        _completion(_VALID, finish_reason="length"),
+        _completion(_VALID, finish_reason="length"),
+    )
+    with pytest.raises(LLMCallError) as info:
+        await _provider(upstream, truncated_reply_retries=1).achat(
             _prompt(), response_format=_Reply
         )
     assert info.value.reason == "cut_short"
+    assert len(upstream.bodies) == 2
+
+
+async def test_no_truncated_reply_retries_fails_the_first_cut_off() -> None:
+    upstream = _Upstream(_completion(_VALID, finish_reason="length"))
+    with pytest.raises(LLMCallError) as info:
+        await _provider(
+            upstream, invalid_reply_retries=3, truncated_reply_retries=0
+        ).achat(_prompt(), response_format=_Reply)
+    assert info.value.reason == "cut_short"
     assert len(upstream.bodies) == 1
+
+
+async def test_a_cut_off_and_an_invalid_reply_spend_separate_budgets() -> None:
+    """One retry each: the cut-off does not use up the invalid reply's resend."""
+    upstream = _Upstream(
+        _completion("not json"),
+        _completion(_VALID, finish_reason="length"),
+        _completion(),
+    )
+    text = await _provider(
+        upstream, invalid_reply_retries=1, truncated_reply_retries=1
+    ).achat(_prompt(), response_format=_Reply)
+    assert text == _VALID
+    assert len(upstream.bodies) == 3
 
 
 async def test_absent_content_raises_no_content() -> None:
@@ -162,9 +210,12 @@ async def test_resendable_upstream_failures(
     assert info.value.reason == "transport"
 
 
-def test_negative_invalid_reply_retries_rejected() -> None:
-    with pytest.raises(ValueError, match="invalid_reply_retries"):
-        OpenAIProvider(model="m", api_key="k", invalid_reply_retries=-1)
+@pytest.mark.parametrize(
+    "retries", ["invalid_reply_retries", "truncated_reply_retries"]
+)
+def test_negative_retries_rejected(retries: str) -> None:
+    with pytest.raises(ValueError, match=retries):
+        OpenAIProvider(model="m", api_key="k", **{retries: -1})
 
 
 # ---------------------------------------------------------------------------

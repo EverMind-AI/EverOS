@@ -157,18 +157,51 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `model` | string | `"gpt-4.1-mini"` | No | LLM model identifier. |
 | `api_key` | string | — | **Yes** | API key for the LLM provider. |
 | `base_url` | string | — | No | Custom endpoint URL (OpenAI-compatible). |
-| `timeout_seconds` | float | `60.0` | No | Deadline of one request. One add or flush may spend up to `(invalid_reply_retries + 1) × timeout_seconds` per extraction call plus the client's own retries, so size reverse-proxy and client timeouts accordingly; raise it for slow self-hosted endpoints. |
+| `timeout_seconds` | float | `60.0` | No | Deadline of one request. One add or flush may spend up to `(invalid_reply_retries + truncated_reply_retries + 1) × timeout_seconds` per extraction call plus the client's own retries, so size reverse-proxy and client timeouts accordingly; raise it for slow self-hosted endpoints. |
 | `invalid_reply_retries` | int | `1` | No | Extra attempts of the identical request after a reply that fails validation. |
+| `truncated_reply_retries` | int | `1` | No | Extra attempts of the identical request after a reply that reached the output cap (`finish_reason` `length`), counted apart from `invalid_reply_retries`. A runaway generation usually finishes when sent again; a reply long by nature reaches the cap again and needs a larger `max_tokens`, which no retry raises. A reply blocked by `content_filter` is never resent. |
 | `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested: `json_schema` (strict schema), `json_object` (JSON mode) or `prompt_only`. |
 | `extra` | table | `{}` | No | Provider-specific request fields merged into every call. Non-standard fields must sit under `extra_body` (the OpenAI SDK rejects unknown top-level names). |
 | `temperature` | float | unset | No | Sent only when a call names none; unset, the request carries no temperature. A default, never an override: agentic search keeps the temperatures it sets per call. |
 | `max_tokens` | int | unset | No | Output cap sent only when a call names none; unset, the request carries none. A reasoning model bills its thinking against it. |
-| `sdk_max_retries` | int | unset | No | Transport retries inside the OpenAI SDK; unset keeps the SDK default. They multiply with `invalid_reply_retries`. |
+| `sdk_max_retries` | int | unset | No | Transport retries inside the OpenAI SDK; unset keeps the SDK default. They multiply with `invalid_reply_retries` and `truncated_reply_retries`. |
 
 `[llm]` is the only LLM section you need: every task below uses it unless its
 own section says otherwise. `[llm]` and its task sections reject unknown keys
 -- a typo fails startup with the list of valid names, instead of being ignored
 while the task quietly keeps `[llm]`'s model.
+
+#### NVIDIA NIM
+
+[NVIDIA NIM](https://build.nvidia.com/) serves an OpenAI-compatible Chat
+Completions API, so it plugs into `[llm]` like OpenRouter does: set the model,
+key, and base URL. Model ids use the `<publisher>/<model>` form; pick one from
+the endpoint's `/models` list.
+
+```toml
+[llm]
+model = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+api_key = "<NVIDIA_API_KEY>"
+base_url = "https://integrate.api.nvidia.com/v1"
+```
+
+Or keep the key out of the file and pass your `NVIDIA_API_KEY` through the
+environment:
+
+```bash
+export EVEROS_LLM__API_KEY="$NVIDIA_API_KEY"
+export EVEROS_LLM__BASE_URL=https://integrate.api.nvidia.com/v1
+export EVEROS_LLM__MODEL=nvidia/nemotron-3.5-super-vl-120b-a12b
+```
+
+Other hosted models you can use include `nvidia/nemotron-3-ultra-550b-a55b`
+and `nvidia/nemotron-3.5-lightning-30b-a3b`. For a self-hosted NIM, point
+`base_url` at your deployment instead (for example
+`http://localhost:8000/v1`) and set `model` to the id it serves.
+
+The default `response_format_mode = "json_schema"` sends a strict JSON schema
+with every extraction call. If your NIM model rejects or ignores it, set
+`response_format_mode = "json_object"`, or `"prompt_only"` as the last resort.
 
 ### `[llm.<task>]`
 
@@ -316,38 +349,6 @@ Episodes are folded one owner at a time. A run folds the episode that triggered 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
 | `max_episodes_per_call` | int | `10` | No | Most episodes one extraction call folds, the triggering one included; `1` folds each alone. |
-
-#### NVIDIA NIM
-
-[NVIDIA NIM](https://build.nvidia.com/) serves an OpenAI-compatible Chat
-Completions API, so it plugs into `[llm]` like OpenRouter does: set the model,
-key, and base URL. Model ids use the `<publisher>/<model>` form; pick one from
-the endpoint's `/models` list.
-
-```toml
-[llm]
-model = "nvidia/nemotron-3.5-super-vl-120b-a12b"
-api_key = "<NVIDIA_API_KEY>"
-base_url = "https://integrate.api.nvidia.com/v1"
-```
-
-Or keep the key out of the file and pass your `NVIDIA_API_KEY` through the
-environment:
-
-```bash
-export EVEROS_LLM__API_KEY="$NVIDIA_API_KEY"
-export EVEROS_LLM__BASE_URL=https://integrate.api.nvidia.com/v1
-export EVEROS_LLM__MODEL=nvidia/nemotron-3.5-super-vl-120b-a12b
-```
-
-Other hosted models you can use include `nvidia/nemotron-3-ultra-550b-a55b`
-and `nvidia/nemotron-3.5-lightning-30b-a3b`. For a self-hosted NIM, point
-`base_url` at your deployment instead (for example
-`http://localhost:8000/v1`) and set `model` to the id it serves.
-
-The default `response_format_mode = "json_schema"` sends a strict JSON schema
-with every extraction call. If your NIM model rejects or ignores it, set
-`response_format_mode = "json_object"`, or `"prompt_only"` as the last resort.
 
 ### `[multimodal]`
 
