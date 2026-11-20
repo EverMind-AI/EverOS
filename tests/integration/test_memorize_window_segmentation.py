@@ -428,6 +428,25 @@ async def test_regrouped_resend_keeps_ids_and_drops_what_was_cut(
     assert buffered == [message_ids(session, [_msg(i)])[0] for i in (2, 3)]
 
 
+async def test_one_millisecond_resent_in_parts_is_not_cut_twice(
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
+) -> None:
+    """[A, B, C] share one millisecond and are cut after B; the retry carries B
+    alone. B keeps its id though its place in the request changed."""
+    await memorize_env_scripted(fake_llm=memorize_llm([[2], []]))
+    session = "s_same_ms_parts"
+    batch = [_msg(0) | {"content": f"part-{i}"} for i in range(3)]
+
+    await memorize({"session_id": session, "messages": batch})
+    await memorize({"session_id": session, "messages": [batch[1]]})
+
+    cells = await _memcell_rows(storage, session)
+    assert [len(ids) for _, ids in cells] == [2], cells
+    assert [mid for mid, _ in await _buffer_rows(storage, session)] == message_ids(
+        session, [batch[2]]
+    )
+
+
 async def test_two_messages_with_one_millisecond_in_two_requests_both_stay(
     memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
 ) -> None:

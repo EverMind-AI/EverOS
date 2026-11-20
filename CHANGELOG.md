@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A resent `/memory/add` no longer cuts the same messages twice** (#274).
+  Messages were deduplicated only against the session buffer, so a client
+  retrying after a timeout re-sent messages the first call had already cut
+  into a memory cell, and they became a second memcell and episode. The
+  boundary stage now drops fresh messages a memcell of the session already
+  holds. Message ids no longer depend on where a message sits in its request:
+  `m_<session>_<timestamp>_<digest>`, `digest` covering who said what (a
+  message repeated verbatim in one request is told apart by its repeat
+  count), so a resend -- whole, split or regrouped, within one millisecond
+  too -- keeps its ids, and two different messages sent in separate requests
+  with one timestamp are no longer merged into one. Messages sharing a
+  timestamp keep arrival order in the buffer rather than sorting by id.
+  The internal helper `everos.memory.extract.ingest.gen_message_id` is
+  replaced by `message_ids`. Buffered messages from an earlier version keep
+  their old ids; a batch sent before the upgrade and resent after it is not
+  recognized as a resend.
+
 ## [1.7.1] - 2026-11-20
 
 EverOS 1.7.1 writes each conversation's memory in its own language: a short
@@ -140,21 +159,6 @@ unchanged apart from additions. See Upgrade below.
   also turn `split_episode_by_owner` off. The OME strategy switches are part
   of the ingest identity, so a store ingested with an earlier config is not
   reused.
-
-### Fixed
-
-- **A resent `/memory/add` no longer cuts the same messages twice** (#274).
-  Messages were deduplicated only against the session buffer, so a client
-  retrying after a timeout re-sent messages the first call had already cut
-  into a memory cell, and they became a second memcell and episode. The
-  boundary stage now drops fresh messages a memcell of the session already
-  holds. Message ids no longer depend on the message's position in the
-  request: `m_<session>_<timestamp>_<n>_<digest>`, where `n` counts the
-  request's messages sharing that timestamp and `digest` covers who said what,
-  so a regrouped resend keeps its ids and two different messages sent in
-  separate requests with one timestamp are no longer merged into one.
-  Buffered messages from an earlier version keep their old ids; a batch sent
-  before the upgrade and resent after it is not recognized as a resend.
 
 ### Removed
 

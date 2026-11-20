@@ -244,5 +244,5 @@ async def test_an_orphan_tool_row_counts_without_reaching_the_model() -> None:
         assert stage.llm.call_count == 0, "never retried, never sent"
         tracks = await stage.tracks("s1")
         assert tracks["memorize"] == []
-        # One timestamp, two rows: request order is kept in the id (_000, _001).
+        # One timestamp, two different rows: two ids.
         assert sorted(tracks["quarantine"]) == sorted(_ids(_orphan_payload("s1", 3)))

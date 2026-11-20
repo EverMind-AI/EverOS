@@ -608,9 +608,10 @@ correlation.
 
 **Resending a batch.** A client that retries `/add` after a timeout may
 resend messages the first call already processed. A message's identity is
-its session, its `timestamp`, its place among the request's messages with
-that same `timestamp`, and what was said by whom (`sender_id`, `role`,
-`content`, `tool_call_id`, `tool_calls`); `sender_name` is not part of it.
+its session, its `timestamp` and what was said by whom (`sender_id`, `role`,
+`content`, `tool_call_id`, `tool_calls`); `sender_name` and its place in the
+request are not part of it (a message repeated verbatim within one request
+counts as many times as it appears).
 A resent message that is still buffered, or already part of a memory cell
 of the session, is dropped, so a retry (whole, split or regrouped) never
 writes it twice and answers `200` (`"accumulated"` when it cut nothing

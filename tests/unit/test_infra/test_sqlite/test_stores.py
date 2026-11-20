@@ -186,6 +186,15 @@ def _record(memcell_id: str, *messages: CanonicalMessage) -> MemcellRecord:
     )
 
 
+async def test_buffer_rows_of_one_timestamp_come_back_in_write_order(
+    stores: _Stores,
+) -> None:
+    """Ids carry no order, so a tie must not fall back to the id's spelling."""
+    call, result = _message("m_z", 1), _message("m_a", 1)
+    await stores.buffer.keep(_SESSION, [call, result], last_message_ts=call.timestamp)
+    assert [m.message_id for m in await stores.buffer.list(_SESSION)] == ["m_z", "m_a"]
+
+
 async def test_keep_buffers_messages_and_stamps_the_last_message(
     stores: _Stores,
 ) -> None:
