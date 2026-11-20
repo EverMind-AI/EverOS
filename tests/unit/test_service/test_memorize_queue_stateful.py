@@ -446,6 +446,10 @@ class MemorizeQueueMachine(RuleBasedStateMachine):
         die_after_loss: bool,
     ) -> None:
         """One ``drain_once``: rows deliver in id order with these outcomes."""
+        if self.q.now() >= self.q.worker._next_sweep_at:
+            # A due sweep runs before the drain's first claim.
+            self._model_purge()
+            event("drain: swept first")
         queued = sorted(
             (m["row_id"], rid)
             for rid, m in self.model.items()

@@ -48,7 +48,8 @@ class MemorizeInbox(BaseTable, table=True):
     defer_extraction: bool = False
     payload_json: str
     """The request body as ``memorize()`` expects it, serialised verbatim.
-    Emptied once the row is delivered; a ``failed`` row keeps it."""
+    Emptied once the row is delivered; a ``failed`` row keeps it while it is
+    among the newest ``max_failed_payload_bytes`` of failed bodies."""
     message_count: int = 0
     status: str = Field(default="queued")
     """``queued`` | ``processing`` | ``success`` | ``failed``."""

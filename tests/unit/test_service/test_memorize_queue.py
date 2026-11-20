@@ -22,6 +22,7 @@ the buffer repo singleton are swapped for temp-bound instances) and a fake
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -824,6 +825,67 @@ async def test_failed_row_keeps_its_body_and_error_in_one_write(
     ]
     row = await repo.find_one(request_id="r1")
     assert row is not None and row.payload_json != ""
+
+
+async def test_sweep_keeps_only_the_newest_failed_bodies_within_budget(
+    repo: MemorizeInboxRepo,
+) -> None:
+    """An outage that fails every batch must not hold every body for a week."""
+    _wiring["deliver"] = _FakeMemorize(failing={"bad1", "bad2"})
+    one_body = len(json.dumps(_payload("bad1"), ensure_ascii=False).encode())
+    w = _worker(_settings(max_failed_payload_bytes=one_body))
+    for n in (1, 2):
+        await w.enqueue(
+            _payload(f"bad{n}"),
+            request_id=f"r{n}",
+            is_final=False,
+            defer_extraction=False,
+        )
+        await w.drain_once()
+
+    await w._sweep()
+
+    old = await repo.find_one(request_id="r1")
+    new = await repo.find_one(request_id="r2")
+    assert old is not None and (old.status, old.payload_json) == ("failed", "")
+    assert old.last_error == "RuntimeError: boom"
+    assert new is not None and json.loads(new.payload_json) == _payload("bad2")
+
+
+async def test_a_drain_that_never_empties_still_bounds_failed_bodies(
+    repo: MemorizeInboxRepo,
+) -> None:
+    """Steady traffic during an outage keeps the drain busy; trimming must not wait."""
+    one_body = len(json.dumps(_payload("bad"), ensure_ascii=False).encode())
+    w = _worker(
+        _settings(max_failed_payload_bytes=one_body, scan_interval_seconds=0.01)
+    )
+    calls = 0
+    kept: list[int] = []  # failed rows still holding a body, seen mid-drain
+
+    async def fail_and_replace(payload: dict[str, Any], **_: Any) -> object:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.02)  # longer than the scan interval
+        rows = await repo.list_all()
+        kept.append(sum(1 for r in rows if r.status == "failed" and r.payload_json))
+        if calls < 20:  # each failure is replaced before the drain could empty
+            await w.enqueue(
+                _payload("bad"),
+                request_id=f"r{calls + 1}",
+                is_final=False,
+                defer_extraction=False,
+            )
+        raise RuntimeError("boom")
+
+    _wiring["deliver"] = fail_and_replace
+    await w.enqueue(
+        _payload("bad"), request_id="r1", is_final=False, defer_extraction=False
+    )
+    await w.drain_once()
+
+    assert calls == 20
+    assert max(kept) <= 2, kept
 
 
 async def test_lost_status_write_is_reaped_before_the_next_row(

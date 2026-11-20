@@ -747,10 +747,12 @@ class AsyncQueueSettings(BaseModel):
     over ``max_pending_per_session`` or a process over ``max_pending_total``
     rejects new rows with 429, and a body over ``max_payload_bytes`` with
     413. A delivered row drops its body at once, so pending and delivered rows
-    stay around ``max_pending_total * max_payload_bytes``; failed rows keep
-    their bodies for the retention period and are not capped, and SQLite does
-    not shrink the file after a purge. The caps are checked without a lock,
-    so concurrent requests overshoot a little.
+    stay around ``max_pending_total * max_payload_bytes``. A failed row keeps
+    its body for re-sending, but only the newest failed bodies up to
+    ``max_failed_payload_bytes`` in total; older ones are emptied (the row and
+    its ``last_error`` stay). SQLite does not shrink the file after a purge.
+    The caps are checked without a lock, so concurrent requests overshoot a
+    little.
 
     A row that fails ``max_attempts`` times (``retry_backoff_seconds``
     apart) is marked ``failed`` and skipped so one bad batch cannot hold
@@ -772,6 +774,7 @@ class AsyncQueueSettings(BaseModel):
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_PER_SESSION
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_TOTAL
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PAYLOAD_BYTES
+        EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_FAILED_PAYLOAD_BYTES
         EVEROS_MEMORIZE__ASYNC_QUEUE__SCAN_INTERVAL_SECONDS
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_ATTEMPTS
         EVEROS_MEMORIZE__ASYNC_QUEUE__RETRY_BACKOFF_SECONDS
@@ -784,6 +787,7 @@ class AsyncQueueSettings(BaseModel):
     max_pending_per_session: int = Field(default=50, ge=1)
     max_pending_total: int = Field(default=200, ge=1)
     max_payload_bytes: int = Field(default=4 * 1024 * 1024, ge=1)
+    max_failed_payload_bytes: int = Field(default=64 * 1024 * 1024, ge=0)
     scan_interval_seconds: float = Field(default=5.0, gt=0)
     max_attempts: int = Field(default=1, ge=1)
     retry_backoff_seconds: float = Field(default=2.0, ge=0)

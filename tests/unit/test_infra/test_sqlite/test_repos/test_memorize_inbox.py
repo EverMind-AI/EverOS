@@ -10,6 +10,8 @@ Pins the queue contract the worker relies on:
   rows to ``queued`` at startup.
 - **Nothing lives forever**: ``purge_expired`` deletes rows older than the
   retention window regardless of status, except rows still ``processing``.
+- **Failed bodies are bounded**: ``trim_failed_payloads`` keeps the newest
+  failed bodies within a byte budget and empties the older ones.
 - **request_id is unique**: one HTTP request maps to at most one row.
 """
 
@@ -157,6 +159,25 @@ async def test_purge_expired_deletes_old_rows_except_processing(
     assert (deleted, undelivered) == (3, 1)
     remaining = {r.id for r in await repo.list_all()}
     assert remaining == {kept_processing.id, kept_fresh.id}
+
+
+async def test_trim_failed_payloads_keeps_the_newest_within_the_budget(
+    repo: MemorizeInboxRepo,
+) -> None:
+    body = "记" * 10  # 30 UTF-8 bytes, 10 characters
+    oldest = await repo.add(_row(status="failed", payload_json=body))
+    middle = await repo.add(_row(status="failed", payload_json=body))
+    newest = await repo.add(_row(status="failed", payload_json=body))
+    queued = await repo.add(_row(status="queued", payload_json=body))
+
+    assert await repo.trim_failed_payloads(max_bytes=60) == 1
+
+    bodies = {r.id: r.payload_json for r in await repo.list_all()}
+    assert bodies == {oldest.id: "", middle.id: body, newest.id: body, queued.id: body}
+    # A second pass finds nothing over the budget; 0 keeps no failed body.
+    assert await repo.trim_failed_payloads(max_bytes=60) == 0
+    assert await repo.trim_failed_payloads(max_bytes=0) == 2
+    assert {r.id: r.status for r in await repo.list_all()}[oldest.id] == "failed"
 
 
 async def test_request_id_is_unique(repo: MemorizeInboxRepo) -> None:
