@@ -20,10 +20,13 @@ import pytest
 from tests.acceptance.memory_delete.conftest import chat
 from tests.acceptance.memory_delete.proxy import Rule
 from tests.acceptance.memory_delete.seed import write_episode
+from tests.fakes.llm import USER_TRACK_OPERATORS
 
 from .journey import Evidence, evidence_base, finish, purge
 from .observe import system_db, wait_idle
 from .seed import AGENT, scope_token
+
+BOUNDARY_REPLY = USER_TRACK_OPERATORS["boundary"]
 
 pytestmark = pytest.mark.acceptance
 
@@ -128,7 +131,7 @@ def test_t35_1a_callers_are_not_slowed_while_the_purge_waits(
     base = _measure(srv)
     word = f"{scope_token('a1', 'p1')}slow"
     hold = purge_proxy.add(
-        Rule(target="llm", pattern=f'(?=.*"_BatchReply")(?=.*{word})', mode="hold")
+        Rule(target="llm", pattern=f'(?=.*"{BOUNDARY_REPLY}")(?=.*{word})', mode="hold")
     )
     sent: dict[str, httpx.Response] = {}
     adder = threading.Thread(

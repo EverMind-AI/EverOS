@@ -14,7 +14,9 @@ import pytest
 from tests.acceptance.memory_delete.conftest import chat
 from tests.acceptance.memory_delete.proxy import Rule
 from tests.acceptance.memory_delete.seed import write_episode
+from tests.fakes.llm import USER_TRACK_OPERATORS, boundary_reply
 
+from .fake_upstream import Override
 from .journey import finish, purge
 from .observe import (
     INDEX_TABLES,
@@ -27,6 +29,8 @@ from .observe import (
     wait_idle,
 )
 from .seed import AGENT, scope_token
+
+BOUNDARY_REPLY = USER_TRACK_OPERATORS["boundary"]
 
 pytestmark = pytest.mark.acceptance
 
@@ -104,7 +108,7 @@ def test_t22_1_sync_add_in_flight_is_cleared(make_world: Any, purge_proxy: Any) 
     srv, root = world.srv, world.srv.root
     word = f"{scope_token('a1', 'p1')}late"
     hold = purge_proxy.add(
-        Rule(target="llm", pattern=f'(?=.*"_BatchReply")(?=.*{word})', mode="hold")
+        Rule(target="llm", pattern=f'(?=.*"{BOUNDARY_REPLY}")(?=.*{word})', mode="hold")
     )
     responses: dict[str, httpx.Response] = {}
 
@@ -148,13 +152,18 @@ def test_t22_1_sync_add_in_flight_is_cleared(make_world: Any, purge_proxy: Any) 
 
 
 def test_t22_2_extraction_handed_off_after_a_disconnect_is_waited_for(
-    make_world: Any, purge_proxy: Any
+    make_world: Any, purge_proxy: Any, fake: Any
 ) -> None:
     """A22 variant (T2): the request's client goes away after it handed its
     extraction off; the extraction carries on and the purge waits for it."""
     world = make_world("T22.2")
     srv, root = world.srv, world.srv.root
     word = f"{scope_token('a1', 'p1')}gone"
+    # The add itself cuts (before the second exchange), so an episode
+    # extraction runs without a flush.
+    fake.override(
+        Override(pattern=word, reply=boundary_reply([2]), name=BOUNDARY_REPLY)
+    )
     hold = purge_proxy.add(
         Rule(target="llm", pattern=f'(?=.*"_EpisodeReply")(?=.*{word})', mode="hold")
     )

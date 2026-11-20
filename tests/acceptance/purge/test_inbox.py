@@ -9,7 +9,9 @@ import pytest
 
 from tests.acceptance.memory_delete.conftest import chat
 from tests.acceptance.memory_delete.proxy import Rule
+from tests.fakes.llm import USER_TRACK_OPERATORS, boundary_reply
 
+from .fake_upstream import Override
 from .journey import finish, purge
 from .observe import md_counts, release, rows, system_db
 from .seed import scope_token
@@ -41,7 +43,7 @@ def _task(srv: Any, request_id: str) -> dict[str, Any]:
 
 
 def test_t8_1_queued_adds_split_by_when_they_came_in(
-    make_world: Any, purge_proxy: Any
+    make_world: Any, purge_proxy: Any, fake: Any
 ) -> None:
     """A8: the scope's adds queued before the purge fail as purge_in_progress;
     one in delivery is waited for (its data then purged with the rest); one
@@ -50,6 +52,14 @@ def test_t8_1_queued_adds_split_by_when_they_came_in(
     world = make_world("T8.1", EVEROS_TEST_FAILPOINTS="purge.before_step8=pause")
     srv = world.srv
     s_token, o_token = scope_token("a1", "p1"), scope_token("a2", "p1")
+    # The other scope's adds cut on arrival, so their delivery shows as episodes.
+    fake.override(
+        Override(
+            pattern=o_token,
+            reply=boundary_reply([1]),
+            name=USER_TRACK_OPERATORS["boundary"],
+        )
+    )
     hold = purge_proxy.add(Rule(target="llm", pattern=f"{s_token}hold", mode="hold"))
     held_id = _async_add(srv, "queued", "a1", "p1", f"{s_token}hold")
     assert purge_proxy.wait_held("llm", timeout=60)
