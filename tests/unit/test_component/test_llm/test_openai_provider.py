@@ -168,6 +168,54 @@ def test_negative_invalid_reply_retries_rejected() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Trailing commas (#564)
+# ---------------------------------------------------------------------------
+
+
+class _Items(StrictOutputModel):
+    text: str
+    items: list[str]
+
+
+@pytest.mark.parametrize(
+    ("reply", "repaired"),
+    [
+        ('{"text": "ok", "items": [],}', '{"text": "ok", "items": []}'),
+        (
+            '{\n"text": "ok",\n"items": ["a", "b",\n],\n}',
+            '{\n"text": "ok",\n"items": ["a", "b"\n]\n}',
+        ),
+        # A comma inside a string is the reply's content, not a trailing comma.
+        ('{"text": "a, } b,]", "items": [],}', '{"text": "a, } b,]", "items": []}'),
+        (
+            '{"text": "say \\"x,\\"}", "items": ["y",]}',
+            '{"text": "say \\"x,\\"}", "items": ["y"]}',
+        ),
+    ],
+    ids=["object", "nested", "comma-in-string", "escaped-quote"],
+)
+async def test_trailing_commas_are_repaired_without_a_resend(
+    reply: str, repaired: str
+) -> None:
+    upstream = _Upstream(_completion(reply))
+    text = await _provider(upstream, invalid_reply_retries=0).achat(
+        _prompt(), response_format=_Items
+    )
+    assert text == repaired
+    assert len(upstream.bodies) == 1
+
+
+async def test_repair_that_still_fails_validation_is_resent() -> None:
+    """Removing trailing commas does not excuse a missing field."""
+    upstream = _Upstream(_completion('{"items": ["a",],}'), _completion())
+    text = await _provider(upstream, invalid_reply_retries=1).achat(
+        _prompt(), response_format=_Reply
+    )
+    assert text == _VALID
+    assert len(upstream.bodies) == 2
+
+
+# ---------------------------------------------------------------------------
 # Observer
 # ---------------------------------------------------------------------------
 

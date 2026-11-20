@@ -18,7 +18,8 @@ method per step:
    or absent content raises (§3.4, §3.5); no choice and ``abort`` / ``error``
    fail only this attempt.
 4. ``_validate`` -- ``model_validate_json`` against the caller's
-   ``response_format``; a mismatch fails only this attempt (§7.1).
+   ``response_format``; a mismatch fails only this attempt (§7.1). A reply
+   that validates once its trailing commas are removed is returned repaired.
 5. ``_request_valid_reply`` -- at most ``1 + invalid_reply_retries`` attempts
    of the identical request, each completion reported to the observer.
 """
@@ -243,8 +244,7 @@ class OpenAIProvider:
         completion = await self._send(request)
         self._observe(completion, attempt)
         text = _check_upstream(completion)
-        _validate(text, response_format)
-        return text
+        return _validate(text, response_format)
 
     async def _send(self, request: dict[str, Any]) -> ChatCompletion:
         """Issue one SDK call; the SDK applies its own transport retries.
@@ -327,18 +327,67 @@ def _check_upstream(completion: ChatCompletion) -> str:
     return choice.message.content
 
 
-def _validate(text: str, response_format: type[BaseModel]) -> None:
+def _validate(text: str, response_format: type[BaseModel]) -> str:
     """Check ``text`` against the caller's own model, as the operator will.
 
+    Some OpenAI-compatible models (in JSON mode or prompt-only) end an object
+    or array with a trailing comma, ``{"a": 1,}``, which strict JSON rejects
+    and which resending the identical request tends to reproduce. Such a
+    reply is validated once more with those commas removed.
+
+    Returns:
+        The text the operator should parse: ``text``, or its repair.
+
     Raises:
-        _AttemptFailedError: ``text`` does not validate; chained to the
-            ``ValidationError``.
+        _AttemptFailedError: Neither ``text`` nor its repair validates;
+            chained to the ``ValidationError`` of ``text``.
     """
     try:
         response_format.model_validate_json(text)
     except ValidationError as exc:
+        repaired = _strip_trailing_commas(text)
+        if repaired != text and _validates(repaired, response_format):
+            return repaired
         raise _AttemptFailedError(
             f"reply failed validation against {response_format.__name__}",
             reason="invalid_reply",
             error_count=exc.error_count(),
         ) from exc
+    return text
+
+
+def _validates(text: str, response_format: type[BaseModel]) -> bool:
+    try:
+        response_format.model_validate_json(text)
+    except ValidationError:
+        return False
+    return True
+
+
+def _strip_trailing_commas(text: str) -> str:
+    """Drop each comma that only whitespace separates from a ``}`` or ``]``.
+
+    Commas inside string literals are kept, escaped quotes included.
+    """
+    out: list[str] = []
+    comma: int | None = None  # index in ``out`` of the last comma seen
+    in_string = escaped = False
+    for ch in text:
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch.isspace():
+            out.append(ch)
+            continue
+        if ch in "}]" and comma is not None:
+            del out[comma]
+        comma = len(out) if ch == "," else None
+        out.append(ch)
+        in_string = ch == '"'
+    return "".join(out)
