@@ -317,6 +317,38 @@ Episodes are folded one owner at a time. A run folds the episode that triggered 
 |---|---|---|---|---|
 | `max_episodes_per_call` | int | `10` | No | Most episodes one extraction call folds, the triggering one included; `1` folds each alone. |
 
+#### NVIDIA NIM
+
+[NVIDIA NIM](https://build.nvidia.com/) serves an OpenAI-compatible Chat
+Completions API, so it plugs into `[llm]` like OpenRouter does: set the model,
+key, and base URL. Model ids use the `<publisher>/<model>` form; pick one from
+the endpoint's `/models` list.
+
+```toml
+[llm]
+model = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+api_key = "<NVIDIA_API_KEY>"
+base_url = "https://integrate.api.nvidia.com/v1"
+```
+
+Or keep the key out of the file and pass your `NVIDIA_API_KEY` through the
+environment:
+
+```bash
+export EVEROS_LLM__API_KEY="$NVIDIA_API_KEY"
+export EVEROS_LLM__BASE_URL=https://integrate.api.nvidia.com/v1
+export EVEROS_LLM__MODEL=nvidia/nemotron-3.5-super-vl-120b-a12b
+```
+
+Other hosted models you can use include `nvidia/nemotron-3-ultra-550b-a55b`
+and `nvidia/nemotron-3.5-lightning-30b-a3b`. For a self-hosted NIM, point
+`base_url` at your deployment instead (for example
+`http://localhost:8000/v1`) and set `model` to the id it serves.
+
+The default `response_format_mode = "json_schema"` sends a strict JSON schema
+with every extraction call. If your NIM model rejects or ignores it, set
+`response_format_mode = "json_object"`, or `"prompt_only"` as the last resort.
+
 ### `[multimodal]`
 
 | Field | Type | Default | Required | Description |
