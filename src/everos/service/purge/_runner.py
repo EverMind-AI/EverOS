@@ -161,6 +161,7 @@ class PurgeRunner:
         scope_of: Callable[[str, str | None, str | None], PurgeScope],
         backoff: Callable[[int], float] = _backoff,
         poll_seconds: float = 5.0,
+        input_log: Any = None,
     ) -> None:
         self._settings = settings
         self._marks = marks
@@ -172,6 +173,7 @@ class PurgeRunner:
         self._engine = engine
         self._fence = fence
         self._scope_of = scope_of
+        self._input_log = input_log
         self._backoff = backoff
         self._poll = poll_seconds
         self._task: asyncio.Task[None] | None = None
@@ -397,6 +399,8 @@ class PurgeRunner:
         # scope is moved there again (a rename onto it would fail).
         await self._markdown.empty(run.scope, run.job_id)
         moved = await self._markdown.move_out(run.scope, run.job_id)
+        if self._input_log is not None:
+            await self._input_log.purge_scope(run.scope)
         reading = self._fence.in_flight()  # projections that may have read S's files
         await self._markdown.restore_counters(run.scope, run.job_id)
         await self._markdown.empty(run.scope, run.job_id)

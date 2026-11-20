@@ -484,12 +484,12 @@ joins it only behind its session's backlog)
 ### `[memorize.input_log]`
 
 An append-only JSONL record of accepted `/add` requests, independent of
-extraction (issue #537). The first PR ships it **disabled**; deletion and
-purge integration, plus the default-on switch, follow separately.
+extraction (issue #537). A session deletion removes that session's lines,
+and a purge removes the covered scopes' `.input_log/` directories.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `false` | When on, one line per accepted `/add` goes to `<root>/<app>/<project>/.input_log/YYYY-MM-DD.jsonl`. `/flush` is not logged. |
+| `enabled` | bool | `true` | One line per accepted `/add` goes to `<root>/<app>/<project>/.input_log/YYYY-MM-DD.jsonl`. `/flush` is not logged. Off stops new lines; existing lines are still deleted by session deletion/purge. |
 | `retention_days` | int | `30` | Daily files older than this are removed when the scope next writes. |
 | `max_inline_bytes` | int | `1048576` | A line larger than this keeps text verbatim but replaces each `base64` attachment with its byte length and SHA-256. |
 

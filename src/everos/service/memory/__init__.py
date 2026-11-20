@@ -36,7 +36,11 @@ import asyncio
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
-from everos.core.errors import PathTraversalError, SessionBusyError
+from everos.core.errors import (
+    DeletionIncompleteError,
+    PathTraversalError,
+    SessionBusyError,
+)
 from everos.core.observability.logging import get_logger
 from everos.memory import DeviceLine, project_device_batch
 
@@ -181,14 +185,30 @@ class MemoryService:
         Runs to completion even if the caller goes away: a deletion cut in
         half would leave the scope half deleted.
         """
-        task = self._extractions.supervise(
-            self._deleter.delete(
+
+        async def _delete_and_cleanup() -> Any:
+            result = await self._deleter.delete(
                 app_id=app_id,
                 project_id=project_id,
                 user_id=user_id,
                 agent_id=agent_id,
                 session_id=session_id,
-            ),
+            )
+            if session_id is not None and self._input_log is not None:
+                try:
+                    await self._input_log.delete_session(
+                        app_id=app_id, project_id=project_id, session_id=session_id
+                    )
+                except Exception as exc:
+                    # The memories are gone but the privacy log is not; report
+                    # the deletion as incomplete so a retry finishes it.
+                    raise DeletionIncompleteError(
+                        "input log cleanup failed; resend the deletion"
+                    ) from exc
+            return result
+
+        task = self._extractions.supervise(
+            _delete_and_cleanup(),
             session_id=session_id,
             memcell_ids=[],
             label="memory_delete",
