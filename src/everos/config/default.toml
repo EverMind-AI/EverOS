@@ -25,6 +25,14 @@ timezone = "UTC"
 # Override via EVEROS_API__HOST and EVEROS_API__PORT.
 host = "127.0.0.1"
 port = 8000
+# Browsers on this machine can reach a loopback server too, so requests are
+# refused when a browser page of another site sends them (its ``Origin``) or
+# when they arrive under a public domain name (``Host``; DNS rebinding).
+# IP addresses, single-label names and the localhost / internal / test /
+# invalid domains are always accepted. List a reverse proxy's domain here:
+# allowed_hosts = ["memory.example.com"]       # EVEROS_API__ALLOWED_HOSTS
+# and the origin of a web UI that calls the API from the browser:
+# cors_origins = ["http://localhost:3000"]     # EVEROS_API__CORS_ORIGINS
 
 [sqlite]
 # PRAGMA journal_mode  — WAL is the recommended high-concurrency mode.

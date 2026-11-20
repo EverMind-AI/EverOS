@@ -25,6 +25,7 @@ from everos.entrypoints.api.middleware import (
     DEFAULT_CORS_ALLOW_HEADERS,
     DEFAULT_CORS_ALLOW_METHODS,
     DEFAULT_CORS_ORIGINS,
+    CrossSiteGuardMiddleware,
     ProfileMiddleware,
     PrometheusMiddleware,
     RequestIdMiddleware,
@@ -72,7 +73,8 @@ def create_app(
         application: A pre-built application (tests inject one assembled
             over fakes). It is reachable by routes at once, and the lifespan
             starts and closes it like one it built itself.
-        cors_origins: Allowed CORS origins (default: ``["*"]``).
+        cors_origins: Allowed CORS origins (default: ``[api] cors_origins``,
+            which is empty: no other site may call the API from a browser).
         cors_allow_credentials: Whether to allow credentials (default: True).
         cors_allow_methods: Allowed CORS methods (default: ``["*"]``).
         cors_allow_headers: Allowed CORS headers (default: ``["*"]``).
@@ -114,12 +116,21 @@ def create_app(
     # Write tracking innermost: it stamps the request the handler runs in.
     app.add_middleware(WriteTrackingMiddleware)
     # CORS next (matches base_app.py legacy pattern).
+    api = (settings or load_settings()).api
+    origins = cors_origins or api.cors_origins or DEFAULT_CORS_ORIGINS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins or DEFAULT_CORS_ORIGINS,
+        allow_origins=origins,
         allow_credentials=cors_allow_credentials,
         allow_methods=cors_allow_methods or DEFAULT_CORS_ALLOW_METHODS,
         allow_headers=cors_allow_headers or DEFAULT_CORS_ALLOW_HEADERS,
+    )
+    # Outside CORS, so it also answers preflights: a browser page of another
+    # site, or one rebinding a public name to this server, gets 403.
+    app.add_middleware(
+        CrossSiteGuardMiddleware,
+        allowed_hosts=api.allowed_hosts,
+        allowed_origins=origins,
     )
     app.add_middleware(PrometheusMiddleware)
     app.add_middleware(ProfileMiddleware)

@@ -179,15 +179,6 @@ class PurgeInProgressError(DomainError):
     """
 
 
-class CrossSiteRefusedError(DomainError):
-    """A browser page of another site asked for a purge.
-
-    Nothing was counted or deleted. The API layer maps it to HTTP 403
-    ``CROSS_SITE_REFUSED``; the caller purges from a client that is not a
-    browser page of another site (curl, an SDK, a plugin).
-    """
-
-
 class PurgeNonceInvalidError(DomainError):
     """A purge confirmation named an unknown, expired or already-used nonce.
 

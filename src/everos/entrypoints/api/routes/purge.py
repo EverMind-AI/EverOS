@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from typing import Annotated, Any
-from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Path
 
-from everos.core.errors import CrossSiteRefusedError
 from everos.entrypoints.api.dependencies import ApplicationDep, RequestIdDep
 from everos.entrypoints.api.schemas import (
     ErrorResponse,
@@ -30,23 +28,8 @@ REFUSED_DURING_PURGE: dict[int | str, dict[str, Any]] = {
 """The answer of a write route while a purge clears the range it names."""
 
 
-def _refuse_cross_site(request: Request) -> None:
-    """Refuse a purge sent by a browser page of another site.
-
-    There is no authentication and CORS allows any origin by default, so any
-    page the user opens could read a nonce and confirm it. Browsers send
-    ``Origin`` with these requests; curl, SDKs, MCP and the plugins send
-    none and pass, and so does a page this server serves itself.
-    """
-    origin = request.headers.get("origin")
-    host = request.headers.get("host", "")
-    if origin is not None and urlsplit(origin).netloc.lower() != host.lower():
-        raise CrossSiteRefusedError(
-            "a purge is refused from a browser page of another site; "
-            "send it from curl, an SDK or a plugin"
-        )
-
-
+# Every route refuses browser pages of other sites (CrossSiteGuardMiddleware);
+# the purge routes document it because they are the irreversible ones.
 _CROSS_SITE_RESPONSE: dict[int | str, dict[str, Any]] = {
     403: {
         "model": ErrorResponse,
@@ -59,11 +42,7 @@ _PathJobId = Annotated[
 ]
 
 
-@router.post(
-    "/purge",
-    dependencies=[Depends(_refuse_cross_site)],
-    responses=_CROSS_SITE_RESPONSE,
-)
+@router.post("/purge", responses=_CROSS_SITE_RESPONSE)
 async def request_purge(
     req: PurgeRequest, app: ApplicationDep, request_id: RequestIdDep
 ) -> SuccessEnvelope[PurgeRequestData]:
@@ -81,7 +60,6 @@ async def request_purge(
 @router.post(
     "/purge/confirm",
     status_code=202,
-    dependencies=[Depends(_refuse_cross_site)],
     responses={
         **_CROSS_SITE_RESPONSE,
         404: {

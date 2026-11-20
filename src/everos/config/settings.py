@@ -110,13 +110,29 @@ class ApiSettings(BaseModel):
     (``0.0.0.0`` etc.) without your own gateway / auth layer in front
     is unsupported.
 
+    A browser can still reach a loopback server: a page of another site can
+    send it requests, and DNS rebinding can make such a page same-origin with
+    it. Requests are therefore refused when their ``Host`` is a public domain
+    name not listed in ``allowed_hosts``, or when they carry the ``Origin`` of
+    another site not listed in ``cors_origins``.
+
     Env binding:
         EVEROS_API__HOST
         EVEROS_API__PORT
+        EVEROS_API__ALLOWED_HOSTS   (JSON list, e.g. '["memory.example.com"]')
+        EVEROS_API__CORS_ORIGINS    (JSON list, e.g. '["http://localhost:3000"]')
     """
 
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
+    allowed_hosts: list[str] = []
+    """Public domain names this server is reached under, such as a reverse
+    proxy's (``"*"`` accepts any). IP addresses, single-label names and the
+    reserved ``localhost`` / ``internal`` / ``test`` / ``invalid`` domains are
+    always accepted."""
+    cors_origins: list[str] = []
+    """Browser origins (``scheme://host[:port]``) allowed to call the API from
+    another site, such as a local web UI. Empty: none; ``"*"``: any."""
 
 
 class SqliteSettings(BaseModel):

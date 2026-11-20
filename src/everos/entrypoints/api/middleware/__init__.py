@@ -1,4 +1,5 @@
-"""The HTTP API layer's middleware (CORS defaults, profiling, metrics, request id).
+"""The HTTP API layer's middleware (CORS defaults, cross-site guard, profiling,
+metrics, request id).
 
 External usage::
 
@@ -7,6 +8,7 @@ External usage::
         DEFAULT_CORS_ALLOW_HEADERS,
         DEFAULT_CORS_ALLOW_METHODS,
         DEFAULT_CORS_ORIGINS,
+        CrossSiteGuardMiddleware,
         ProfileMiddleware,
         PrometheusMiddleware,
     )
@@ -16,6 +18,7 @@ from .cors import DEFAULT_CORS_ALLOW_CREDENTIALS as DEFAULT_CORS_ALLOW_CREDENTIA
 from .cors import DEFAULT_CORS_ALLOW_HEADERS as DEFAULT_CORS_ALLOW_HEADERS
 from .cors import DEFAULT_CORS_ALLOW_METHODS as DEFAULT_CORS_ALLOW_METHODS
 from .cors import DEFAULT_CORS_ORIGINS as DEFAULT_CORS_ORIGINS
+from .cross_site import CrossSiteGuardMiddleware as CrossSiteGuardMiddleware
 from .profile import ProfileMiddleware as ProfileMiddleware
 from .prometheus import PrometheusMiddleware as PrometheusMiddleware
 from .request_id import RequestIdMiddleware as RequestIdMiddleware
@@ -26,6 +29,7 @@ __all__ = [
     "DEFAULT_CORS_ALLOW_HEADERS",
     "DEFAULT_CORS_ALLOW_METHODS",
     "DEFAULT_CORS_ORIGINS",
+    "CrossSiteGuardMiddleware",
     "ProfileMiddleware",
     "PrometheusMiddleware",
     "RequestIdMiddleware",
