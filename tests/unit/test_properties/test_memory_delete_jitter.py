@@ -934,6 +934,34 @@ async def _check(world: _World) -> None:
     crash=None,
     disk_full_at=None,
 )
+@example(  # a skill listed, then removed by an agent deletion before it was read
+    first=[
+        ("del_owner_session", "u1", "s1"),
+        ("skill",),
+        ("add", "s2", ("u2", "u3")),
+        ("reflect", "u3"),
+        ("del_session", "s1", False),
+        ("del_owner", "u3"),
+        ("skill",),
+        ("facts", "u3"),
+        ("facts", "u1"),
+        ("cluster", "u1"),
+        ("del_session", "s1", True),
+    ],
+    second=[
+        ("cluster", "u3"),
+        ("del_owner", "u3"),
+        ("cluster", "u3"),
+        ("del_id", "u1"),
+        ("del_owner_session", "u1", "s2"),
+        ("cluster", "u1"),
+        ("skill",),
+        ("del_owner", "g1"),
+    ],
+    seed=257,
+    crash=None,
+    disk_full_at=2,
+)
 def test_deletions_and_writers_keep_their_invariants(
     first: list[tuple[Any, ...]],
     second: list[tuple[Any, ...]],

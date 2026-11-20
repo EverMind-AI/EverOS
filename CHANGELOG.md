@@ -138,6 +138,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`everos demo` keeps the conversation on its newest line.** The conversation
   panel follows every new line, also after the reader scrolled up; on a slow
   machine it could stay at the top.
+- **Agent-skill extraction no longer fails when the agent is deleted
+  mid-run.** A `SKILL.md` (or a skill's reference or script) removed between
+  being found and being read now reads as absent instead of raising
+  `FileNotFoundError`, which failed the `extract_agent_skill` run.
 
 ### Upgrade
 

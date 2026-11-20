@@ -17,7 +17,10 @@ Pairs with :class:`AgentSkillWriter`:
 the target is missing — readers do not raise on absence, since "skill not
 yet created" is a normal state for the upsert-style workflow. Callers that
 need to distinguish "missing" from "empty body" check for ``None``
-explicitly.
+explicitly. A file removed between the existence check and the read is
+missing too (``list_by_cluster`` skips it): an owner deletion moves the
+agent's whole directory away under the owner's lock, which reads do not
+take.
 
 ``reference_name`` / ``script_filename`` are appended after the skill
 directory, so ``skill_dir_name`` does not cover them; both go through
@@ -193,11 +196,8 @@ class AgentSkillReader:
         path = self._reference_path(
             agent_id, skill_name, reference_name, app_id, project_id
         )
-        apath = anyio.Path(path)
-        if not await apath.is_file():
-            return None
-        text = await MarkdownReader.read_text(apath)
-        return text.rstrip("\n")
+        text = await _read_text_if_present(path)
+        return text.rstrip("\n") if text is not None else None
 
     async def read_script(
         self,
@@ -216,11 +216,8 @@ class AgentSkillReader:
         path = self._script_path(
             agent_id, skill_name, script_filename, app_id, project_id
         )
-        apath = anyio.Path(path)
-        if not await apath.is_file():
-            return None
-        text = await MarkdownReader.read_text(apath)
-        return text.rstrip("\n")
+        text = await _read_text_if_present(path)
+        return text.rstrip("\n") if text is not None else None
 
     # ── Internals — same shape as AgentSkillWriter ────────────────────────────
 
@@ -229,7 +226,8 @@ class AgentSkillReader:
 
         Shared by :meth:`read_main` (path derived from a caller-supplied
         ``skill_name``) and :meth:`list_by_cluster` (path taken directly
-        from a directory glob, never re-derived from a name).
+        from a directory glob, never re-derived from a name). ``None`` when
+        the file is not there, including when it went after the glob.
 
         Raises:
             ValidationError: the file's frontmatter violates *schema*.
@@ -238,9 +236,10 @@ class AgentSkillReader:
                 while ``list_by_cluster`` catches it per file so one bad
                 file cannot starve the rest of the cluster.
         """
-        if not await anyio.Path(path).is_file():
+        text = await _read_text_if_present(path)
+        if text is None:
             return None
-        parsed = await MarkdownReader.read(path)
+        parsed = MarkdownReader.parse(text)
         frontmatter = schema.model_validate(parsed.frontmatter)
         body = parsed.body.rstrip("\n")
         return frontmatter, body
@@ -294,3 +293,19 @@ class AgentSkillReader:
             / AgentSkillFrontmatter.SKILL_SCRIPTS_DIR_NAME
             / sanitize_dirname(script_filename, "script")
         )
+
+
+async def _read_text_if_present(path: Path) -> str | None:
+    """``path``'s text; ``None`` when it is not a file, or is removed before the read.
+
+    The existence check answers fast for a missing path or a directory (which
+    on Windows would otherwise be retried as a sharing violation); the
+    ``FileNotFoundError`` catch covers the file going between that check and
+    the read.
+    """
+    if not await anyio.Path(path).is_file():
+        return None
+    try:
+        return await MarkdownReader.read_text(path)
+    except FileNotFoundError:
+        return None

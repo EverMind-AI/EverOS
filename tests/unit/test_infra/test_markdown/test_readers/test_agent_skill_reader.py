@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
+import anyio
 import pytest
 from pydantic import ValidationError
 
@@ -368,3 +370,81 @@ async def test_read_main_rederivation_from_raw_name_is_idempotent_safe(
     fm_out, body = out
     assert fm_out.name == space_name
     assert body == "The fix body."
+
+
+# ── A file removed between the existence check and the read ──────────────
+
+
+@pytest.fixture
+def vanish_once_seen(monkeypatch: pytest.MonkeyPatch) -> Callable[[Path], None]:
+    """Make a path disappear right after a reader sees that it is a file.
+
+    An owner deletion moves the agent's whole directory away under the owner's
+    lock, which reads do not take, so a file can go between ``is_file()`` and
+    the read that follows it.
+    """
+    real_is_file = anyio.Path.is_file
+    doomed: set[Path] = set()
+
+    async def is_file_then_gone(self: anyio.Path) -> bool:
+        present = await real_is_file(self)
+        if present and Path(str(self)) in doomed:
+            await self.unlink()
+        return present
+
+    monkeypatch.setattr(anyio.Path, "is_file", is_file_then_gone)
+    return doomed.add
+
+
+async def test_list_by_cluster_skips_a_skill_removed_while_listing(
+    writer: AgentSkillWriter,
+    reader: AgentSkillReader,
+    vanish_once_seen: Callable[[Path], None],
+) -> None:
+    """A skill gone by the time it is read is absent, not an error."""
+    for name in ("alpha", "beta"):
+        path = await writer.write_main(
+            "a1",
+            name,
+            frontmatter=_make_fm(
+                id=f"a1_{name}", agent_id="a1", name=name, cluster_id="cl1"
+            ),
+            body="b",
+        )
+        if name == "alpha":
+            vanish_once_seen(path)
+
+    results = await reader.list_by_cluster("a1", "cl1")
+
+    assert [fm.name for fm, _body in results] == ["beta"]
+
+
+async def test_read_main_is_none_for_a_skill_removed_before_the_read(
+    writer: AgentSkillWriter,
+    reader: AgentSkillReader,
+    vanish_once_seen: Callable[[Path], None],
+) -> None:
+    path = await writer.write_main("a1", "alpha", frontmatter=_make_fm(), body="b")
+    vanish_once_seen(path)
+
+    assert await reader.read_main("a1", "alpha", schema=AgentSkillFrontmatter) is None
+
+
+async def test_read_reference_is_none_for_a_file_removed_before_the_read(
+    writer: AgentSkillWriter,
+    reader: AgentSkillReader,
+    vanish_once_seen: Callable[[Path], None],
+) -> None:
+    vanish_once_seen(await writer.write_reference("a1", "alpha", "terms", "t"))
+
+    assert await reader.read_reference("a1", "alpha", "terms") is None
+
+
+async def test_read_script_is_none_for_a_file_removed_before_the_read(
+    writer: AgentSkillWriter,
+    reader: AgentSkillReader,
+    vanish_once_seen: Callable[[Path], None],
+) -> None:
+    vanish_once_seen(await writer.write_script("a1", "alpha", "run.py", "pass\n"))
+
+    assert await reader.read_script("a1", "alpha", "run.py") is None
