@@ -1,7 +1,7 @@
 """NVIDIA NIM -- an ``[llm]`` section pointed at NIM reaches the SDK client.
 
 NIM serves the OpenAI Chat Completions protocol, so it needs no provider of its
-own: ``resolve_llm_config`` + ``build_llm_provider`` turn the section into an
+own: ``llm_client_config`` + ``build_llm_provider`` turn the section into an
 ``OpenAIProvider`` whose ``openai.AsyncOpenAI`` client carries NIM's base URL,
 key, and model. No request is sent.
 """
@@ -11,12 +11,14 @@ from __future__ import annotations
 from pydantic import SecretStr
 
 from everos.component.llm import (
+    LLMClientConfig,
     OpenAIProvider,
     build_llm_provider,
+    llm_client_config,
     observer_for,
-    resolve_llm_config,
+    resolve_llm_task,
 )
-from everos.config import Settings
+from everos.config import LLMTask, Settings
 from everos.config.settings import LLMSettings
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
@@ -33,8 +35,13 @@ def _settings(base_url: str = NVIDIA_BASE_URL) -> Settings:
     )
 
 
+def _config(settings: Settings) -> LLMClientConfig:
+    """What a task that only inherits ``[llm]`` builds its client from."""
+    return llm_client_config(resolve_llm_task(settings, LLMTask.EPISODE))
+
+
 def test_nvidia_section_resolves_to_its_endpoint() -> None:
-    config = resolve_llm_config(_settings())
+    config = _config(_settings())
 
     assert config.model == NVIDIA_MODEL
     assert config.api_key == "nvidia-test-key"
@@ -44,9 +51,7 @@ def test_nvidia_section_resolves_to_its_endpoint() -> None:
 def test_nvidia_endpoint_reaches_the_sdk_client() -> None:
     settings = _settings()
 
-    provider = build_llm_provider(
-        resolve_llm_config(settings), observer=observer_for(settings)
-    )
+    provider = build_llm_provider(_config(settings), observer=observer_for(settings))
 
     assert isinstance(provider, OpenAIProvider)
     assert str(provider._client.base_url) == f"{NVIDIA_BASE_URL}/"
@@ -56,7 +61,7 @@ def test_nvidia_endpoint_reaches_the_sdk_client() -> None:
 
 def test_self_hosted_nim_base_url_is_kept() -> None:
     provider = build_llm_provider(
-        resolve_llm_config(_settings(base_url="http://localhost:8000/v1"))
+        _config(_settings(base_url="http://localhost:8000/v1"))
     )
 
     assert str(provider._client.base_url) == "http://localhost:8000/v1/"
