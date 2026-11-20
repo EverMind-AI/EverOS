@@ -84,6 +84,8 @@ everos init --root /data/everos
 |---|---|---|---|
 | `host` | string | `"127.0.0.1"` | HTTP server bind address. |
 | `port` | int | `8000` | HTTP server bind port (1–65535). |
+| `allowed_hosts` | list[string] | `[]` | Public domain names the server is reached under, such as a reverse proxy's. A request whose `Host` is any other public domain is refused with `403 CROSS_SITE_REFUSED`, which stops DNS rebinding. IP addresses, single-label names (a compose service) and the `localhost` / `internal` / `test` / `invalid` domains are always accepted; `"*"` accepts any. |
+| `cors_origins` | list[string] | `[]` | Browser origins (`scheme://host[:port]`) allowed to call the API from another site, such as a local web UI. A request carrying any other site's `Origin` is refused with `403 CROSS_SITE_REFUSED`; curl, SDKs, MCP and the plugins send no `Origin` and are unaffected. `"*"` allows any site. |
 
 ### `[sqlite]`
 

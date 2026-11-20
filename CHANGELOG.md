@@ -26,6 +26,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their old ids; a batch sent before the upgrade and resent after it is not
   recognized as a resend.
 
+### Security
+
+- **Browser pages of other sites can no longer call the API.** CORS used to
+  allow every origin, so any page open in a browser on the same machine could
+  read, write and delete memories through a loopback server, and a page that
+  rebinds its own domain to `127.0.0.1` could do the same. Every route now
+  answers `403 CROSS_SITE_REFUSED` to a request carrying another site's
+  `Origin` or arriving under a public domain name in `Host`. Before only the
+  purge routes refused cross-site requests.
+
+### Upgrade
+
+- curl, SDKs, MCP, the plugins and a compose service name are unaffected. A
+  web UI on another origin that calls the API from the browser needs its
+  origin in `[api] cors_origins`; a reverse proxy that forwards its own domain
+  in `Host` needs that domain in `[api] allowed_hosts`.
+
 ## [1.7.1] - 2026-11-20
 
 EverOS 1.7.1 writes each conversation's memory in its own language: a short

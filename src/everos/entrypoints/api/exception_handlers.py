@@ -36,7 +36,7 @@ _INTERNAL_ERROR_MESSAGE = "Internal server error"
 type _Handler = Callable[[Request, Exception], Awaitable[JSONResponse]]
 
 
-def _error_response(
+def error_response(
     request: Request, status_code: int, code: ErrorCode, message: str
 ) -> JSONResponse:
     """Build a JSONResponse with the canonical error envelope."""
@@ -87,7 +87,6 @@ _ERROR_RULES: Mapping[type[Exception], _Rule] = {
     # A deletion that found its session busy deleted nothing: retry later.
     errors.SessionBusyError: _Rule(503, ErrorCode.SESSION_BUSY),
     errors.PurgeInProgressError: _Rule(409, ErrorCode.PURGE_IN_PROGRESS),
-    errors.CrossSiteRefusedError: _Rule(403, ErrorCode.CROSS_SITE_REFUSED),
     errors.PurgeNonceInvalidError: _Rule(404, ErrorCode.PURGE_NONCE_INVALID),
     errors.DeletionIncompleteError: _Rule(
         500,
@@ -136,7 +135,7 @@ def _rule_handler(rule: _Rule) -> _Handler:
             fields = rule.log_fields(exc)
             getattr(logger, level)(event, path=str(request.url.path), **fields)
         message = str(exc) if rule.message is None else rule.message
-        return _error_response(request, rule.status_code, rule.code, message)
+        return error_response(request, rule.status_code, rule.code, message)
 
     return handle
 
@@ -174,18 +173,18 @@ async def request_validation_handler(
 ) -> JSONResponse:
     """FastAPI RequestValidationError -> 422."""
     message = _validation_message(exc)
-    return _error_response(request, 422, ErrorCode.INVALID_INPUT, message)
+    return error_response(request, 422, ErrorCode.INVALID_INPUT, message)
 
 
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """FastAPI HTTPException -> its own status code; a 5xx hides ``detail``."""
     if exc.status_code < 500:
-        return _error_response(
+        return error_response(
             request, exc.status_code, ErrorCode.BAD_REQUEST, str(exc.detail)
         )
     path = str(request.url.path)
     logger.error("http_exception_5xx", path=path, status_code=exc.status_code)
-    return _error_response(
+    return error_response(
         request, exc.status_code, ErrorCode.INTERNAL_ERROR, _INTERNAL_ERROR_MESSAGE
     )
 
@@ -198,7 +197,7 @@ async def unexpected_handler(request: Request, exc: Exception) -> JSONResponse:
         exception_type=type(exc).__name__,
         exc_info=True,
     )
-    return _error_response(
+    return error_response(
         request, 500, ErrorCode.INTERNAL_ERROR, _INTERNAL_ERROR_MESSAGE
     )
 
