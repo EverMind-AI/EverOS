@@ -88,6 +88,7 @@ def test_llm_section_reaches_the_factory() -> None:
             extra={"extra_body": {"x": 1}},
             response_format_mode="json_object",
             invalid_reply_retries=3,
+            truncated_reply_retries=2,
             temperature=0.3,
             max_tokens=16384,
             sdk_max_retries=1,
@@ -103,6 +104,7 @@ def test_llm_section_reaches_the_factory() -> None:
         extra={"extra_body": {"x": 1}},
         response_format_mode="json_object",
         invalid_reply_retries=3,
+        truncated_reply_retries=2,
         temperature=0.3,
         max_tokens=16384,
     )

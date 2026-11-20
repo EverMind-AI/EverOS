@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An LLM reply cut off at the output cap is sent once more instead of
+  failing its call.** A generation that runs away until `max_tokens`
+  (`finish_reason` `length`) usually finishes when the identical request is
+  sent again, so every LLM call -- the episode extraction inside
+  `/memory/add` included -- now resends it once before giving up, rather than
+  losing the memcell's episode or failing the background extraction.
+  `[llm] truncated_reply_retries` (default `1`; settable per task in
+  `[llm.<task>]` and in `[multimodal]`) sets how many times. It is counted
+  apart from `invalid_reply_retries`, and a retry never raises `max_tokens`:
+  a reply that is long by nature reaches the cap again and still fails, which
+  a larger `max_tokens` for that task fixes. A reply blocked by
+  `content_filter` is not resent.
+
 - **A resent `/memory/add` no longer cuts the same messages twice** (#274).
   Messages were deduplicated only against the session buffer, so a client
   retrying after a timeout re-sent messages the first call had already cut

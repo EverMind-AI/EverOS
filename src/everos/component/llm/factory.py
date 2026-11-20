@@ -88,6 +88,8 @@ class LLMClientConfig:
         extra: Request fields merged into every call.
         response_format_mode: How the reply format is requested.
         invalid_reply_retries: Extra attempts after an unusable reply.
+        truncated_reply_retries: Extra attempts after a reply that reached the
+            output cap.
         temperature: Sent when a call names none; ``None`` leaves it out.
         max_tokens: Sent when a call names none; ``None`` leaves it out.
     """
@@ -100,6 +102,7 @@ class LLMClientConfig:
     extra: dict[str, Any] = field(default_factory=dict)
     response_format_mode: ResponseFormatMode = "json_schema"
     invalid_reply_retries: int = 1
+    truncated_reply_retries: int = 1
     temperature: float | None = None
     max_tokens: int | None = None
 
@@ -215,6 +218,7 @@ def llm_client_config(resolution: LLMTaskResolution) -> LLMClientConfig:
         extra=dict(cfg.extra),
         response_format_mode=cfg.response_format_mode,
         invalid_reply_retries=cfg.invalid_reply_retries,
+        truncated_reply_retries=cfg.truncated_reply_retries,
         temperature=cfg.temperature,
         max_tokens=cfg.max_tokens,
     )
@@ -243,6 +247,7 @@ def build_llm_provider(
         extra=config.extra,
         response_format_mode=config.response_format_mode,
         invalid_reply_retries=config.invalid_reply_retries,
+        truncated_reply_retries=config.truncated_reply_retries,
         observer=observer,
     )
 
@@ -292,6 +297,7 @@ def resolve_multimodal_config(settings: Settings) -> LLMClientConfig:
         base_url=cfg.base_url,
         response_format_mode=cfg.response_format_mode,
         invalid_reply_retries=cfg.invalid_reply_retries,
+        truncated_reply_retries=cfg.truncated_reply_retries,
     )
 
 
