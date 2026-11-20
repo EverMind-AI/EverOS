@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 from pathlib import Path
 
 import pytest
 import structlog.testing
 
 from everos.core.locks import LOCKS, owner_key
+from everos.core.utils import datetime as dt_module
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.markdown import (
     MarkdownAgentCaseStore,
@@ -19,6 +21,7 @@ from everos.infra.persistence.markdown import (
     MarkdownReader,
     parse_structured_entry,
 )
+from everos.infra.persistence.markdown.stores import _iso
 from everos.memory.models import (
     AgentCase,
     AgentSkill,
@@ -37,6 +40,12 @@ from everos.memory.ports import (
 )
 
 _TS = 1_747_216_800_000  # 2025-05-14T10:00:00Z
+
+
+def test_iso_renders_pre_2001_milliseconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    with monkeypatch.context() as patch:
+        patch.setattr(dt_module, "_display_tz", lambda: dt.UTC)
+        assert _iso(946_684_800_000) == "2000-01-01T00:00:00+00:00"
 
 
 @pytest.fixture
