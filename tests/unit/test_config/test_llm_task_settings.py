@@ -148,6 +148,7 @@ def test_the_task_names_are_stable() -> None:
     """Section names in users' configs: renaming one breaks every config using it."""
     assert [task.value for task in LLMTask] == [
         "boundary",
+        "language",
         "episode",
         "summary",
         "atomic_fact",

@@ -91,13 +91,14 @@ def test_an_unconfigured_llm_fails_the_build(llm: LLMSettings) -> None:
 
 
 def test_every_task_is_built_from_llm_alone() -> None:
-    """One provider for the eleven extraction and search tasks, one for the decider."""
+    """One provider for the extraction and search tasks; the language task and
+    the decider, which carry defaults of their own, get one each."""
     llms = build_providers(_unconfigured()).llms
 
     clients = {f.name: getattr(llms, f.name) for f in dataclasses.fields(llms)}
     shared = {name for name, llm in clients.items() if llm is llms.boundary}
-    assert shared == set(clients) - {"decider"}
-    assert llms.decider is not llms.boundary
+    assert shared == set(clients) - {"language", "decider"}
+    assert len({id(llms.boundary), id(llms.language), id(llms.decider)}) == 3
 
 
 def test_configured_optional_providers_are_built() -> None:

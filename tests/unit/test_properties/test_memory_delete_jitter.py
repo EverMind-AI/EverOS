@@ -440,6 +440,7 @@ async def _add(world: _World, session: str, owners: tuple[str, ...]) -> None:
         episode_store=world.stores.episode,
         memcell_store=world.stores.memcell,
         instructions=bundled_instructions(),
+        language_llm=llm,
         episode_llm=llm,
     )
     # The extraction model; sometimes slow enough for a whole session
@@ -544,6 +545,7 @@ async def _reflect(world: _World, owner: str) -> None:
         episode_index=_MdIndex(world),  # type: ignore[arg-type]
         memcell_store=stores.memcell,
         report_store=stores.reflection_report,
+        profile_store=stores.profile,
         reflector=reflector,
     )
     merged = await orchestrator.run(scope=_scope(owner))

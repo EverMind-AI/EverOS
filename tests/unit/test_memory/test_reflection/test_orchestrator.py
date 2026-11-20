@@ -8,6 +8,8 @@ Every storage dependency is a mock of its port. Tests verify:
   never in the index — the cascade carries it there
 - LLM failure skips cluster gracefully
 - empty candidates return empty list
+- the merge language: the owner's profile language, else the members' vote,
+  else read off the merged text; pinned on the merged episode and its event
 """
 
 from __future__ import annotations
@@ -23,9 +25,10 @@ from everos.core.locks import LOCKS
 from everos.infra.persistence.lancedb import render_predicate
 from everos.memory._partition_locks import _reset_for_tests
 from everos.memory.events import EpisodeExtracted, ReflectedEpisode, ReflectionContext
-from everos.memory.models import AtomicFact, Cluster, Episode
+from everos.memory.models import AtomicFact, Cluster, Episode, Profile
 from everos.memory.ports import MemoryRef, Scope, SearchHit, Stored
 from everos.memory.reflection import ReflectionFinisher, ReflectionOrchestrator
+from everos.memory.reflection._language import LanguageChoice
 from everos.memory.reflection.orchestrator import _MAX_CLUSTERS_PER_RUN
 
 _SCOPE = Scope(
@@ -75,6 +78,7 @@ def _stored_episode(
     parent_type: str = "memcell",
     episode: str = "test episode text",
     md_path: str = "default_app/default_project/users/u_alice/episodes/e.md",
+    language: str | None = None,
 ) -> Stored[Episode]:
     return Stored(
         ref=MemoryRef(id=f"u_alice_{entry_id}", entry_id=entry_id, md_path=md_path),
@@ -88,6 +92,7 @@ def _stored_episode(
             session_id="s_test",
             parent_id=parent_id,
             parent_type=parent_type,  # type: ignore[arg-type]
+            language=language,
         ),
     )
 
@@ -124,6 +129,7 @@ class _Ports:
     reflector: MagicMock
     embedder: MagicMock
     memcell_store: MagicMock
+    profile_store: MagicMock
 
     def orchestrator(self) -> ReflectionOrchestrator:
         return ReflectionOrchestrator(
@@ -132,6 +138,7 @@ class _Ports:
             episode_index=self.episode_index,
             memcell_store=self.memcell_store,
             report_store=self.report_store,
+            profile_store=self.profile_store,
             reflector=self.reflector,
         )
 
@@ -148,7 +155,8 @@ class _Ports:
 
 @pytest.fixture
 def ports() -> _Ports:
-    ports = _Ports(*(MagicMock() for _ in range(9)))
+    ports = _Ports(*(MagicMock() for _ in range(10)))
+    ports.profile_store.read = AsyncMock(return_value=None)
     # Nothing was deleted: every source is still in md, every memcell exists.
     ports.episode_store.exists = AsyncMock(side_effect=lambda _scope, ids: set(ids))
     ports.memcell_store.find_by_ids = AsyncMock(
@@ -319,6 +327,7 @@ async def test_merged_episode_is_written_with_a_cluster_parent(ports: _Ports) ->
             owner_id=None, episode="merged text", subject="topic", timestamp=0
         ),
         last_ts=1_780_272_000_000,
+        language=LanguageChoice("Japanese", "profile"),
         only_if=_unchanged,
     )
 
@@ -333,6 +342,7 @@ async def test_merged_episode_is_written_with_a_cluster_parent(ports: _Ports) ->
         subject="topic",
         parent_id="cl_abc",
         parent_type="cluster",
+        language="Japanese",
     )
 
 
@@ -417,6 +427,106 @@ async def test_run_update_mode_uses_old_episode(ports: _Ports) -> None:
     assert "old_episode" in kwargs
     assert merged.reflection is not None
     assert merged.reflection.mode == "update"
+
+
+# ── The merge language ────────────────────────────────────────────────────
+
+
+def _arm_two_members(ports: _Ports, *languages: str | None) -> None:
+    """One INIT-mergeable cluster whose two members stored ``languages``."""
+    episodes = [
+        _stored_episode(
+            entry_id=f"ep_20260601_000{i}", parent_id=f"mc_00{i}", language=language
+        )
+        for i, language in enumerate(languages, 1)
+    ]
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_lang",
+        members=[(ep.ref.entry_id, "episode") for ep in episodes],
+        episodes=episodes,
+        merged_entry_id="ep_20260614_0009",
+    )
+
+
+def _arm_profile(ports: _Ports, primary_language: str | None) -> None:
+    ports.profile_store.read = AsyncMock(
+        return_value=Profile(
+            owner_id="u_alice",
+            summary="s",
+            timestamp=0,
+            primary_language=primary_language,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("profile_language", "member_languages", "asked", "stored", "source"),
+    [
+        ("Chinese", ("English", "English"), "Chinese", "Chinese", "profile"),
+        (None, ("English", "English"), "English", "English", "vote"),
+        (None, ("Chinese", "English"), None, "English", "text"),
+    ],
+    ids=["profile wins", "members vote", "split vote reads the merged text"],
+)
+async def test_a_merge_is_written_and_pinned_in_one_language(
+    ports: _Ports,
+    profile_language: str | None,
+    member_languages: tuple[str, str],
+    asked: str | None,
+    stored: str,
+    source: str,
+) -> None:
+    """The reflector is asked for the profile language, else the members'
+    majority; a split asks for none and the merged text decides. The merged
+    episode, its event (and so its facts) and the log carry the stored one."""
+    _arm_two_members(ports, *member_languages)
+    _arm_profile(ports, profile_language)
+
+    with structlog.testing.capture_logs() as logs:
+        (merged,) = await ports.orchestrator().run(scope=_SCOPE)
+
+    assert ports.reflector.areflect.call_args.kwargs["output_language"] == asked
+    _, (written,) = ports.episode_store.append_many.await_args.args
+    assert (written.language, merged.language) == (stored, stored)
+    (line,) = [entry for entry in logs if entry["event"] == "reflection_merged"]
+    assert (line["language"], line["language_from"]) == (stored, source)
+
+
+async def test_an_update_merge_is_asked_for_the_language_too(ports: _Ports) -> None:
+    old_merged = _stored_episode(
+        entry_id="ep_20260612_0001", parent_id="cl_update", parent_type="cluster"
+    )
+    new_ep = _stored_episode(entry_id="ep_20260613_0001", parent_id="mc_004")
+    _arm_cluster_flow(
+        ports,
+        cluster_id="cl_update",
+        members=[("ep_20260612_0001", "episode"), ("ep_20260613_0001", "episode")],
+        episodes=[new_ep, old_merged],
+        merged_entry_id="ep_20260614_0002",
+        reflected={"cl_update"},
+    )
+    _arm_profile(ports, "Japanese")
+
+    await ports.orchestrator().run(scope=_SCOPE)
+
+    kwargs = ports.reflector.areflect.call_args.kwargs
+    assert ("old_episode" in kwargs, kwargs["output_language"]) == (True, "Japanese")
+
+
+async def test_the_profile_is_read_once_per_owner_and_never_when_idle(
+    ports: _Ports,
+) -> None:
+    _arm_two_members(ports, "English", "English")
+    await ports.orchestrator().run(scope=_SCOPE)
+    ports.profile_store.read.assert_awaited_once_with(_SCOPE)
+
+    ports.profile_store.read.reset_mock()
+    ports.cluster_store.list_for_owner = AsyncMock(
+        return_value=_clusters(("cl_only_one", 1))
+    )
+    assert await ports.orchestrator().run(scope=_SCOPE) == []
+    ports.profile_store.read.assert_not_awaited()
 
 
 @pytest.mark.parametrize("update", [False, True])
@@ -511,6 +621,7 @@ async def test_call_reflector_emits_consolidate_generation_span(
             merged_entry_ids=[],
             is_update=False,
             owner_id="u_alice",
+            output_language=None,
         )
         force_flush()
     finally:
@@ -708,3 +819,19 @@ async def test_finish_skips_swap_when_merged_gone(ports: _Ports) -> None:
     ports.episode_store.deprecate.assert_awaited_once()
     ports.cluster_store.replace_members.assert_not_awaited()
     assert any(e["event"] == "reflection_finish_skipped_merged_gone" for e in logs)
+
+
+async def test_an_unreadable_profile_falls_back_to_the_vote(ports: _Ports) -> None:
+    """A broken ``user.md`` must not fail the owner's run (nor, through the
+    cron run, every other owner's)."""
+    _arm_two_members(ports, "Japanese", "Japanese")
+    ports.profile_store.read = AsyncMock(side_effect=ValueError("bad frontmatter"))
+
+    with structlog.testing.capture_logs() as logs:
+        (merged,) = await ports.orchestrator().run(scope=_SCOPE)
+
+    assert merged.language == "Japanese"
+    assert ports.reflector.areflect.call_args.kwargs["output_language"] == "Japanese"
+    assert [e["event"] for e in logs if e["log_level"] == "warning"] == [
+        "reflection_profile_unreadable"
+    ]

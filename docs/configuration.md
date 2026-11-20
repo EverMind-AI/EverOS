@@ -186,6 +186,7 @@ inherits too, so a template's `api_key = ""` cannot mask `[llm]`'s key.
 | Task | What it calls the model for |
 |---|---|
 | `boundary` | Cutting a session's messages into memcells (user and agent tracks) |
+| `language` | Naming each memcell's conversation language, which its episode and everything extracted from it are written in |
 | `episode` | Extracting each memcell's episode |
 | `summary` | The episode's display summary, written offline from the stored episode (`summarize_episode`) |
 | `atomic_fact` | Atomic-fact extraction |
@@ -205,6 +206,19 @@ level: `EVEROS_LLM__<TASK>__<FIELD>`, e.g. `EVEROS_LLM__BOUNDARY__MODEL`.
 `everos config show` prints what every task resolves to -- model, endpoint host
 and the section each field came from -- and the server logs the same at
 startup (`llm.task.resolved`; the key is never printed).
+
+**The language task's own defaults.** The language call runs in the write
+path, once per memcell before its episode, and its reply is one word. When
+`[llm.language]` leaves these fields unset, they take the language task's own
+values instead of `[llm]`'s:
+
+| Field | Language default | Why |
+|---|---|---|
+| `temperature` | `0.0` | The same conversation is named the same way every time. |
+| `max_tokens` | `64` | The reply is one label; a model that thinks before it answers runs out, so give this task a model with thinking off. |
+| `timeout_seconds` | `3.0` | A synchronous `/add` waits for it. A call that runs out of time only leaves the language to the episode model. |
+| `sdk_max_retries` | `0` | The timeout is the whole wait. |
+| `invalid_reply_retries` | `0` | An unusable reply is given up, as a timeout is. |
 
 **The decider's own defaults.** The decider runs inside a search request, so
 the time and retry budget of one round is bounded by the caller waiting on it,

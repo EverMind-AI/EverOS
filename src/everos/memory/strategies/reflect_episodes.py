@@ -59,6 +59,7 @@ async def reflect_episodes(event: CronTick, deps: MemoryDeps) -> list[Event]:
         episode_index=deps.indexes.episode,
         memcell_store=deps.stores.memcell,
         report_store=deps.stores.reflection_report,
+        profile_store=deps.stores.profile,
         reflector=EpisodeReflector(llm=deps.llms.reflection),
         custom_instructions=deps.instructions.load("reflect"),
     )

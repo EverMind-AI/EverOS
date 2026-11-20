@@ -207,6 +207,7 @@ async def _merge_once(
         episode_index=indexes.episode,
         memcell_store=stores.memcell,
         report_store=stores.reflection_report,
+        profile_store=stores.profile,
         reflector=reflector,
     )
     return await orchestrator.run(scope=_USER)

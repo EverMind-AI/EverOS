@@ -123,9 +123,11 @@ class Episode(BaseModel):
     parent_id: str
     parent_type: EpisodeParentType = "memcell"
     language: str | None = None
-    """The ``OutputLanguage`` value the episode is written in, detected from
-    its text; downstream extractions are pinned to it. ``None`` when unknown
-    (an episode stored before it existed, or text with no letters)."""
+    """The ``OutputLanguage`` value the episode is written in; downstream
+    extractions are pinned to it. A pipeline episode stores the language
+    decided for its memcell, else the one read off its text; a merged episode
+    stores the one Reflection wrote it in. ``None`` when unknown (an episode
+    stored before it existed, or text with no letters)."""
 
     model_config = ConfigDict(extra="allow")
 

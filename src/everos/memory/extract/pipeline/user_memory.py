@@ -6,10 +6,14 @@ Cells / memcell_ids / message_id-mapping / sender lists are produced by
 user-perspective output of one cell: Episode md, plus the
 ``EpisodeExtracted`` event that announces it.
 
-Each cell costs one model call (``EpisodeExtractor.aextract``). Every copy
-is written with :func:`~everos.memory.episode_summary.placeholder_summary`
-as its summary; the ``summarize_episode`` strategy writes the model's preview
-afterwards, from the episode text and in its language.
+Each cell costs two model calls: the language decision
+(:func:`~everos.memory.extract.language.decide_output_language`), then the
+episode (``EpisodeExtractor.aextract``), written in the decided language. The
+language stored on the episode and its event is the decided one, else the one
+the episode's text is written in. Every copy is written with
+:func:`~everos.memory.episode_summary.placeholder_summary` as its summary; the
+``summarize_episode`` strategy writes the model's preview afterwards, from the
+episode text and in its language.
 
 ``MemoryService.add`` runs it cell by cell alongside
 :class:`AgentMemoryPipeline` (the latter only in ``mode="agent"``) and
@@ -23,13 +27,15 @@ from typing import TYPE_CHECKING
 
 from everalgo.types import Episode as AlgoEpisode
 from everalgo.types import MemCell as AlgoMemCell
-from everalgo.user_memory import EpisodeExtractor
+from everalgo.user_memory import EpisodeExtractor, LanguageDetector
 
+from everos.core.observability.logging import get_logger
 from everos.core.observability.tracing import capture_output, memory_span
 from everos.core.utils.language import detect_output_language
 from everos.memory.custom_instructions import CustomInstructions
 from everos.memory.episode_summary import placeholder_summary
 from everos.memory.events import EpisodeCopy, EpisodeExtracted
+from everos.memory.extract.language import decide_output_language
 from everos.memory.extract.llm_retry import retry_llm_output
 from everos.memory.extract.pipeline.base import CellOutcome, PreparedCell
 from everos.memory.models import Episode, IngestResult
@@ -37,6 +43,9 @@ from everos.memory.ports import EpisodeStore, Event, MemcellStore, MemoryRef, Sc
 
 if TYPE_CHECKING:
     from everalgo.llm import LLMClient
+    from everalgo.user_memory import OutputLanguage
+
+logger = get_logger(__name__)
 
 
 class UserMemoryPipeline:
@@ -47,6 +56,7 @@ class UserMemoryPipeline:
         memcell_store: Whether the cell still exists when its episodes are
             written (a session deletion removes it first).
         instructions: Custom instructions for the episode operator.
+        language_llm: LLM for the language decision.
         episode_llm: LLM for the episode extraction.
         tz: The zone message times are shown to the model in.
     """
@@ -57,9 +67,11 @@ class UserMemoryPipeline:
         memcell_store: MemcellStore,
         instructions: CustomInstructions,
         *,
+        language_llm: LLMClient,
         episode_llm: LLMClient,
         tz: tzinfo = UTC,
     ) -> None:
+        self._language_detector = LanguageDetector(llm=language_llm)
         self._ep_ext = EpisodeExtractor(llm=episode_llm)
         self._episode_store = episode_store
         self._memcell_store = memcell_store
@@ -79,10 +91,11 @@ class UserMemoryPipeline:
         md_paths: list[str] = []
         user_senders = _unique_user_senders(cell)
         if user_senders:
-            algo_ep = await self._extract_episode(ingested, prepared)
-            # The model writes in the conversation's language; what it chose
-            # pins every extraction downstream of this episode.
-            language = detect_output_language(algo_ep.episode)
+            decided = await decide_output_language(
+                self._language_detector, cell, memcell_id=memcell_id
+            )
+            algo_ep = await self._extract_episode(ingested, prepared, decided)
+            language = _stored_language(decided, algo_ep.episode)
             written = await self._write_copies(
                 ingested, prepared, algo_ep, senders=user_senders, language=language
             )
@@ -101,6 +114,13 @@ class UserMemoryPipeline:
                         language=language,
                     )
                 )
+                logger.info(
+                    "episode_written",
+                    memcell_id=memcell_id,
+                    owners=len(written),
+                    language=language,
+                    language_from="decided" if decided else "text",
+                )
         return CellOutcome(
             message_count=len(cell.items),
             events=events,
@@ -108,13 +128,17 @@ class UserMemoryPipeline:
         )
 
     async def _extract_episode(
-        self, ingested: IngestResult, prepared: PreparedCell
+        self,
+        ingested: IngestResult,
+        prepared: PreparedCell,
+        language: OutputLanguage | None,
     ) -> AlgoEpisode:
         """One whole-cell episode, shared by every user sender of the cell.
 
         ``sender_id=None`` binds the episode to no user; the fan-out to one
-        copy per sender happens in markdown only, so a cell costs one model
-        call. An unusable reply is tried again by :func:`retry_llm_output`.
+        copy per sender happens in markdown only, so a cell costs one episode
+        call. It is written in ``language``; ``None`` leaves the language to
+        the model. An unusable reply is tried again by :func:`retry_llm_output`.
         """
         extractor = self._ep_ext
         custom_instructions = self._instructions.load("episode_extract")
@@ -124,6 +148,7 @@ class UserMemoryPipeline:
                 prepared.cell,
                 sender_id=None,
                 custom_instructions=custom_instructions,
+                output_language=language,
                 tz=self._tz,
             )
 
@@ -223,6 +248,15 @@ class UserMemoryPipeline:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _stored_language(decided: OutputLanguage | None, episode: str) -> str | None:
+    """The language an episode is stored with: the decided one, else its text's.
+
+    It pins every extraction downstream of the episode. Read off the text only
+    when nothing was decided, since then the model chose the language.
+    """
+    return decided.value if decided else detect_output_language(episode)
 
 
 def _unique_user_senders(cell: AlgoMemCell) -> list[str]:
