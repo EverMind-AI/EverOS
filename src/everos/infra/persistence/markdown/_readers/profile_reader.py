@@ -58,7 +58,12 @@ class ProfileReader:
         path = self._resolve_path(scope_id, schema, app_id, project_id)
         if not await anyio.Path(path).is_file():
             return None
-        parsed = await MarkdownReader.read(path)
+        try:
+            parsed = await MarkdownReader.read(path)
+        except FileNotFoundError:
+            # A deletion can remove the file between the check and the read;
+            # "not yet written" and "just removed" are both absent.
+            return None
         frontmatter = schema.model_validate(parsed.frontmatter)
         body = parsed.body.rstrip("\n")
         return frontmatter, body

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar, Literal
 
+import anyio
 import pytest
 from pydantic import ValidationError
 
@@ -61,6 +62,30 @@ async def test_read_returns_typed_frontmatter_and_body(
 
 async def test_read_returns_none_when_missing(reader: ProfileReader) -> None:
     assert await reader.read("u_ghost", schema=_UserProfileFM) is None
+
+
+async def test_read_returns_none_when_file_vanishes_after_stat(
+    writer: ProfileWriter, reader: ProfileReader, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deletion between the is_file check and the read is "not found"."""
+    await writer.write(
+        "u_jason",
+        frontmatter=_UserProfileFM(
+            id="demo_user_profile_u_jason",
+            type="demo_user_profile",
+            user_id="u_jason",
+        ),
+        body="b",
+    )
+    original_is_file = anyio.Path.is_file
+
+    async def is_file_then_delete(self: anyio.Path) -> bool:
+        result = await original_is_file(self)
+        await self.unlink()
+        return result
+
+    monkeypatch.setattr(anyio.Path, "is_file", is_file_then_delete)
+    assert await reader.read("u_jason", schema=_UserProfileFM) is None
 
 
 async def test_read_round_trip_through_extra_fields(
