@@ -306,11 +306,14 @@ class PurgeMachine(RuleBasedStateMachine):
 
     @rule()
     def deliver_one(self) -> None:
+        if self.crashed:  # a dead process delivers nothing until the restart
+            return
         self.run(self.queue.drain_once())
 
     @rule()
     def claim_and_crash(self) -> None:
         """A row claimed and left ``processing`` (the process died in it)."""
+        self.crashed = True
         self.run(self.queue._inbox.claim_next())
 
     @rule()
