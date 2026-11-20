@@ -13,8 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a user sender first gets one short call on the new `language` LLM task
   (everalgo `LanguageDetector`), which names the language of its
   conversation -- Chinese, Japanese or English, any other language as English
-  -- from what the participants say to each other, not from pasted code,
-  documents or names. The episode is extracted in that language and stores
+  -- from the sentences the participants write to each other, not from
+  pasted code or documents, names, or a few words of another language mixed
+  in. The episode is extracted in that language and stores
   it, and its summary, atomic facts and (on first build) profile follow it.
   A failed or slow call leaves the language to the episode model, as before,
   and the episode stores the language its text is written in; a memcell with
@@ -56,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `language`; `user_profile_extracted` gains `language` and `language_from`
   (`frozen` or `event`); `reflection_merged` gains `language` and
   `language_from` (`profile`, `vote` or `text`).
-- **`everalgo-user-memory` 0.9.0 -> 0.10.0**, which only adds
+- **`everalgo-user-memory` 0.9.0 -> 0.10.1**, which only adds
   `LanguageDetector`.
 - **Episode `hybrid` search ranks three recall lanes.** BM25 and the episode
   vector are fused with an atomic-fact lane (200 facts max-pooled onto at most

@@ -156,8 +156,9 @@ index catches up asynchronously.
   episode's opening, cut and closed with `…`) that the OME replaces with
   a model-written preview shortly after.
 - **Language.** The language call answers Chinese, Japanese or English (any
-  other language is written in English), judging what the participants say
-  to each other rather than pasted code, documents or names. The episode
+  other language is written in English), judging the sentences the
+  participants write to each other rather than pasted code or documents,
+  names, or a few words of another language mixed in. The episode
   stores that language, and its summary and atomic facts are written in it;
   the profile takes the language of the first episode it is built from and
   keeps it, and a Reflection merge follows the profile's language (else the
