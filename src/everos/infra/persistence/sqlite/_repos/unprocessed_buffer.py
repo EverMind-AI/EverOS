@@ -14,7 +14,7 @@ Exposes:
 
 from __future__ import annotations
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, literal_column, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from everos.infra.persistence.sqlite._base.repository import RepoBase
@@ -34,7 +34,11 @@ class UnprocessedBufferRepo(RepoBase[UnprocessedBuffer]):
         app_id: str = "default",
         project_id: str = "default",
     ) -> list[UnprocessedBuffer]:
-        """Return all rows of (app, project, session, track), ts asc."""
+        """Return all rows of (app, project, session, track), ts asc.
+
+        Rows sharing a timestamp come back in the order they were written
+        (``rowid``): the buffer is always rewritten whole, in merged order.
+        """
         async with session_scope(self._factory) as s:
             stmt = (
                 select(UnprocessedBuffer)
@@ -44,7 +48,7 @@ class UnprocessedBufferRepo(RepoBase[UnprocessedBuffer]):
                     UnprocessedBuffer.session_id == session_id,
                     UnprocessedBuffer.track == track,
                 )
-                .order_by(UnprocessedBuffer.timestamp.asc())  # type: ignore[union-attr]
+                .order_by(UnprocessedBuffer.timestamp.asc(), literal_column("rowid"))  # type: ignore[union-attr]
             )
             return list((await s.execute(stmt)).scalars().all())
 

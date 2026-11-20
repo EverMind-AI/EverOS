@@ -1,7 +1,9 @@
 """Laws of the merge, rank and parse helpers on the memorize and search paths.
 
 1. ``merge_dedupe_sort`` (boundary stage): the result is sorted by
-   ``(timestamp, message_id)``, holds each id once, its id set is the union
+   timestamp, rows sharing one keep arrival order (buffered first, in
+   buffer order, then new ones in request order -- ids carry no order since
+   #274), it holds each id once, its id set is the union
    of both inputs, a buffered message wins over a new one with the same id,
    and merging again changes nothing. ``buffered`` comes from a table keyed
    by ``message_id``, so it never holds an id twice; the law is stated on
@@ -80,8 +82,12 @@ def test_merge_dedupe_sort_laws(
     buffered: list[CanonicalMessage], new: list[CanonicalMessage]
 ) -> None:
     merged = merge_dedupe_sort(buffered, new)
-    keys = [(m.timestamp, m.message_id) for m in merged]
-    assert keys == sorted(keys)
+    assert [m.timestamp for m in merged] == sorted(m.timestamp for m in merged)
+    arrival = {}
+    for m in [*buffered, *new]:
+        arrival.setdefault(m.message_id, len(arrival))
+    keys = [(m.timestamp, arrival[m.message_id]) for m in merged]
+    assert keys == sorted(keys), "a tie keeps arrival order"
     ids = [m.message_id for m in merged]
     assert len(ids) == len(set(ids))
     assert set(ids) == {m.message_id for m in buffered} | {m.message_id for m in new}

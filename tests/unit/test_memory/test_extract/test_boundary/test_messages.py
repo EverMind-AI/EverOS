@@ -88,12 +88,15 @@ def test_merge_dedupe_sort_dedupes_by_message_id() -> None:
     assert m1.text == "hi"  # original, not "overwritten?"
 
 
-def test_merge_sorts_by_timestamp_then_id() -> None:
-    a = _msg("m_b", "user", ts_seconds=100)
-    b = _msg("m_a", "user", ts_seconds=100)
-    c = _msg("m_c", "user", ts_seconds=50)
-    merged = merge_dedupe_sort([], [a, b, c])
-    assert [m.message_id for m in merged] == ["m_c", "m_a", "m_b"]
+def test_merge_sorts_by_timestamp_and_keeps_arrival_order_on_a_tie() -> None:
+    """Ids carry no order (#274): a tie keeps the order rows arrived in, so a
+    tool result whose id happens to sort first still follows its call."""
+    call = _msg("m_z", "assistant", ts_seconds=100)
+    result = _msg("m_a", "tool", ts_seconds=100)
+    earlier = _msg("m_c", "user", ts_seconds=50)
+    held = _msg("m_y", "user", ts_seconds=100)
+    merged = merge_dedupe_sort([held], [call, result, earlier])
+    assert [m.message_id for m in merged] == ["m_c", "m_y", "m_z", "m_a"]
 
 
 # ── apply_cuts ───────────────────────────────────────────────────────────

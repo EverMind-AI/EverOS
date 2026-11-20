@@ -186,6 +186,15 @@ def _record(memcell_id: str, *messages: CanonicalMessage) -> MemcellRecord:
     )
 
 
+async def test_buffer_rows_of_one_timestamp_come_back_in_write_order(
+    stores: _Stores,
+) -> None:
+    """Ids carry no order, so a tie must not fall back to the id's spelling."""
+    call, result = _message("m_z", 1), _message("m_a", 1)
+    await stores.buffer.keep(_SESSION, [call, result], last_message_ts=call.timestamp)
+    assert [m.message_id for m in await stores.buffer.list(_SESSION)] == ["m_z", "m_a"]
+
+
 async def test_keep_buffers_messages_and_stamps_the_last_message(
     stores: _Stores,
 ) -> None:
@@ -216,6 +225,23 @@ async def test_cut_records_the_cells_and_buffers_only_the_tail(
     assert status is not None
     assert status[0] == last_message  # cut leaves last_message_ts alone
     assert status[1] is not None
+
+
+async def test_already_cut_names_what_this_sessions_memcells_hold(
+    stores: _Stores,
+) -> None:
+    m1, m2, m3 = _message("m1", 1), _message("m2", 2), _message("m3", 3)
+    other = SessionKey(app_id="app", project_id="proj", session_id="s2")
+    await stores.buffer.cut(
+        _SESSION, [_record("mc_1", m1, m2)], tail=[m3], last_memcell_ts=m2.timestamp
+    )
+    await stores.buffer.cut(
+        other, [_record("mc_2", m3)], tail=[], last_memcell_ts=m3.timestamp
+    )
+
+    assert await stores.buffer.already_cut(_SESSION, ["m1", "m3", "m9"]) == {"m1"}
+    assert await stores.buffer.already_cut(other, ["m1", "m3"]) == {"m3"}
+    assert await stores.buffer.already_cut(_SESSION, []) == set()
 
 
 async def test_keep_leaves_the_last_memcell_stamp_alone(stores: _Stores) -> None:

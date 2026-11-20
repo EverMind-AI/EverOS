@@ -30,7 +30,7 @@ from everalgo.testing import FakeLLMClient
 
 from everos.infra.ome.records import RunStatus
 from everos.infra.persistence import MemoryRoot
-from everos.memory.extract.ingest.id_gen import gen_message_id
+from everos.memory.extract.ingest import message_ids
 from everos.service import (
     MemorizeResult,
     build_application,
@@ -251,7 +251,7 @@ async def test_agent_mode_cut_files_each_tool_row_with_its_segment(
     )
 
     assert result.status == "extracted"
-    ids = [gen_message_id(session, m["timestamp"], i) for i, m in enumerate(messages)]
+    ids = message_ids(session, messages)
     cells = [json.loads(row["message_ids_json"]) for row in _memcell_rows(tmp_path)]
     assert cells == [ids[:4], ids[4:]]
 

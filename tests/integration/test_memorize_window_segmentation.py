@@ -45,6 +45,7 @@ from everalgo.testing import FakeLLMClient
 from sqlalchemy import text
 
 from everos.infra.persistence import MemoryRoot
+from everos.memory.extract.ingest import message_ids
 from everos.service import (
     MemorizeResult,
     MemoryService,
@@ -301,8 +302,7 @@ async def test_second_add_consumes_prior_buffer_and_replaces_tail(
     assert new_tail_id not in all_cell_msgs
 
     # Conservation: 6 distinct message ids covered across cells + buffer.
-    # (We avoid hard-coding id format here — gen_message_id encodes the
-    # per-batch index, not a global one.)
+    # (We avoid hard-coding the id format here; see ingest.message_ids.)
     covered = all_cell_msgs | {new_tail_id}
     assert len(covered) == 6, (
         f"expected 6 distinct ids covered, got {len(covered)}: {covered}"
@@ -386,3 +386,77 @@ async def test_three_sequential_adds_conservation_no_loss(
     )
     # Disjoint
     assert not (in_cells & in_buffer)
+
+
+# ---------------------------------------------------------------------------
+# Resends (#274): a client that retries after a timeout resends messages the
+# first call may already have cut; they must not be cut a second time.
+# ---------------------------------------------------------------------------
+
+
+async def test_resent_batch_is_not_cut_twice(
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
+) -> None:
+    """[m0,m1,m2] cut after 2, then the identical request again."""
+    await memorize_env_scripted(fake_llm=memorize_llm([[2], []]))
+    session = "s_resend"
+    batch = {"session_id": session, "messages": [_msg(i) for i in range(3)]}
+
+    await memorize(batch)
+    await memorize(batch)
+
+    cells = await _memcell_rows(storage, session)
+    assert [len(ids) for _, ids in cells] == [2], cells
+    assert [mid for mid, _ in await _buffer_rows(storage, session)] == [
+        message_ids(session, [_msg(2)])[0]
+    ]
+
+
+async def test_regrouped_resend_keeps_ids_and_drops_what_was_cut(
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
+) -> None:
+    """The retry carries m1 at another position and one new message, m3."""
+    await memorize_env_scripted(fake_llm=memorize_llm([[2], []]))
+    session = "s_regroup"
+
+    await memorize({"session_id": session, "messages": [_msg(i) for i in range(3)]})
+    await memorize({"session_id": session, "messages": [_msg(i) for i in (1, 2, 3)]})
+
+    cells = await _memcell_rows(storage, session)
+    assert len(cells) == 1, cells
+    buffered = [mid for mid, _ in await _buffer_rows(storage, session)]
+    assert buffered == [message_ids(session, [_msg(i)])[0] for i in (2, 3)]
+
+
+async def test_one_millisecond_resent_in_parts_is_not_cut_twice(
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
+) -> None:
+    """[A, B, C] share one millisecond and are cut after B; the retry carries B
+    alone. B keeps its id though its place in the request changed."""
+    await memorize_env_scripted(fake_llm=memorize_llm([[2], []]))
+    session = "s_same_ms_parts"
+    batch = [_msg(0) | {"content": f"part-{i}"} for i in range(3)]
+
+    await memorize({"session_id": session, "messages": batch})
+    await memorize({"session_id": session, "messages": [batch[1]]})
+
+    cells = await _memcell_rows(storage, session)
+    assert [len(ids) for _, ids in cells] == [2], cells
+    assert [mid for mid, _ in await _buffer_rows(storage, session)] == message_ids(
+        session, [batch[2]]
+    )
+
+
+async def test_two_messages_with_one_millisecond_in_two_requests_both_stay(
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage
+) -> None:
+    """Different messages, same timestamp, each first in its request."""
+    await memorize_env_scripted(fake_llm=memorize_llm([[], []]))
+    session = "s_same_ms"
+    first = _msg(0)
+    second = _msg(0) | {"content": "a different message"}
+
+    await memorize({"session_id": session, "messages": [first]})
+    await memorize({"session_id": session, "messages": [second]})
+
+    assert len(await _buffer_rows(storage, session)) == 2

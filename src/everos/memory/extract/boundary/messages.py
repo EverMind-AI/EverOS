@@ -52,11 +52,17 @@ def filter_for_mode(
 def merge_dedupe_sort(
     buffered: Sequence[CanonicalMessage], new: Sequence[CanonicalMessage]
 ) -> list[CanonicalMessage]:
-    """Union by ``message_id`` (a buffered row wins), sorted by ``(timestamp, id)``."""
+    """Union by ``message_id`` (a buffered row wins), sorted by timestamp.
+
+    The sort is stable: rows sharing a timestamp keep arrival order, buffered
+    rows (in buffer order) before this call's (in request order). Ids carry no
+    order of their own (``ingest.message_ids``), so a tool result never sorts
+    ahead of the call it answers on a tie.
+    """
     seen: dict[str, CanonicalMessage] = {m.message_id: m for m in buffered}
     for m in new:
         seen.setdefault(m.message_id, m)
-    return sorted(seen.values(), key=lambda m: (m.timestamp, m.message_id))
+    return sorted(seen.values(), key=lambda m: m.timestamp)
 
 
 class Segmentation(NamedTuple):

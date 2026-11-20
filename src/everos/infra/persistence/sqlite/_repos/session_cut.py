@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Sequence
 
-from sqlalchemy import delete, insert, update
+from sqlalchemy import bindparam, delete, insert, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from everos.core.utils.datetime import get_utc_now
@@ -67,6 +67,38 @@ class SessionCutRepo(RepoBase[UnprocessedBuffer]):
                 await _stamp(s, keys, "last_memcell_ts", last_memcell_ts)
             await _replace_buffer(s, keys, tail)
             await s.commit()
+
+    async def already_cut(
+        self,
+        session_id: str,
+        track: str,
+        message_ids: Sequence[str],
+        *,
+        app_id: str,
+        project_id: str,
+    ) -> set[str]:
+        """Which of ``message_ids`` a memcell of the (session, track) holds.
+
+        The memcells a cut inserts are its record of what it consumed, in the
+        same transaction, so a message is "already cut" exactly when one of
+        them lists it.
+        """
+        if not message_ids:
+            return set()
+        # ponytail: scans the session's memcells; a (session, message_id)
+        # table if one session ever holds enough memcells for this to show.
+        stmt = text(
+            "SELECT DISTINCT j.value FROM memcell AS m, "
+            "json_each(m.message_ids_json) AS j "
+            "WHERE m.app_id = :app_id AND m.project_id = :project_id "
+            "AND m.session_id = :session_id AND m.track = :track "
+            "AND j.value IN :ids"
+        ).bindparams(bindparam("ids", expanding=True))
+        params = _keys(app_id, project_id, session_id, track) | {
+            "ids": list(message_ids)
+        }
+        async with session_scope(self._factory) as s:
+            return set((await s.execute(stmt, params)).scalars())
 
 
 def _keys(app_id: str, project_id: str, session_id: str, track: str) -> dict[str, str]:

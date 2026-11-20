@@ -74,6 +74,7 @@ from everos.infra.persistence.sqlite._repos.unprocessed_buffer import (
 from everos.infra.persistence.sqlite._tables import Memcell
 from everos.memory.extract.boundary import BoundaryDetection
 from everos.memory.extract.boundary.quarantine import POISON_CALLS
+from everos.memory.extract.ingest import message_ids
 from everos.memory.extract.pipeline import CellOutcome
 from tests.fakes import (
     UNUSABLE_REPLY,
@@ -219,8 +220,7 @@ async def _jittered(
         async def call(k: int, session: str, kind: str, n: int, pause: float) -> None:
             await asyncio.sleep(pause)
             msgs = []
-            ids = []
-            for idx in range(n if kind != "flush" else 0):
+            for _ in range(n if kind != "flush" else 0):
                 next_ts[0] += 1
                 ts = BASE_TS + next_ts[0]
                 msgs.append(
@@ -231,10 +231,9 @@ async def _jittered(
                         "role": "user",
                     }
                 )
-                mid = f"m_{session}_{ts}_{idx:03d}"
-                ids.append(mid)
                 if next_ts[0] in run.poison_positions:
                     run.poison_texts.add(f"m{next_ts[0]}")
+            ids = message_ids(session, msgs)
             payload = {"session_id": session, "messages": msgs}
             run.note(f"call#{k} {kind} {session} n={len(msgs)}")
             try:
