@@ -567,6 +567,9 @@ dev = [
     # [otel] stack is always present in the dev / CI environment.
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+    # MemTrace tests must run in the default dev / CI environment without
+    # installing the optional [memtrace] extra explicitly.
+    "smartcomment>=0.1.2",
     "pymilvus>=3.0.0",
     # The NLTK tokenizer tests must run, not skip, so the [nltk] extra is present too.
     "nltk==3.9.4",

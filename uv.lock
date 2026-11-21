@@ -662,6 +662,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-rerunfailures" },
     { name = "ruff" },
+    { name = "smartcomment" },
 ]
 
 [package.metadata]
@@ -724,6 +725,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "pytest-rerunfailures", specifier = ">=15.0" },
     { name = "ruff", specifier = ">=0.8.0" },
+    { name = "smartcomment", specifier = ">=0.1.2" },
 ]
 
 [[package]]
