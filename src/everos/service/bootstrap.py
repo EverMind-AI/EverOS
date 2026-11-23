@@ -90,6 +90,7 @@ from everos.infra.cascade import (
     DeleteFence,
     FencedIndexEraser,
 )
+from everos.infra.memtrace import MemTraceTracker
 from everos.infra.ome import (
     OfflineEngine,
     OMEConfig,
@@ -196,6 +197,9 @@ class Application:
     _admin: CascadeAdmin = dataclasses.field(repr=False)
     _engine: OfflineEngine = dataclasses.field(repr=False)
     _root_lock: OmeLock = dataclasses.field(repr=False)
+    _memtrace_tracker: MemTraceTracker | None = dataclasses.field(
+        default=None, repr=False
+    )
     _stack: contextlib.AsyncExitStack = dataclasses.field(
         default_factory=contextlib.AsyncExitStack, repr=False
     )
@@ -231,6 +235,14 @@ class Application:
             raise
 
     async def _start_components(self) -> None:
+        tracker = self._memtrace_tracker
+        if tracker is not None:
+            logger.info(
+                "memtrace_tracker_status",
+                enabled=tracker.enabled,
+                out_dir=str(tracker.out_dir),
+                smartcomment_available=tracker.smartcomment_available,
+            )
         scores = await init_score_sink(self._settings.observability)
         self._stack.push_async_callback(_shielded("score_sink", shutdown_score_sink))
         logger.info("tracing_score_sink_ready", enabled=scores)
@@ -295,6 +307,8 @@ class Application:
     async def _close_components(self) -> None:
         try:
             await self._stack.aclose()
+            if self._memtrace_tracker is not None:
+                await _shielded("memtrace", self._memtrace_tracker.sync_now)()
             await _shielded("index", self._admin.close_index)()
             await _shielded("sqlite", self._admin.dispose)()
             shutdown_tracing()
@@ -366,6 +380,8 @@ def build_application(
     root = MemoryRoot(resolve_root())
     database = SqliteDatabase(root, settings.sqlite)
     sqlite = SqliteRepos.over(database)
+    memtrace_tracker = MemTraceTracker()
+    memtrace_tracker.set_memcell_repo(sqlite.memcell)
     index = build_derived_index(settings, root)
     stores = build_stores(root, sqlite)
     indexes = build_indexes(index)
@@ -411,6 +427,7 @@ def build_application(
         eraser,
         marks,
         root,
+        memtrace_tracker,
     )
     engine.set_run_gate(PurgeRunGate(marks))
     purge = PurgeService(
@@ -465,6 +482,7 @@ def build_application(
         ),
         purge=purge,
         capabilities=capabilities,
+        _memtrace_tracker=memtrace_tracker,
         _settings=settings,
         _root=root,
         _admin=admin,
@@ -627,11 +645,13 @@ def _build_memory_service(
     index_eraser: IndexEraser,
     purge_marks: PurgeMarks,
     root: MemoryRoot,
+    memtrace_tracker: MemTraceTracker,
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
     return MemoryService(
         index_eraser=index_eraser,
+        memtrace_tracker=memtrace_tracker,
         purge_marks=purge_marks,
         input_log=InputLogWriter(
             root=root.root,
