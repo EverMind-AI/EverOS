@@ -89,8 +89,13 @@ base_url = "https://openrouter.ai/api/v1"
 # response_format_mode = "json_schema"
 # Extra attempts of the identical request after a reply that fails validation.
 # invalid_reply_retries = 1
-# Deadline of one request in seconds. Raise it for slow self-hosted endpoints;
-# one extraction call may take up to (invalid_reply_retries + 1) x this.
+# Extra attempts after a reply that reached the output cap (max_tokens), counted
+# apart from invalid_reply_retries: a runaway generation usually finishes when sent
+# again. A reply long by nature needs a larger max_tokens, which no retry raises.
+# truncated_reply_retries = 1
+# Deadline of one request in seconds. Raise it for slow self-hosted endpoints; one
+# extraction call may take up to
+# (invalid_reply_retries + truncated_reply_retries + 1) x this.
 # timeout_seconds = 60.0
 # Sent only when a call names none (agentic search keeps its own temperatures);
 # left unset, the request carries neither.
@@ -179,6 +184,7 @@ max_concurrency = 4
 # See [llm].
 # response_format_mode = "json_schema"
 # invalid_reply_retries = 1
+# truncated_reply_retries = 1
 # file:// content-item support (read locally by EverOS, not everalgo).
 # file_uri_allow_dirs: empty = allow any readable file (local-first default);
 # list base dirs to confine reads when the API is exposed.
