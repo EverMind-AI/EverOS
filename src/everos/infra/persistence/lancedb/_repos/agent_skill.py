@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from everos.infra.persistence.lancedb._base.indexes import VECTOR_QUERY_NPROBES
+from everos.infra.persistence.lancedb._base.indexes import (
+    VECTOR_QUERY_NPROBES,
+    VECTOR_QUERY_REFINE_FACTOR,
+)
 from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
 
 from ...records.agent_skill import AgentSkill
@@ -56,6 +59,7 @@ class _AgentSkillRepo(LanceIndexContract[AgentSkill], LanceRepoBase[AgentSkill])
             .nearest_to(list(query_vector))
             .distance_type("cosine")
             .nprobes(VECTOR_QUERY_NPROBES)
+            .refine_factor(VECTOR_QUERY_REFINE_FACTOR)
             .where(_in_cluster(owner_id, cluster_id))
             .limit(top_k)
             .to_list()

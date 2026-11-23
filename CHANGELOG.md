@@ -96,6 +96,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server start` raises the soft limit to 32768 instead of 8192 (still capped
   at the hard limit), and where macOS refuses that it steps down rather than
   staying at 256.
+- **A vector search no longer reads its whole index each time.** The vector
+  index was IVF_FLAT, which stores every vector whole (0.66 GB for 161k
+  atomic facts); the 16 MB index cache could not hold it, so each vector,
+  hybrid or agentic search read about half a gigabyte of it again: about
+  1.1 GB of transient memory and 449 ms per query. It is now IVF_RQ (one bit
+  per dimension, 24 MB for the same facts) with each query's best
+  candidates re-ranked on their stored vectors (`refine_factor` 5): 35-130 MB
+  and 20-50 ms per query. A query now probes 64 partitions instead of 32,
+  which costs nothing measurable on 1-bit codes, so results match exact search
+  up to ~260k rows per table (top 200 identical for 300 real facts at 161k
+  rows; 32 probes matched 99.3% of the top 10). An existing IVF_FLAT index
+  is rebuilt as IVF_RQ once by the cascade worker's next index upkeep
+  (seconds at 161k rows); searches keep using the old index until the new
+  one is in place.
 
 ## [1.7.1] - 2026-11-20
 
