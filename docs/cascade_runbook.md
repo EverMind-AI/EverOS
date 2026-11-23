@@ -405,9 +405,19 @@ on the real `Episode` schema):
 | `2 MB` | ~45 | ~5 ms | macOS default 256 (5× headroom) |
 | `4 MB` | ~52 | ~3 ms | macOS default 256 |
 | `8 MB` | ~140 | ~2.4 ms | macOS default 256 (1.8× headroom) |
-| **`16 MB`** (default) | **~290** | **~2.3 ms** | **Linux default 1024 (3.5× headroom); macOS needs `ulimit -n 1024`** |
+| **`16 MB`** (default, soft limit < 8192) | **~290** | **~2.3 ms** | **Linux default 1024 (3.5× headroom); macOS needs `ulimit -n 1024`** |
 | `32 MB` | ~630 | ~1.4 ms | Linux default 1024 (1.6× headroom) |
+| **`64 MB`** (default, soft limit ≥ 8192) | ~1,200 extrapolated | — | 8192 (≥ 6× headroom); 32768 after `everos server start` |
 | `unbounded` | grows forever | ~1.3 ms | NEVER use in a daemon |
+
+Unset, the cap is chosen when the connection opens from the process's
+open-file soft limit: 64 MB at 8192 or above, else 16 MB (the session
+logs `lancedb_session_caches`). 64 MB holds a 161k-row IVF_RQ vector
+index (24 MB) and its BM25 readers, so hybrid search stops re-reading them
+(three lanes 30.5 → 20.3 ms; 128 MB was no faster). Its row above is a
+linear extrapolation of this table; a separate churn of 200 write +
+optimize + retrain rounds on two 161k-row tables peaked at 75 descriptors
+at 64 MB, 65 at 16 MB, and climbed to 696 unbounded (2026-11).
 
 EverOS's measured steady-state working set after a `rebuild_indexes`
 cycle is roughly **50-100 readers / 3-6 MB resident** (5 tables × ~7

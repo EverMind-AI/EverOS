@@ -22,6 +22,37 @@ import lancedb
 from lancedb import AsyncConnection
 
 from everos.config import LanceDBSettings
+from everos.core.observability.logging import get_logger
+from everos.core.utils.open_files import open_file_usage
+
+logger = get_logger(__name__)
+
+INDEX_CACHE_BYTES = 16 * 1024 * 1024
+"""Index cache when the open-file soft limit is low or unknown: the cap
+measured to hold descriptors near 290 (``LanceDBSettings``)."""
+LARGE_INDEX_CACHE_BYTES = 64 * 1024 * 1024
+"""Index cache when the soft limit is at least
+:data:`LARGE_INDEX_CACHE_MIN_SOFT_LIMIT`. Holds a 161k-row table's IVF_RQ
+index (24 MB) with its BM25 readers, so hybrid search stops re-reading them
+(three lanes 30.5 -> 20.3 ms; 128 MB was no faster). 200 rounds of writes,
+optimize and retrains kept descriptors flat (max 75 against 65 at 16 MB;
+unbounded climbed to 696), 2026-11. Never larger: the cap is what bounds the
+stale readers LanceDB keeps after optimize."""
+LARGE_INDEX_CACHE_MIN_SOFT_LIMIT = 8192
+"""``everos server start`` raises the soft limit to 32768 where the hard
+limit allows; a host left at 1024 (direct ``uvicorn``, a container's hard
+limit) keeps the 16 MB cap."""
+
+
+def index_cache_bytes(configured: int | None, usage: tuple[int, int] | None) -> int:
+    """The index cache cap: ``configured`` when set, else chosen from the
+    open-file soft limit in ``usage`` (``(open, soft)``; ``None`` where it
+    cannot be read, e.g. Windows)."""
+    if configured is not None:
+        return configured
+    if usage is not None and usage[1] >= LARGE_INDEX_CACHE_MIN_SOFT_LIMIT:
+        return LARGE_INDEX_CACHE_BYTES
+    return INDEX_CACHE_BYTES
 
 
 async def open_lancedb_connection(
@@ -35,8 +66,9 @@ async def open_lancedb_connection(
             ``MemoryRoot.lancedb_dir``). Created if missing.
         lancedb_settings: Tunables; the ``read_consistency_seconds`` field
             is converted to a :class:`~datetime.timedelta`, and
-            ``index_cache_size_bytes`` / ``metadata_cache_size_bytes`` cap
-            the session's two caches.
+            ``index_cache_size_bytes`` (or :func:`index_cache_bytes`'s choice
+            when unset) / ``metadata_cache_size_bytes`` cap the session's two
+            caches.
 
     Returns:
         An :class:`AsyncConnection` ready for table operations.
@@ -57,9 +89,17 @@ async def open_lancedb_connection(
     # (lance-format/lance#7718), which is why leaving *that* cache unbounded
     # — as this module used to — is what made the count grow without end.
     # See ``LanceDBSettings`` for the measurement behind both sizes.
+    usage = open_file_usage()
+    index_cache = index_cache_bytes(lancedb_settings.index_cache_size_bytes, usage)
     session = lancedb.Session(
-        index_cache_size_bytes=lancedb_settings.index_cache_size_bytes,
+        index_cache_size_bytes=index_cache,
         metadata_cache_size_bytes=lancedb_settings.metadata_cache_size_bytes,
+    )
+    logger.info(
+        "lancedb_session_caches",
+        index_cache_bytes=index_cache,
+        metadata_cache_bytes=lancedb_settings.metadata_cache_size_bytes,
+        open_file_soft_limit=usage[1] if usage else None,
     )
 
     return await lancedb.connect_async(

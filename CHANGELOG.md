@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The LanceDB index cache is 64 MB where the open-file limit allows.**
+  `[lancedb] index_cache_size_bytes` is now unset by default and chosen when
+  the connection opens: 64 MB when the process's open-file soft limit is at
+  least 8192 (`everos server start` raises it to 32768 where the hard limit
+  allows), else the previous 16 MB. 64 MB holds a 161k-row vector index and
+  its BM25 readers, so a hybrid search's three lanes stop re-reading them
+  (30.5 -> 20.3 ms); 200 rounds of writes, optimize and index retrains kept
+  open descriptors flat (peak 75, against 65 at 16 MB and 696 and climbing
+  with no cap). The cap still bounds the stale index readers LanceDB keeps
+  after optimize, so it never goes above 64 MB. A configured value is used
+  as before; the choice is logged as `lancedb_session_caches`.
 - **An installed EverOS starts without downloading the token-counting
   encoding.** The agent track counts prompt tokens with tiktoken's
   `o200k_base` encoding, which tiktoken downloads (3.6 MB) the first time a

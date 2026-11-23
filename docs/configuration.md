@@ -103,7 +103,7 @@ everos init --root /data/everos
 |---|---|---|---|
 | `read_consistency_seconds` | float \| null | `null` | Read consistency interval. `null` = no check, `0` = strict, `>0` = eventual. |
 | `max_concurrent_queries` | int | `32` | Search queries (keyword, vector, filtered scan) one process runs on LanceDB at once; the rest wait for a slot. Bounds the files a burst of searches holds open and the result conversion it puts on the event loop. A query holding a slot also waits (up to 10 s) while the process holds 75% of its open-file soft limit. Metrics: `everos_lancedb_query_wait_seconds` (both waits), `everos_lancedb_queries_in_flight`, `everos_lancedb_fd_headroom_waits_total`. |
-| `index_cache_size_bytes` | int | `16777216` | Upper bound on LanceDB index cache (16 MB default). |
+| `index_cache_size_bytes` | int \| null | `null` (auto) | Upper bound on LanceDB's index cache. Unset: 64 MB when the process's open-file soft limit is at least 8192 (`everos server start` raises it to 32768 where the hard limit allows), else 16 MB; the cap bounds the descriptors stale index readers hold. Set a value to pin it. |
 
 ### `[index]`
 
