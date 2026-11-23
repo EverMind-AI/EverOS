@@ -68,7 +68,8 @@ def _write_foresights(root: Path) -> None:
             "**parent_id**: mc_1\n### Foresight\n"
             f"Prepare for trip {i}.\n<!-- /entry:fs_{i} -->"
             for i in range(2)
-        )
+        ),
+        encoding="utf-8",
     )
 
 
@@ -147,7 +148,7 @@ async def test_episode_and_late_foresights_share_the_original_input(
     ]
     path = tmp_path / "users/alice/episodes/2026-01-01.md"
     path.parent.mkdir(parents=True)
-    path.write_text(_EPISODE_MD)
+    path.write_text(_EPISODE_MD, encoding="utf-8")
     await tracker.on_memorize(
         {"session_id": "sess_a", "messages": []},
         is_final=True,

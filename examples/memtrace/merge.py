@@ -118,10 +118,13 @@ def main() -> None:
     paths = sorted(args.graph_dir.glob("*.json"))
     if args.output.resolve() in {path.resolve() for path in paths}:
         parser.error("The merged graph must not overwrite a source graph.")
-    graphs = [json.loads(path.read_text()) for path in paths]
+    graphs = [json.loads(path.read_text(encoding="utf-8")) for path in paths]
     merged = merge_graphs(graphs)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(merged, ensure_ascii=False, indent=2))
+    args.output.write_text(
+        json.dumps(merged, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

@@ -56,9 +56,15 @@ async def test_updated_revision_is_not_renumbered_in_search_graph(
 
     path = tmp_path / "users/alice/episodes/2026-01-01.md"
     path.parent.mkdir(parents=True)
-    path.write_text(_EPISODE_MD.replace("Alice went camping in July.", "Friday"))
+    path.write_text(
+        _EPISODE_MD.replace("Alice went camping in July.", "Friday"),
+        encoding="utf-8",
+    )
     await tracker._sync_files()
-    path.write_text(_EPISODE_MD.replace("Alice went camping in July.", "Monday"))
+    path.write_text(
+        _EPISODE_MD.replace("Alice went camping in July.", "Monday"),
+        encoding="utf-8",
+    )
     await tracker._sync_files()
     response = _resp("ep_1")
     response.data.episodes[0].episode = "Monday"
@@ -86,7 +92,10 @@ async def test_disk_state_does_not_replace_actual_stale_search_text(
 ) -> None:
     path = tmp_path / "users/alice/episodes/2026-01-01.md"
     path.parent.mkdir(parents=True)
-    path.write_text(_EPISODE_MD.replace("Alice went camping in July.", "Monday"))
+    path.write_text(
+        _EPISODE_MD.replace("Alice went camping in July.", "Monday"),
+        encoding="utf-8",
+    )
     response = _resp("ep_1")
     response.data.episodes[0].episode = "Friday"
     await tracker.on_search(_req(), response)
@@ -103,7 +112,10 @@ async def test_shared_memory_does_not_connect_queries_to_other_contexts(
 ) -> None:
     path = tmp_path / "users/alice/episodes/2026-01-01.md"
     path.parent.mkdir(parents=True)
-    path.write_text(_EPISODE_MD.replace("Alice went camping in July.", "body ep_1"))
+    path.write_text(
+        _EPISODE_MD.replace("Alice went camping in July.", "body ep_1"),
+        encoding="utf-8",
+    )
     tracker._root = tmp_path
     await tracker.on_search(_req(), _resp("ep_1"), request_id="first")
     await tracker.on_search(_req(), _resp("ep_1"), request_id="second")
@@ -313,7 +325,7 @@ async def test_qa_injection_requires_unique_tenant_scope(
         sum(inject_qa_dir(tracker.out_dir, [{**record, "app_id": "b"}]).values()) == 1
     )
     for path in tracker.out_dir.glob("*.json"):
-        graph = ExecNetwork.import_graph(json.loads(path.read_text()))
+        graph = ExecNetwork.import_graph(json.loads(path.read_text(encoding="utf-8")))
         assert bool(graph.search_variables(class_name="prediction")) == (
             graph.metadata["app_id"] == "b"
         )
@@ -328,7 +340,7 @@ async def test_failed_scan_application_retries_unchanged_files(
 ) -> None:
     path = tmp_path / "users/alice/episodes/2026-01-01.md"
     path.parent.mkdir(parents=True)
-    path.write_text(_EPISODE_MD)
+    path.write_text(_EPISODE_MD, encoding="utf-8")
     tracker._root = tmp_path
     name = "_apply_snapshot" if stage == "apply" else "_export"
     original = getattr(tracker, name)
@@ -361,7 +373,8 @@ async def test_persisted_episode_links_only_matching_actual_extractor_output(
     path.write_text(
         _EPISODE_MD.replace("Alice went camping in July.", "Monday")
         if rewritten_before_scan
-        else _EPISODE_MD
+        else _EPISODE_MD,
+        encoding="utf-8",
     )
     tracker._root = tmp_path
     common = {

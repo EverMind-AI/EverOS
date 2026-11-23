@@ -297,7 +297,7 @@ def main() -> int:
     failed = 0
     for json_file in json_files:
         try:
-            payload = json.loads(json_file.read_text())
+            payload = json.loads(json_file.read_text(encoding="utf-8"))
             queries = _query_names(payload)
             selections = [None] if args.combined or not queries else queries
             for index, query_name in enumerate(selections, start=1):

@@ -25,7 +25,7 @@ def test_listing_needs_no_credentials_or_client(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = tmp_path / "graph.json"
-    path.write_text(json.dumps(graph.export_graph()))
+    path.write_text(json.dumps(graph.export_graph()), encoding="utf-8")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     _argv(monkeypatch, path, "--list-cases")
     assert cli.main() == 0
@@ -42,10 +42,11 @@ def test_report_cannot_overwrite_input_or_credentials(
     target: str,
 ) -> None:
     path = tmp_path / "graph.json"
-    path.write_text(json.dumps(graph.export_graph()))
+    path.write_text(json.dumps(graph.export_graph()), encoding="utf-8")
     credentials = tmp_path / "credentials.json"
     credentials.write_text(
-        '{"api_keys": ["fake-key"], "base_urls": ["https://example.invalid"]}'
+        '{"api_keys": ["fake-key"], "base_urls": ["https://example.invalid"]}',
+        encoding="utf-8",
     )
     output = path if target == "graph" else credentials
     before = output.read_bytes()
@@ -64,7 +65,7 @@ def test_cli_writes_report_and_returns_status(
     successful: bool,
 ) -> None:
     path = tmp_path / "graph.json"
-    path.write_text(json.dumps(graph.export_graph()))
+    path.write_text(json.dumps(graph.export_graph()), encoding="utf-8")
     original = path.read_bytes()
     output = tmp_path / "reports" / "report.json"
     monkeypatch.setenv("OPENAI_API_KEY", "fake-unit-secret")
@@ -82,9 +83,9 @@ def test_cli_writes_report_and_returns_status(
     monkeypatch.setattr(cli, "_run", fake_run)
     _argv(monkeypatch, path, "--query-id", "query", "--output", str(output))
     assert cli.main() == (0 if successful else 1)
-    report = json.loads(output.read_text())
+    report = json.loads(output.read_text(encoding="utf-8"))
     assert report["diagnostics"] == []
-    assert "fake-unit-secret" not in output.read_text()
+    assert "fake-unit-secret" not in output.read_text(encoding="utf-8")
     assert path.read_bytes() == original
 
 
@@ -104,7 +105,7 @@ def test_conflicting_legacy_merge_is_rejected_before_credentials(
     payload = graph.export_graph()
     payload["metadata"] = {"merge_value_conflicts": ["memory@1"]}
     path = tmp_path / "graph.json"
-    path.write_text(json.dumps(payload))
+    path.write_text(json.dumps(payload), encoding="utf-8")
     _argv(monkeypatch, path, "--list-cases")
     assert cli.main() == 2
     assert "unresolved revision conflicts" in capsys.readouterr().err
@@ -118,7 +119,7 @@ def test_safe_merged_query_can_be_selected_by_original_identity(
     payload = graph.export_graph()
     payload["metadata"] = {"app_id": "a", "project_id": "p"}
     path = tmp_path / "graph.json"
-    path.write_text(json.dumps(merge_graphs([payload])))
+    path.write_text(json.dumps(merge_graphs([payload])), encoding="utf-8")
     output = tmp_path / "report.json"
     monkeypatch.setenv("OPENAI_API_KEY", "fake-unit-key")
 
