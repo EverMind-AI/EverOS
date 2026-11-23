@@ -890,9 +890,10 @@ means delivery is slower than arrival.
 (`row_retention_hours`) after it was created. `GET /tasks/{task_id}` returns `404`
 after that. A delivered row drops its request body at once. A `failed` row
 keeps its body (in `memorize_inbox.payload_json`, found by `request_id`)
-until purged, and failed rows are not capped: an outage in which every batch
-fails keeps every body accepted during it for the retention period. SQLite
-reuses the freed pages but does not shrink `system.db`. A row that ages out
+for re-sending, but only the newest failed bodies up to
+`max_failed_payload_bytes` (64 MiB) in total: an outage in which every batch
+fails empties the older bodies within one sweep, and their rows stay with
+`last_error`. SQLite reuses the freed pages but does not shrink `system.db`. A row that ages out
 while still `queued` was never delivered; the purge logs a warning when that
 happens.
 

@@ -48,6 +48,7 @@ from ._queue_steps import (
     purge_expired,
     queue_health,
     recover_processing,
+    trim_failed_payloads,
     wait_any,
     wait_for_wake,
     write_status,
@@ -106,6 +107,7 @@ class MemorizeQueueWorker:
         # which is what lets the sweep tell a lost status write from a row
         # that is simply still running.
         self._in_flight: dict[int, tuple[MemorizeTask, asyncio.Task[None]]] = {}
+        self._next_sweep_at = get_utc_now()
 
     # ── producer side (called by the route) ────────────────────────────────
 
@@ -287,6 +289,10 @@ class MemorizeQueueWorker:
         started = 0
         try:
             while True:
+                # Between deliveries too: a drain kept busy by new rows (an
+                # outage under steady traffic) must not starve housekeeping.
+                if get_utc_now() >= self._next_sweep_at:
+                    await self._sweep()
                 if self._status_write_lost:
                     await self._reap_lost()  # before the next claim, not after
                 while (
@@ -353,8 +359,7 @@ class MemorizeQueueWorker:
             # sweep that also catches rows left behind by a missed wake.
             await wait_for_wake(self._wake, timeout=self._cfg.scan_interval_seconds)
             try:
-                await self._sweep()
-                await self.drain_once()
+                await self.drain_once()  # sweeps first when one is due
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -408,7 +413,10 @@ class MemorizeQueueWorker:
             self._status_write_lost = True
 
     async def _sweep(self) -> None:
-        """Expire old rows; fail ``processing`` rows nobody is working on.
+        """Expire old rows; bound failed bodies; fail orphaned ``processing`` rows.
+
+        Runs at start and then at most once per ``scan_interval_seconds``,
+        checked before each claim of :meth:`drain_once`, busy or idle.
 
         The scheduler knows the rows it has in flight, so any other
         ``processing`` row lost its status write. The outcome is unknown (the
@@ -416,8 +424,15 @@ class MemorizeQueueWorker:
         ``failed`` rather than replayed. Housekeeping must never stop
         delivery: each step logs and moves on.
         """
-        before = get_utc_now() - dt.timedelta(hours=self._cfg.row_retention_hours)
+        now = get_utc_now()
+        self._next_sweep_at = now + dt.timedelta(
+            seconds=self._cfg.scan_interval_seconds
+        )
+        before = now - dt.timedelta(hours=self._cfg.row_retention_hours)
         await purge_expired(self._inbox, before=before)
+        await trim_failed_payloads(
+            self._inbox, max_bytes=self._cfg.max_failed_payload_bytes
+        )
         # ponytail: in-process bookkeeping; a lease column if workers ever run
         # in more than one process.
         await self._reap_lost()
