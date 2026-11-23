@@ -46,11 +46,13 @@ flowchart LR
 uv sync --frozen --extra memtrace
 ```
 
-MemTrace 默认开启。需要临时关闭时：
+MemTrace 默认关闭，只在需要时按进程打开：
 
 ```bash
-export EVEROS_MEMTRACE_ENABLED=0
+export EVEROS_MEMTRACE_ENABLED=1
 ```
+
+只用于调试和评测，不要在生产环境打开：每次 `/memory/add`、`/memory/flush`、`/memory/search` 返回前都会在一把进程级锁里对比整个记忆根，耗时随 Markdown 文件数增长，并发请求会互相等待；导出的图保留消息原文和记忆正文，`/memory/delete` 和清空数据（purge）都不会删除导出目录，需要自行删除。详见 [memtrace-graphs.md](memtrace-graphs.md#enabling-tracing)。
 
 图默认写到 `<memory-root>/memtrace/`。调试时可以指定一个独立目录：
 

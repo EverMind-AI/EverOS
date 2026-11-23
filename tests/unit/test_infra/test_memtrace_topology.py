@@ -22,6 +22,13 @@ from .test_memtrace_tracker import (
     _resp,
 )
 
+
+@pytest.fixture(autouse=True)
+def _memtrace_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tracing is opt-in; these tests exercise the enabled tracker."""
+    monkeypatch.setenv("EVEROS_MEMTRACE_ENABLED", "1")
+
+
 _INPUT = {"items": [{"role": "user", "content": "Camping on Friday."}]}
 _KEY = ("default", "default", "alice", "sess_a")
 

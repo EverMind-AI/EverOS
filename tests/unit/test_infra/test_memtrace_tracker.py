@@ -66,6 +66,12 @@ from everos.memory.search.trace import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _memtrace_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tracing is opt-in; these tests exercise the enabled tracker."""
+    monkeypatch.setenv("EVEROS_MEMTRACE_ENABLED", "1")
+
+
 async def _empty_memcells(ids: list[str]) -> list[Any]:
     return []
 
@@ -597,6 +603,17 @@ async def test_disabled_tracker_writes_nothing(
     monkeypatch.setenv("EVEROS_MEMTRACE_ENABLED", "0")
     monkeypatch.setenv("EVEROS_MEMTRACE_DIR", str(tmp_path / "memtrace"))
     tracker = MemTraceTracker()
+    await tracker.on_search(_req(), _resp("ep_1"), stages=_stages())
+    assert not (tmp_path / "memtrace").exists()
+
+
+async def test_tracing_is_off_unless_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("EVEROS_MEMTRACE_ENABLED")
+    monkeypatch.setenv("EVEROS_MEMTRACE_DIR", str(tmp_path / "memtrace"))
+    tracker = MemTraceTracker()
+    assert not tracker.enabled
     await tracker.on_search(_req(), _resp("ep_1"), stages=_stages())
     assert not (tmp_path / "memtrace").exists()
 

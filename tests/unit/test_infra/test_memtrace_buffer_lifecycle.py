@@ -27,6 +27,12 @@ from .test_memtrace_tracker import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _memtrace_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tracing is opt-in; these tests exercise the enabled tracker."""
+    monkeypatch.setenv("EVEROS_MEMTRACE_ENABLED", "1")
+
+
 @pytest.fixture
 def tracker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MemTraceTracker:
     monkeypatch.setenv("EVEROS_MEMTRACE_DIR", str(tmp_path / "memtrace"))

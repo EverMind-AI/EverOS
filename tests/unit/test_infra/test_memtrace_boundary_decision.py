@@ -22,6 +22,12 @@ from everos.memory.extract.trace import collect_construction_trace
 from .test_memtrace_tracker import _TS_MS, _message, _payload
 
 
+@pytest.fixture(autouse=True)
+def _memtrace_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tracing is opt-in; these tests exercise the enabled tracker."""
+    monkeypatch.setenv("EVEROS_MEMTRACE_ENABLED", "1")
+
+
 class _ScriptedOperator:
     def __init__(self, boundaries: list[int]) -> None:
         self.boundaries = boundaries

@@ -35,8 +35,12 @@ them).
 
 Configuration (environment variables, no settings-schema change):
 
-* ``EVEROS_MEMTRACE_ENABLED`` — ``1`` (default) records; ``0``/``false``
-  turns every hook into a no-op.
+* ``EVEROS_MEMTRACE_ENABLED`` — off by default; ``1``/``true``/``yes``
+  records. Tracing is a debugging and benchmarking aid, not a production
+  setting: every request diffs the whole memory root under one
+  process-wide lock (the cost grows with the markdown file count and
+  concurrent requests wait their turn), and the exported graphs keep raw
+  message and memory text that ``/memory/delete`` and purge do not remove.
 * ``EVEROS_MEMTRACE_DIR`` — export directory (default ``<root>/memtrace``).
 
 Identity / category vocabulary (aligned with MemTraceBench and the earlier
@@ -265,8 +269,8 @@ def _safe_name(raw: str) -> str:
 def _scoped_name(raw: str) -> str:
     """Readable-but-unique file-name fragment for one graph-key component.
 
-    ``_safe_name`` alone folds ids like ``张三``/``李四`` or ``a@b``/``a_b``
-    onto the same graph file; the SHA-1 digest suffix keeps every distinct
+    ``_safe_name`` alone folds non-ASCII ids, or ``a@b`` and ``a_b``, onto
+    the same graph file; the SHA-1 digest suffix keeps every distinct
     raw id in its own file while the truncated safe prefix stays readable.
     """
     digest = hashlib.sha1(raw.encode()).hexdigest()[:8]
@@ -441,10 +445,10 @@ class MemTraceTracker:
     def __init__(self) -> None:
         self._memcell_repo: Any = None
         self._root: Path = MemoryRoot.resolve().root
-        env_enabled = os.environ.get("EVEROS_MEMTRACE_ENABLED", "1").lower() not in (
-            "0",
-            "false",
-            "no",
+        env_enabled = os.environ.get("EVEROS_MEMTRACE_ENABLED", "").lower() in (
+            "1",
+            "true",
+            "yes",
         )
         if env_enabled and not _SMARTCOMMENT_AVAILABLE:
             logger.warning(

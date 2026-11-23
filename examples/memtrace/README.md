@@ -21,6 +21,10 @@ the locked environment with the existing tracing extra:
 uv sync --frozen --extra memtrace
 ```
 
+Tracing is off by default: start the server with `EVEROS_MEMTRACE_ENABLED=1`
+to record graphs. See [the cost and privacy notes](../../docs/memtrace-graphs.md#enabling-tracing)
+before enabling it anywhere but a test root.
+
 The runtime uses `smartcomment`, `openai`, Pydantic and the standard library.
 It does not import the sibling MemTrace checkout, install AgentScope, or require
 `rank_bm25`, `networkx`, an embedding endpoint, or a vector database.

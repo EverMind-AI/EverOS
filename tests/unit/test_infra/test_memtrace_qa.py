@@ -29,6 +29,13 @@ from everos.memory.search.dto import (
     SearchResponse,
 )
 
+
+@pytest.fixture(autouse=True)
+def _memtrace_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tracing is opt-in; these tests exercise the enabled tracker."""
+    monkeypatch.setenv("EVEROS_MEMTRACE_ENABLED", "1")
+
+
 _TS = _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC)
 
 

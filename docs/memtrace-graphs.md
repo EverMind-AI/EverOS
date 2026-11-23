@@ -1,5 +1,32 @@
 # MemTrace graph export
 
+## Enabling tracing
+
+MemTrace is off by default. Install the optional dependency and opt in per
+process:
+
+```bash
+uv sync --frozen --extra memtrace
+export EVEROS_MEMTRACE_ENABLED=1                 # off unless set to 1/true/yes
+export EVEROS_MEMTRACE_DIR=/path/to/memtrace     # default: <memory-root>/memtrace
+```
+
+Use it for debugging and benchmark runs, not in production:
+
+- **Latency.** Every `/memory/add`, `/memory/flush` and `/memory/search` diffs
+  the whole memory root before it returns, under one process-wide lock. The
+  cost grows with the number of markdown files, and concurrent requests wait
+  for each other's diff. The first request after a start parses every file.
+- **Raw text.** The graphs keep message content and memory text.
+  `/memory/delete` and purge do not touch the export directory; delete it
+  yourself when the data it traced is deleted.
+- **Growth.** One graph per owner and session is rewritten after each request
+  and is never trimmed, so long sessions make the exports, and each rewrite,
+  larger.
+- **Workers.** Each process keeps its own in-memory graphs. With several
+  workers, run a single writer or give each worker its own
+  `EVEROS_MEMTRACE_DIR`.
+
 ## Recorded topology
 
 Search graphs retain every stage and its candidate-list snapshot, but only the
