@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 
 def probe():
@@ -59,6 +60,7 @@ def probe():
             "tunables": os.environ.get("GLIBC_TUNABLES"),
             "argv": sys.orig_argv,
             "heaps": len(ET.fromstring(xml).findall("heap")),
+            "jemalloc": "libjemalloc" in Path("/proc/self/maps").read_text(),
             "malloc_info": xml,
         }
         with open(output, "a", encoding="utf-8") as f:

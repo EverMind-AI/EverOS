@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The CLI preloads jemalloc on Linux where it is installed.** With
+  `libjemalloc2` present, `everos` re-executes with
+  `LD_PRELOAD=libjemalloc.so.2` and
+  `MALLOC_CONF=oversize_threshold:0,dirty_decay_ms:1000,narenas:4` beside the
+  existing `MALLOC_ARENA_MAX=2`. On a 4-core, 8 GB server keyword search went
+  from 80 to 161 QPS and hybrid search at 5 QPS from 4.3 to 2.4 s median,
+  while the last hour of an 8-hour write-and-search soak averaged 1125 MB
+  against 1221 MB with glibc. Without jemalloc nothing changes. An explicit
+  `MALLOC_ARENA_MAX` (or the glibc tunable) keeps glibc; an explicit
+  `LD_PRELOAD` or `MALLOC_CONF` keeps the operator's choice.
+
 ### Fixed
 
 - **Two intermittently red tests now fail only on a real regression.** The
