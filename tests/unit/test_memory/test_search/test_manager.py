@@ -77,17 +77,19 @@ def _episode_row(
     return hit(_keyed(stored, eid), score)
 
 
-def _case_row(cid: str) -> SearchHit[Any]:
+def _case_row(cid: str, score: float = 0.7) -> SearchHit[Any]:
     stored = stored_case(
         cid,
         owner_id="agent_a",
         task_intent=f"intent {cid}",
         approach=f"approach {cid}",
     )
-    return hit(_keyed(stored, cid), 0.7)
+    return hit(_keyed(stored, cid), score)
 
 
-def _skill_row(sid: str, source_case_ids: Sequence[str] = ()) -> SearchHit[Any]:
+def _skill_row(
+    sid: str, source_case_ids: Sequence[str] = (), score: float = 0.65
+) -> SearchHit[Any]:
     stored = stored_skill(
         sid,
         owner_id="agent_a",
@@ -95,7 +97,7 @@ def _skill_row(sid: str, source_case_ids: Sequence[str] = ()) -> SearchHit[Any]:
         description=f"desc {sid}",
         source_case_ids=source_case_ids,
     )
-    return hit(stored, 0.65)
+    return hit(stored, score)
 
 
 def _atomic_fact_row(fid: str, *, parent_id: str, score: float) -> SearchHit[Any]:
@@ -806,6 +808,19 @@ async def test_agent_keyword_returns_cases_and_skills_only() -> None:
     assert resp.data.profiles == []
     assert [c.id for c in resp.data.agent_cases] == ["c_1"]
     assert [s.id for s in resp.data.agent_skills] == ["s_1"]
+
+
+async def test_agent_keyword_ignores_radius() -> None:
+    """``radius`` floors cosine; KEYWORD has none, so BM25 hits never meet it,
+    neither the unlimited-mode default nor a caller-supplied value."""
+    mgr = _build_manager(
+        case_sparse=[_case_row("c_low", score=0.2)],
+        skill_sparse=[_skill_row("s_low", score=0.2)],
+    )
+    for req in (_agent_req(top_k=-1), _agent_req(top_k=5, radius=0.9)):
+        resp = await mgr.search(req)
+        assert [c.id for c in resp.data.agent_cases] == ["c_low"]
+        assert [s.id for s in resp.data.agent_skills] == ["s_low"]
 
 
 async def test_agent_owner_ignores_include_profile() -> None:

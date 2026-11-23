@@ -788,7 +788,8 @@ class SearchManager:
                 recalled = await recaller.dense_recall(
                     vector, where, limit=self._recall_limit(req.top_k, cap=cap)
                 )
-            recalled = recalled.within_radius(_effective_radius(req))
+                # ``radius`` floors cosine; BM25 keyword scores ignore it.
+                recalled = recalled.within_radius(_effective_radius(req))
             record_stage("single_route", recaller.kind, recalled.candidates)
             return recalled
 
