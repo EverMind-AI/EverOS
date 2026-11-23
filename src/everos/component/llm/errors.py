@@ -27,8 +27,9 @@ class LLMCallError(LLMServiceError):
 
     Reasons:
         ``refusal``: the upstream flagged a refusal (contract §3.4).
-        ``cut_short``: the upstream reported ``length`` / ``content_filter``;
-            the identical request hits the same cap again (contract §3.5).
+        ``cut_short``: the upstream reported ``content_filter``, or reported
+            ``length`` on every attempt ``truncated_reply_retries`` allowed
+            (contract §3.5).
         ``no_content``: the upstream answered without content.
         ``invalid_reply``: no reply validated against ``response_format``
             within the attempt budget (contract §7.1).

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An LLM reply cut off at the output cap is sent once more instead of
+  failing its call.** A generation that runs away until `max_tokens`
+  (`finish_reason` `length`) usually finishes when the identical request is
+  sent again, so every LLM call -- the episode extraction inside
+  `/memory/add` included -- now resends it once before giving up, rather than
+  losing the memcell's episode or failing the background extraction.
+  `[llm] truncated_reply_retries` (default `1`; settable per task in
+  `[llm.<task>]` and in `[multimodal]`) sets how many times. It is counted
+  apart from `invalid_reply_retries`, and a retry never raises `max_tokens`:
+  a reply that is long by nature reaches the cap again and still fails, which
+  a larger `max_tokens` for that task fixes. A reply blocked by
+  `content_filter` is not resent.
+
 - **A resent `/memory/add` no longer cuts the same messages twice** (#274).
   Messages were deduplicated only against the session buffer, so a client
   retrying after a timeout re-sent messages the first call had already cut
@@ -25,6 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaced by `message_ids`. Buffered messages from an earlier version keep
   their old ids; a batch sent before the upgrade and resent after it is not
   recognized as a resend.
+- **Failed `async_mode` batches no longer keep their bodies without bound.**
+  A `failed` queue row kept its request body for the seven-day retention,
+  uncapped, so an outage that failed every batch could hold every body
+  accepted during it on disk. Now only the newest failed bodies up to
+  `memorize.async_queue.max_failed_payload_bytes` (default 64 MiB) are kept;
+  older ones are emptied by the queue's sweep while the row and its
+  `last_error` stay. The sweep (this trim and the retention purge) now runs
+  every `scan_interval_seconds` while the worker is busy too, not only
+  between drains.
 
 ## [1.7.1] - 2026-11-20
 

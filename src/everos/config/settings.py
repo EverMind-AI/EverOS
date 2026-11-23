@@ -212,7 +212,8 @@ and a failed one only leaves the episode's language to the episode model. So
 it gets one bounded attempt: the reply is a one-word label (64 tokens, no room
 for a model that thinks first), and a slow or unusable reply is given up after
 3 seconds rather than resent -- the SDK retries are 0 so the deadline is the
-whole wait.
+whole wait. A reply cut off at the 64-token cap is still sent once more, as for
+every task: ``truncated_reply_retries`` has no task default.
 
 The decider runs inside a search request, so one round's deadline and retry
 budget are bounded by the caller waiting on it, not by ``[llm]``'s
@@ -329,6 +330,13 @@ class LLMClientSettings(BaseModel):
     validation against the operator's model, has no choice, or was aborted by
     the server. Bounded here, cheaply, rather than by rerunning the whole
     operator; ``0`` hands the first failure straight to the caller."""
+    truncated_reply_retries: int = Field(default=1, ge=0)
+    """Extra attempts of the identical request after a reply that reached the
+    output cap (``finish_reason`` ``length``), counted apart from
+    ``invalid_reply_retries``. A sampled reply that ran away to the cap usually
+    finishes when sent again; one that is long by nature reaches it again, which
+    only a larger ``max_tokens`` fixes -- a retry never raises it. ``0`` hands
+    the cut-off reply straight to the caller."""
     temperature: float | None = None
     """Sampling temperature sent when an operator's call names none.
 
@@ -341,8 +349,8 @@ class LLMClientSettings(BaseModel):
     out of the request. A reasoning model bills its thinking against it."""
     sdk_max_retries: int | None = Field(default=None, ge=0)
     """Transport retries inside the OpenAI SDK; ``None`` keeps the SDK default.
-    They multiply with ``invalid_reply_retries`` and with any retry an operator
-    layers on top."""
+    They multiply with ``invalid_reply_retries``, ``truncated_reply_retries``
+    and any retry an operator layers on top."""
 
 
 class LLMTaskSettings(BaseModel):
@@ -365,6 +373,7 @@ class LLMTaskSettings(BaseModel):
     extra: dict[str, Any] | None = None
     response_format_mode: ResponseFormatMode | None = None
     invalid_reply_retries: int | None = Field(default=None, ge=0)
+    truncated_reply_retries: int | None = Field(default=None, ge=0)
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, ge=1)
     sdk_max_retries: int | None = Field(default=None, ge=0)
@@ -593,6 +602,9 @@ class MultimodalSettings(BaseModel):
     invalid_reply_retries: int = Field(default=1, ge=0)
     """Extra attempts after an unusable reply. See
     :attr:`LLMClientSettings.invalid_reply_retries`."""
+    truncated_reply_retries: int = Field(default=1, ge=0)
+    """Extra attempts after a reply that reached the output cap. See
+    :attr:`LLMClientSettings.truncated_reply_retries`."""
 
     # ``file://`` content-item support (read locally by EverOS, not everalgo).
     file_uri_allow_dirs: list[str] = []
@@ -731,10 +743,12 @@ class AsyncQueueSettings(BaseModel):
     over ``max_pending_per_session`` or a process over ``max_pending_total``
     rejects new rows with 429, and a body over ``max_payload_bytes`` with
     413. A delivered row drops its body at once, so pending and delivered rows
-    stay around ``max_pending_total * max_payload_bytes``; failed rows keep
-    their bodies for the retention period and are not capped, and SQLite does
-    not shrink the file after a purge. The caps are checked without a lock,
-    so concurrent requests overshoot a little.
+    stay around ``max_pending_total * max_payload_bytes``. A failed row keeps
+    its body for re-sending, but only the newest failed bodies up to
+    ``max_failed_payload_bytes`` in total; older ones are emptied (the row and
+    its ``last_error`` stay). SQLite does not shrink the file after a purge.
+    The caps are checked without a lock, so concurrent requests overshoot a
+    little.
 
     A row that fails ``max_attempts`` times (``retry_backoff_seconds``
     apart) is marked ``failed`` and skipped so one bad batch cannot hold
@@ -756,6 +770,7 @@ class AsyncQueueSettings(BaseModel):
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_PER_SESSION
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_TOTAL
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PAYLOAD_BYTES
+        EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_FAILED_PAYLOAD_BYTES
         EVEROS_MEMORIZE__ASYNC_QUEUE__SCAN_INTERVAL_SECONDS
         EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_ATTEMPTS
         EVEROS_MEMORIZE__ASYNC_QUEUE__RETRY_BACKOFF_SECONDS
@@ -768,6 +783,7 @@ class AsyncQueueSettings(BaseModel):
     max_pending_per_session: int = Field(default=50, ge=1)
     max_pending_total: int = Field(default=200, ge=1)
     max_payload_bytes: int = Field(default=4 * 1024 * 1024, ge=1)
+    max_failed_payload_bytes: int = Field(default=64 * 1024 * 1024, ge=0)
     scan_interval_seconds: float = Field(default=5.0, gt=0)
     max_attempts: int = Field(default=1, ge=1)
     retry_backoff_seconds: float = Field(default=2.0, ge=0)
@@ -778,12 +794,11 @@ class AsyncQueueSettings(BaseModel):
 class InputLogSettings(BaseModel):
     """``/add`` input log (``[memorize.input_log]``).
 
-    Disabled in the first PR that introduces it: enabling the log also
-    requires the deletion/purge path that removes a scope's lines, which
-    follows in the second PR (issue #537).
+    Enabled by default now that session deletion and purge remove the
+    corresponding lines (issue #537).
     """
 
-    enabled: bool = False
+    enabled: bool = True
     retention_days: int = Field(default=30, ge=1)
     max_inline_bytes: int = Field(default=1024 * 1024, ge=1)
 

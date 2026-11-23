@@ -39,6 +39,7 @@ _FIELDS = (
     "extra",
     "response_format_mode",
     "invalid_reply_retries",
+    "truncated_reply_retries",
     "temperature",
     "max_tokens",
     "sdk_max_retries",
@@ -76,6 +77,7 @@ _FULL_OVERRIDE: dict[str, Any] = {
     "extra": {"extra_body": {"own": True}},
     "response_format_mode": "prompt_only",
     "invalid_reply_retries": 3,
+    "truncated_reply_retries": 2,
     "temperature": 0.7,
     "max_tokens": 2048,
     "sdk_max_retries": 4,
@@ -456,3 +458,14 @@ async def test_the_deciders_default_request_sets_no_output_cap(
     await _send(_providers(_settings())[LLMTask.DECIDER])
     (body,) = wire
     assert sorted(body) == ["messages", "model", "response_format"]
+
+
+@pytest.mark.parametrize("task", list(LLMTask))
+def test_every_task_takes_the_truncated_reply_retries_of_llm(task: LLMTask) -> None:
+    """No task has a default of its own for it, the language and decider included."""
+    assert (
+        _effective(_settings({"truncated_reply_retries": 3}), task)[
+            "truncated_reply_retries"
+        ]
+        == 3
+    )

@@ -157,18 +157,51 @@ Zilliz Cloud endpoint; a Milvus Lite filesystem path is rejected.
 | `model` | string | `"gpt-4.1-mini"` | No | LLM model identifier. |
 | `api_key` | string | — | **Yes** | API key for the LLM provider. |
 | `base_url` | string | — | No | Custom endpoint URL (OpenAI-compatible). |
-| `timeout_seconds` | float | `60.0` | No | Deadline of one request. One add or flush may spend up to `(invalid_reply_retries + 1) × timeout_seconds` per extraction call plus the client's own retries, so size reverse-proxy and client timeouts accordingly; raise it for slow self-hosted endpoints. |
+| `timeout_seconds` | float | `60.0` | No | Deadline of one request. One add or flush may spend up to `(invalid_reply_retries + truncated_reply_retries + 1) × timeout_seconds` per extraction call plus the client's own retries, so size reverse-proxy and client timeouts accordingly; raise it for slow self-hosted endpoints. |
 | `invalid_reply_retries` | int | `1` | No | Extra attempts of the identical request after a reply that fails validation. |
+| `truncated_reply_retries` | int | `1` | No | Extra attempts of the identical request after a reply that reached the output cap (`finish_reason` `length`), counted apart from `invalid_reply_retries`. A runaway generation usually finishes when sent again; a reply long by nature reaches the cap again and needs a larger `max_tokens`, which no retry raises. A reply blocked by `content_filter` is never resent. |
 | `response_format_mode` | string | `"json_schema"` | No | How the reply format is requested: `json_schema` (strict schema), `json_object` (JSON mode) or `prompt_only`. |
 | `extra` | table | `{}` | No | Provider-specific request fields merged into every call. Non-standard fields must sit under `extra_body` (the OpenAI SDK rejects unknown top-level names). |
 | `temperature` | float | unset | No | Sent only when a call names none; unset, the request carries no temperature. A default, never an override: agentic search keeps the temperatures it sets per call. |
 | `max_tokens` | int | unset | No | Output cap sent only when a call names none; unset, the request carries none. A reasoning model bills its thinking against it. |
-| `sdk_max_retries` | int | unset | No | Transport retries inside the OpenAI SDK; unset keeps the SDK default. They multiply with `invalid_reply_retries`. |
+| `sdk_max_retries` | int | unset | No | Transport retries inside the OpenAI SDK; unset keeps the SDK default. They multiply with `invalid_reply_retries` and `truncated_reply_retries`. |
 
 `[llm]` is the only LLM section you need: every task below uses it unless its
 own section says otherwise. `[llm]` and its task sections reject unknown keys
 -- a typo fails startup with the list of valid names, instead of being ignored
 while the task quietly keeps `[llm]`'s model.
+
+#### NVIDIA NIM
+
+[NVIDIA NIM](https://build.nvidia.com/) serves an OpenAI-compatible Chat
+Completions API, so it plugs into `[llm]` like OpenRouter does: set the model,
+key, and base URL. Model ids use the `<publisher>/<model>` form; pick one from
+the endpoint's `/models` list.
+
+```toml
+[llm]
+model = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+api_key = "<NVIDIA_API_KEY>"
+base_url = "https://integrate.api.nvidia.com/v1"
+```
+
+Or keep the key out of the file and pass your `NVIDIA_API_KEY` through the
+environment:
+
+```bash
+export EVEROS_LLM__API_KEY="$NVIDIA_API_KEY"
+export EVEROS_LLM__BASE_URL=https://integrate.api.nvidia.com/v1
+export EVEROS_LLM__MODEL=nvidia/nemotron-3.5-super-vl-120b-a12b
+```
+
+Other hosted models you can use include `nvidia/nemotron-3-ultra-550b-a55b`
+and `nvidia/nemotron-3.5-lightning-30b-a3b`. For a self-hosted NIM, point
+`base_url` at your deployment instead (for example
+`http://localhost:8000/v1`) and set `model` to the id it serves.
+
+The default `response_format_mode = "json_schema"` sends a strict JSON schema
+with every extraction call. If your NIM model rejects or ignores it, set
+`response_format_mode = "json_object"`, or `"prompt_only"` as the last resort.
 
 ### `[llm.<task>]`
 
@@ -316,38 +349,6 @@ Episodes are folded one owner at a time. A run folds the episode that triggered 
 | Field | Type | Default | Required | Description |
 |---|---|---|---|---|
 | `max_episodes_per_call` | int | `10` | No | Most episodes one extraction call folds, the triggering one included; `1` folds each alone. |
-
-#### NVIDIA NIM
-
-[NVIDIA NIM](https://build.nvidia.com/) serves an OpenAI-compatible Chat
-Completions API, so it plugs into `[llm]` like OpenRouter does: set the model,
-key, and base URL. Model ids use the `<publisher>/<model>` form; pick one from
-the endpoint's `/models` list.
-
-```toml
-[llm]
-model = "nvidia/nemotron-3.5-super-vl-120b-a12b"
-api_key = "<NVIDIA_API_KEY>"
-base_url = "https://integrate.api.nvidia.com/v1"
-```
-
-Or keep the key out of the file and pass your `NVIDIA_API_KEY` through the
-environment:
-
-```bash
-export EVEROS_LLM__API_KEY="$NVIDIA_API_KEY"
-export EVEROS_LLM__BASE_URL=https://integrate.api.nvidia.com/v1
-export EVEROS_LLM__MODEL=nvidia/nemotron-3.5-super-vl-120b-a12b
-```
-
-Other hosted models you can use include `nvidia/nemotron-3-ultra-550b-a55b`
-and `nvidia/nemotron-3.5-lightning-30b-a3b`. For a self-hosted NIM, point
-`base_url` at your deployment instead (for example
-`http://localhost:8000/v1`) and set `model` to the id it serves.
-
-The default `response_format_mode = "json_schema"` sends a strict JSON schema
-with every extraction call. If your NIM model rejects or ignores it, set
-`response_format_mode = "json_object"`, or `"prompt_only"` as the last resort.
 
 ### `[multimodal]`
 
@@ -507,21 +508,22 @@ joins it only behind its session's backlog)
 | `max_pending_per_session` | int | `50` | Unfinished batches per session; beyond this `/add` and `/flush` answer `429`. |
 | `max_pending_total` | int | `200` | Unfinished batches across all sessions; beyond this the answer is `429`. |
 | `max_payload_bytes` | int | `4194304` | One serialised request body; beyond this the answer is `413`. |
-| `scan_interval_seconds` | float | `5.0` | Fallback sweep interval; an enqueue wakes the worker immediately. |
+| `max_failed_payload_bytes` | int | `67108864` | Request bodies kept on `failed` rows (for re-sending), newest first; older failed rows past this total (64 MiB) lose their body within one sweep, the row and its error stay. `0` keeps none. |
+| `scan_interval_seconds` | float | `5.0` | Sweep interval (retention purge, failed-body trim), busy or idle; an enqueue wakes the worker immediately. |
 | `max_attempts` | int | `1` | Delivery attempts per batch before it is marked `failed` and skipped. Keep `1` unless duplicate memcells after a partial failure are acceptable: the pipeline is not atomic. |
 | `retry_backoff_seconds` | float | `2.0` | Pause between attempts. |
 | `max_replays` | int | `3` | A batch in flight when the process died is replayed on the next start; after this many replays without finishing it is marked `failed` (`error_code: replays_exhausted`). |
-| `row_retention_hours` | float | `168.0` | Rows of any status are deleted this long after creation (seven days), including rows never delivered; the purge logs a warning for those. Delivered rows drop their request body at once, `failed` rows keep it. |
+| `row_retention_hours` | float | `168.0` | Rows of any status are deleted this long after creation (seven days), including rows never delivered; the purge logs a warning for those. Delivered rows drop their request body at once, `failed` rows keep it within `max_failed_payload_bytes`. |
 
 ### `[memorize.input_log]`
 
 An append-only JSONL record of accepted `/add` requests, independent of
-extraction (issue #537). The first PR ships it **disabled**; deletion and
-purge integration, plus the default-on switch, follow separately.
+extraction (issue #537). A session deletion removes that session's lines,
+and a purge removes the covered scopes' `.input_log/` directories.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `false` | When on, one line per accepted `/add` goes to `<root>/<app>/<project>/.input_log/YYYY-MM-DD.jsonl`. `/flush` is not logged. |
+| `enabled` | bool | `true` | One line per accepted `/add` goes to `<root>/<app>/<project>/.input_log/YYYY-MM-DD.jsonl`. `/flush` is not logged. Off stops new lines; existing lines are still deleted by session deletion/purge. |
 | `retention_days` | int | `30` | Daily files older than this are removed when the scope next writes. |
 | `max_inline_bytes` | int | `1048576` | A line larger than this keeps text verbatim but replaces each `base64` attachment with its byte length and SHA-256. |
 

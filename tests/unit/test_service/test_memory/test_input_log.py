@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from everos.config import InputLogSettings
 from everos.infra.persistence import app_dir_name, project_dir_name
 from everos.service.memory import InputLogWriter
@@ -130,6 +132,94 @@ async def test_write_failure_does_not_escape(tmp_path: Path, monkeypatch) -> Non
     await writer.log_add(_payload(), request_id="r1")  # must not raise
 
 
-def test_settings_default_is_disabled() -> None:
-    assert InputLogSettings().enabled is False
+def test_settings_default_is_enabled() -> None:
+    assert InputLogSettings().enabled is True
     assert InputLogSettings().retention_days == 30
+
+
+async def test_delete_session_removes_only_that_sessions_lines(tmp_path: Path) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    await writer.log_add(_payload(), request_id="r1")
+    other = _payload()
+    other["session_id"] = "s2"
+    await writer.log_add(other, request_id="r2")
+
+    await writer.delete_session(app_id="default", project_id="default", session_id="s1")
+
+    lines = _lines(tmp_path)
+    assert [line["session_id"] for line in lines] == ["s2"]
+
+
+async def test_delete_session_removes_an_empty_file(tmp_path: Path) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    await writer.log_add(_payload(), request_id="r1")
+    await writer.delete_session(app_id="default", project_id="default", session_id="s1")
+
+    directory = (
+        tmp_path / app_dir_name("default") / project_dir_name("default") / ".input_log"
+    )
+    assert list(directory.glob("*.jsonl")) == []
+
+
+async def test_purge_scope_propagates_removal_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from everos.core.purge_marks import PurgeScope
+
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    await writer.log_add(_payload(), request_id="r1")
+    scope = PurgeScope(
+        "project",
+        app_id="default",
+        project_id="default",
+        app_dir=app_dir_name("default"),
+        project_dir=project_dir_name("default"),
+    )
+
+    def _denied(*args: object, **kwargs: object) -> None:
+        raise PermissionError("denied")
+
+    monkeypatch.setattr("shutil.rmtree", _denied)
+    with pytest.raises(PermissionError):
+        await writer.purge_scope(scope)
+
+
+async def test_purge_scope_removes_the_log_directory(tmp_path: Path) -> None:
+    from everos.core.purge_marks import PurgeScope
+
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    await writer.log_add(_payload(), request_id="r1")
+    scope = PurgeScope(
+        "project",
+        app_id="default",
+        project_id="default",
+        app_dir=app_dir_name("default"),
+        project_dir=project_dir_name("default"),
+    )
+
+    await writer.purge_scope(scope)
+
+    directory = (
+        tmp_path / app_dir_name("default") / project_dir_name("default") / ".input_log"
+    )
+    assert not directory.exists()

@@ -416,6 +416,9 @@ class SqliteMemorizeInboxStore:
     async def purge_expired(self, *, before: dt.datetime) -> tuple[int, int]:
         return await self._repo.purge_expired(before=before)
 
+    async def trim_failed_payloads(self, *, max_bytes: int) -> int:
+        return await self._repo.trim_failed_payloads(max_bytes=max_bytes)
+
 
 class SqliteReflectionReportStore:
     """Reflection audit trail over ``reflection_report``.
