@@ -159,6 +159,7 @@ demo/memcell_outputs/
 # AI agent tooling (local agent skills/config, not part of the project)
 .agents/
 AGENTS.md
+smartcomment_docs/
 *.duckdb
 
 

@@ -34,8 +34,10 @@ __all__ = [
 
 import asyncio
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
+from everos.core.context import resolve_request_id
 from everos.core.errors import (
     DeletionIncompleteError,
     PathTraversalError,
@@ -43,6 +45,8 @@ from everos.core.errors import (
 )
 from everos.core.observability.logging import get_logger
 from everos.memory import DeviceLine, project_device_batch
+from everos.memory.extract.trace import collect_construction_trace
+from everos.memory.search.trace import collect_search_trace
 
 from ._delete import Deleter
 from ._delete import DeleteResult as DeleteResult
@@ -95,6 +99,7 @@ class MemoryService:
         get_manager: Answers :meth:`get`.
         raw_file_builder: Host file hydration capability for ingestion.
         index_eraser: Removes deleted memories' index rows (:meth:`delete`).
+        memtrace_tracker: Optional execution-graph recorder injected by bootstrap.
         purge_marks: The root's purge marks: the async queue drops rows a
             purge superseded; each delivery and each extraction is registered
             while it runs, so a purge can wait for it. ``None`` ignores purges.
@@ -114,9 +119,11 @@ class MemoryService:
         get_manager: GetManager,
         raw_file_builder: RawFileBuilder,
         index_eraser: IndexEraser,
+        memtrace_tracker: Any = None,
         purge_marks: PurgeMarks | None = None,
         input_log: InputLogWriter | None = None,
     ) -> None:
+        self._memtrace_tracker = memtrace_tracker
         self._search_manager = search_manager
         self._get_manager = get_manager
         self._input_log = input_log
@@ -163,7 +170,21 @@ class MemoryService:
 
     async def search(self, req: SearchRequest) -> SearchResponse:
         """Hybrid retrieval across the configured memory backends."""
-        return await self._search_manager.search(req)
+        tracker = getattr(self, "_memtrace_tracker", None)
+        if tracker is None or not tracker.enabled:
+            return await self._search_manager.search(req)
+
+        request_id = resolve_request_id()
+        with collect_search_trace() as stages:
+            try:
+                resp = await self._search_manager.search(req)
+            except Exception as exc:
+                await tracker.on_search_error(
+                    req, stages=stages, error=exc, request_id=request_id
+                )
+                raise
+        await tracker.on_search(req, resp, stages=stages, request_id=request_id)
+        return resp
 
     async def get(self, req: GetRequest) -> GetResponse:
         """Paginated listing over the requested ``memory_type``."""
@@ -459,6 +480,36 @@ class MemoryService:
             defer_extraction: Persist fresh messages to the unprocessed buffer
                 but skip boundary detection and both extraction pipelines.
         """
-        return await self._memorizer.run(
-            payload, is_final=is_final, defer_extraction=defer_extraction
+        request_id = resolve_request_id()
+        tracker = getattr(self, "_memtrace_tracker", None)
+        context = (
+            collect_construction_trace()
+            if tracker is not None and getattr(tracker, "enabled", False)
+            else nullcontext([])
         )
+        with context as events:
+            try:
+                result = await self._memorizer.run(
+                    payload, is_final=is_final, defer_extraction=defer_extraction
+                )
+            except BaseException as exc:
+                if tracker is not None:
+                    await tracker.on_memorize_error(
+                        payload,
+                        is_final=is_final,
+                        defer_extraction=defer_extraction,
+                        error=exc,
+                        request_id=request_id,
+                        **({"construction_events": events} if events else {}),
+                    )
+                raise
+            if tracker is not None:
+                await tracker.on_memorize(
+                    payload,
+                    is_final=is_final,
+                    defer_extraction=defer_extraction,
+                    result=result,
+                    request_id=request_id,
+                    **({"construction_events": events} if events else {}),
+                )
+            return result
