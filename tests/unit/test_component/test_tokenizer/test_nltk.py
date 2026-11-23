@@ -51,6 +51,17 @@ def test_tokens_match_the_everalgo_harness(text: str, expected: list[str]) -> No
     assert NltkTokenizer().tokenize(text) == expected
 
 
+def test_a_word_after_an_opening_quote_is_kept() -> None:
+    """NLTK 3.10 splits a leading quote off a word; 3.9.4 dropped the word.
+
+    The one token difference between the two releases on LoCoMo + LongMemEval
+    text (449 of 83,484 texts). The harness above ran 3.9.4, so it has no
+    such case; this pins the pinned release's behaviour.
+    """
+    text = "Camping with my fam, 'cause nature helps."
+    assert NltkTokenizer().tokenize(text) == ["camp", "fam", "caus", "natur", "help"]
+
+
 def test_tokenize_batch_preserves_order() -> None:
     texts = ["What did Melanie paint?", "", "swimming lessons"]
     assert NltkTokenizer().tokenize_batch(texts) == [

@@ -14,7 +14,9 @@ Load-bearing rules:
 * The ``punkt_tab`` and ``stopwords`` NLTK data must already be installed.
   Nothing is downloaded at runtime: a missing resource fails at construction.
 * The token stream depends on the NLTK release, so the ``[nltk]`` extra pins
-  the one the harness used.
+  one exactly. It is 3.10.4, newer than the harness's 3.9.4: it fixes
+  a PorterStemmer denial of service, and the two differ only on a word right
+  after an opening quote (``'cause``), which 3.9.4 dropped.
 """
 
 from __future__ import annotations
