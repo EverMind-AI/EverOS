@@ -3,9 +3,9 @@
 Locks the fix for the tantivy implicit-AND poison: when a query
 contains an IDF≈0 token (typically the partition owner's own name on
 an owner-scoped corpus), the entire query used to return 0 hits. The
-fixed path wraps each token in a ``BooleanQuery`` with ``SHOULD``
-clauses (mirrors enterprise ES ``bool.should + minimum_should_match=1``)
-so other tokens can carry the query.
+fixed path matches the tokens with the OR operator (mirrors enterprise
+ES ``bool.should + minimum_should_match=1``) so other tokens can carry
+the query.
 
 These tests build a tiny in-memory corpus where one term is 100% DF
 (the "poison" term) and verify that mixing it with informative
@@ -105,12 +105,77 @@ def test_build_or_query_single_token_returns_match_query() -> None:
     assert isinstance(q, MatchQuery)
 
 
-def test_build_or_query_multi_token_returns_boolean_query() -> None:
-    """≥2 tokens → BooleanQuery with one SHOULD clause per token."""
-    from lancedb.query import BooleanQuery
+def test_build_or_query_distinct_tokens_return_one_or_match_query() -> None:
+    """≥2 distinct tokens → one OR MatchQuery, not a clause per token.
+
+    Replaces the old one-SHOULD-clause-per-token shape: LanceDB runs a full
+    plan per clause and each plan's prefilter reads every data file, which
+    multiplied the descriptors a search holds by its token count (2026-11
+    soak reached the 8192 open-file limit).
+    """
+    from lancedb.query import FullTextOperator, MatchQuery
 
     q = build_or_query(["alice", "support", "group"], column="episode_tokens")
+    assert isinstance(q, MatchQuery)
+    assert q.query == "alice support group"
+    assert q.operator == FullTextOperator.OR
+    assert q.boost == 1.0
+
+
+def test_build_or_query_repeated_token_gets_one_clause_per_repeat() -> None:
+    """A repeated token keeps the weight its repeated clauses gave it."""
+    from lancedb.query import BooleanQuery
+
+    q = build_or_query(["group", "alice", "group"], column="episode_tokens")
     assert isinstance(q, BooleanQuery)
+    assert [c.query for _, c in q.queries] == ["group alice", "group"]
+
+
+async def test_build_or_query_scores_match_one_clause_per_token(
+    storage: Storage,
+) -> None:
+    """Real BM25: same per-row scores as the old one-SHOULD-per-token query."""
+    from lancedb.query import BooleanQuery, MatchQuery, Occur
+
+    await storage.repos.episode.upsert(
+        [
+            _episode_row(eid=f"ep_{i}", owner_id="alice", body_tokens=body)
+            for i, body in enumerate(
+                [
+                    "alice attended lgbtq support group last tuesday",
+                    "alice tried watercolor painting on saturday morning",
+                    "support group met again and alice brought painting supplies",
+                    "bob went hiking",
+                ]
+            )
+        ]
+    )
+    tbl = await storage.lance.table(Episode.TABLE_NAME, Episode)
+
+    async def scores(query: object) -> dict[str, float]:
+        rows = (
+            await tbl.query().nearest_to_text(query).select(["id"]).to_arrow()
+        ).to_pylist()
+        return {row["id"]: row["_score"] for row in rows}
+
+    # No inverted index yet: LanceDB's brute-force path (the path rows written
+    # since the last optimize take). Then the inverted index.
+    for indexed in (False, True):
+        if indexed:
+            await storage.repos.episode.rebuild_indexes()
+            assert await tbl.list_indices()
+        for tokens in (
+            ["alice", "support", "painting"],
+            ["support", "group", "support", "painting", "support"],
+        ):
+            per_token = BooleanQuery(
+                [(Occur.SHOULD, MatchQuery(t, column="episode_tokens")) for t in tokens]
+            )
+            built = build_or_query(tokens, column="episode_tokens")
+            expected, got = await scores(per_token), await scores(built)
+            assert expected.keys() == got.keys()
+            for rid, score in expected.items():
+                assert got[rid] == pytest.approx(score, rel=1e-5), (indexed, tokens)
 
 
 # ── Live recall: poison token + informative token must surface results ──

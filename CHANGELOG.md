@@ -62,6 +62,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `last_error` stay. The sweep (this trim and the retention purge) now runs
   every `scan_interval_seconds` while the worker is busy too, not only
   between drains.
+- **A keyword search no longer reads its table once per query word.** The
+  BM25 leg (keyword, hybrid and agentic search) sent LanceDB one clause per
+  token, and LanceDB plans each clause on its own, its filter reading every
+  data file of the table; a six-word question opened each file six times.
+  Concurrent searches on a table split into many data files drove the server
+  to its 8192 open-file limit in an 8-hour soak, failing searches with "Too
+  many open files". Each search is now one OR query over all its words (a
+  repeated word adds one more clause, keeping its weight): scores and ranks
+  are unchanged, and in a 40-minute side-by-side soak the open files peaked
+  at 106 instead of 1,238 while keyword search's median latency fell from 21
+  to 13 ms.
 
 ## [1.7.1] - 2026-11-20
 

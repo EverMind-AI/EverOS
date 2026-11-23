@@ -16,10 +16,16 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import re
+from collections import Counter
 from collections.abc import Sequence
 from typing import Any, Final, overload
 
-from lancedb.query import BooleanQuery, FullTextQuery, MatchQuery
+from lancedb.query import (
+    BooleanQuery,
+    FullTextOperator,
+    FullTextQuery,
+    MatchQuery,
+)
 
 try:
     from lancedb.query import Occur
@@ -115,15 +121,34 @@ def _where(where: Filter | str) -> str:
 
 
 def build_or_query(tokens: Sequence[str], column: str) -> FullTextQuery | None:
-    """Build LanceDB's OR-mode BM25 query for already-tokenized terms."""
+    """Build LanceDB's OR-mode BM25 query for already-tokenized terms.
+
+    One ``MatchQuery`` with the OR operator holding every distinct token, not
+    one clause per token: LanceDB plans every ``BooleanQuery`` clause on its
+    own, and each plan prefilters by reading every data file of the table, so
+    a six-token query opened each file six times (127 descriptors against 22
+    on a soak table; concurrent searches pushed the process to its 8192
+    limit). BM25 sums the matched tokens either way, so the score is the
+    same. A token the query repeats keeps the weight its repeated clauses
+    gave it: clause ``k`` holds the tokens that occur at least ``k`` times, so
+    a query without repeats is one clause. Not ``boost``: LanceDB's
+    brute-force path (rows not yet in the inverted index) ignores it.
+    """
     clean = [token for token in tokens if token]
     if not clean:
         return None
-    if len(clean) == 1:
-        return MatchQuery(clean[0], column=column)
-    return BooleanQuery(
-        [(Occur.SHOULD, MatchQuery(token, column=column)) for token in clean]
-    )
+    counts = Counter(clean)  # first-seen order
+    clauses = [
+        MatchQuery(
+            " ".join(token for token, n in counts.items() if n >= k),
+            column=column,
+            operator=FullTextOperator.OR,
+        )
+        for k in range(1, max(counts.values()) + 1)
+    ]
+    if len(clauses) == 1:
+        return clauses[0]
+    return BooleanQuery([(Occur.SHOULD, clause) for clause in clauses])
 
 
 class LanceIndexContract[T]:
