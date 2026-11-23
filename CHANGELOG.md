@@ -73,6 +73,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are unchanged, and in a 40-minute side-by-side soak the open files peaked
   at 106 instead of 1,238 while keyword search's median latency fell from 21
   to 13 ms.
+- **A search waits for open-file headroom instead of failing with "Too many
+  open files".** A LanceDB query holding one of the
+  `[lancedb] max_concurrent_queries` slots now waits, up to 10 s, while the
+  process holds 75% of its open-file soft limit; the searches already
+  running release their files within seconds. Counted by
+  `everos_lancedb_fd_headroom_waits_total`; a wait that runs out is logged
+  (`lancedb_fd_headroom_wait_expired`) and the query runs anyway. `everos
+  server start` raises the soft limit to 32768 instead of 8192 (still capped
+  at the hard limit), and where macOS refuses that it steps down rather than
+  staying at 256.
 
 ## [1.7.1] - 2026-11-20
 
