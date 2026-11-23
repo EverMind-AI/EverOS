@@ -503,7 +503,16 @@ class SearchManager:
                 lanes.facts.candidates,
                 top_k=top_k,
             )
-            record_stage("rrf", "episode", kept)
+            record_stage(
+                "rrf",
+                "episode",
+                kept,
+                inputs=[
+                    ("episode", "sparse"),
+                    ("episode", "dense"),
+                    ("episode", "maxsim_atomic"),
+                ],
+            )
             facts = await self._fact.facts_for_episodes(
                 build_ep_to_fact_parents(kept),
                 where,
@@ -562,6 +571,7 @@ class SearchManager:
         facts = facts.within_radius(radius)
         record_stage("sparse", "episode", sparse.candidates)
         record_stage("dense", "episode", dense.candidates)
+        record_stage("maxsim_atomic", "episode", facts.candidates)
         return _HybridLanes(
             sparse=sparse,
             dense=dense,

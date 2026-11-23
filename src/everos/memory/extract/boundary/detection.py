@@ -166,6 +166,10 @@ class BoundaryDetection:
         buffered = await self._session_buffer.list(session)
         fresh = await self._not_yet_cut(session, fresh, buffered)
         if not fresh:
+            # Every row was already cut; the buffer is unchanged. Still emit
+            # the authoritative snapshot so the tracer does not mistake the
+            # resent request messages for newly buffered input.
+            _record_buffer_loaded(ingested, buffered, buffered)
             return _empty_outcome("skipped", message_count=0)
         merged = merge_dedupe_sort(buffered, fresh)
         _record_buffer_loaded(ingested, buffered, merged)
@@ -203,6 +207,10 @@ class BoundaryDetection:
         buffered = await self._session_buffer.list(session)
         fresh = await self._not_yet_cut(session, fresh, buffered)
         if not fresh and not is_final:
+            # Every row was already cut; the buffer is unchanged. Still emit
+            # the authoritative snapshot so the tracer does not mistake the
+            # resent request messages for newly buffered input.
+            _record_buffer_loaded(ingested, buffered, buffered)
             return _empty_outcome("skipped", message_count=0)
         merged = merge_dedupe_sort(buffered, fresh)
         _record_buffer_loaded(ingested, buffered, merged)

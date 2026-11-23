@@ -1424,10 +1424,18 @@ async def test_hybrid_user_records_hierarchy_stage_sequence() -> None:
     assert [(s.phase, s.kind) for s in stages if s.kind == "episode"] == [
         ("sparse", "episode"),
         ("dense", "episode"),
+        ("maxsim_atomic", "episode"),
         ("rrf", "episode"),
         ("hierarchy", "episode"),
         ("filtered", "episode"),
     ]
+    rrf = next(s for s in stages if s.phase == "rrf" and s.kind == "episode")
+    by_phase = {s.phase: s for s in stages if s.kind == "episode"}
+    assert rrf.input_stage_ids == (
+        by_phase["sparse"].stage_id,
+        by_phase["dense"].stage_id,
+        by_phase["maxsim_atomic"].stage_id,
+    )
 
 
 async def test_hybrid_user_without_min_score_skips_filtered_stage() -> None:
@@ -1440,6 +1448,7 @@ async def test_hybrid_user_without_min_score_skips_filtered_stage() -> None:
     assert [s.phase for s in stages if s.kind == "episode"] == [
         "sparse",
         "dense",
+        "maxsim_atomic",
         "rrf",
         "hierarchy",
     ]

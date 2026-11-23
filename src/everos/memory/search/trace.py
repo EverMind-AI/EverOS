@@ -20,7 +20,8 @@ request land in one list.
 
 Stage ``phase`` vocabulary: ``sparse`` / ``dense`` (per-route recall),
 ``single_route`` (KEYWORD / VECTOR one-route recall), ``maxsim_atomic``
-(VECTOR episode max-pool), ``rrf`` / ``hierarchy`` / ``filtered``
+(VECTOR episode max-pool; also the atomic-fact lane of episode HYBRID),
+``rrf`` / ``hierarchy`` / ``filtered``
 (episode HYBRID hierarchy pipeline), ``fusion`` (everalgo rank output),
 ``bridged_dense`` (case→skill bridge merged dense pool), ``agentic``.
 ``kind`` is the recaller business kind: ``episode`` / ``agent_case`` /
