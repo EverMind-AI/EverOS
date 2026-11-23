@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An installed EverOS starts without downloading the token-counting
+  encoding.** The agent track counts prompt tokens with tiktoken's
+  `o200k_base` encoding, which tiktoken downloads (3.6 MB) the first time a
+  process uses it and caches in the temp dir: a host without internet access
+  could not start, and a cleaned temp dir meant downloading again. The wheel
+  now carries the encoding (fetched at build time by `hatch_build.py` and
+  checked against tiktoken's sha256; the wheel grows from 0.9 to 2.6 MB), and
+  the start-up warm-up copies it to where tiktoken looks. An existing
+  `TIKTOKEN_CACHE_DIR` is still honoured. A source checkout (`uv sync`) has
+  no copy and downloads as before; building a wheel needs the network.
 - **The CLI preloads jemalloc on Linux where it is installed.** With
   `libjemalloc2` present, `everos` re-executes with
   `LD_PRELOAD=libjemalloc.so.2` and
