@@ -388,9 +388,14 @@ async def test_drain_time_counts_toward_the_budget(
     storage: Storage, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Persisted while it waits, so a restart does not reset it; at the
-    budget the job fails and says why on the store the second pass missed."""
+    budget the job fails and says why on the store the second pass missed.
+
+    The budget is wall time from the start, so it must outlast pass one with
+    room to spare: a pass one slower than the budget (seen at ~1 s on the
+    Windows runner) ends the job before the wait and blames a pass-one step.
+    """
     monkeypatch.setattr(_runner, "_DRAIN_SAVE_S", 0.05)
-    p, job_id = await _confirmed(storage, run_budget_seconds=1)
+    p, job_id = await _confirmed(storage, run_budget_seconds=3)
     forever = p.marks.track(_old())  # never ends
     forever.__enter__()
     assert await p.run_to_end(job_id) == "failed"
