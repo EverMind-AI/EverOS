@@ -12,6 +12,7 @@ import asyncio
 import datetime as dt
 import hashlib
 import json
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,60 @@ class InputLogWriter:
         )
         async with self._lock:
             await asyncio.to_thread(self._append_sync, directory, now, line)
+
+    async def delete_session(
+        self, *, app_id: str, project_id: str, session_id: str
+    ) -> None:
+        """Drop one session's lines from every daily file in the scope."""
+        directory = (
+            self._root
+            / self._app_dir(app_id)
+            / self._project_dir(project_id)
+            / _LOG_DIR
+        )
+        async with self._lock:
+            await asyncio.to_thread(self._delete_session_sync, directory, session_id)
+
+    def _delete_session_sync(self, directory: Path, session_id: str) -> None:
+        if not directory.is_dir():
+            return
+        for path in directory.glob("*.jsonl"):
+            original = path.read_text(encoding="utf-8").splitlines()
+            kept: list[str] = []
+            for line in original:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    kept.append(line)
+                    continue
+                if record.get("session_id") != session_id:
+                    kept.append(line)
+            if not kept:
+                path.unlink(missing_ok=True)
+            elif len(kept) != len(original):
+                temp = path.with_suffix(".tmp")
+                temp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+                temp.replace(path)
+
+    async def purge_scope(self, scope: Any) -> None:
+        """Remove every ``.input_log`` directory the purge scope covers."""
+        async with self._lock:
+            await asyncio.to_thread(self._purge_scope_sync, scope)
+
+    def _purge_scope_sync(self, scope: Any) -> None:
+        if scope.kind == "space":
+            dirs = list(self._root.glob("*/*/.input_log"))
+        elif scope.kind == "app":
+            dirs = list((self._root / str(scope.app_dir)).glob("*/.input_log"))
+        else:
+            dirs = [self._root / str(scope.app_dir) / str(scope.project_dir) / _LOG_DIR]
+        for directory in dirs:
+            try:
+                shutil.rmtree(directory)
+            except FileNotFoundError:
+                # Already gone is success; any other removal failure must
+                # escape so the purge runner retries the step.
+                continue
 
     def _directory(self, payload: dict[str, Any]) -> Path:
         app_id = str(payload.get("app_id", "default"))

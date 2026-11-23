@@ -12,7 +12,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from everos.core.errors import (
     NotFoundError,
@@ -77,6 +77,7 @@ class PurgeService:
     index_store: str
     engine: OfflineEngine
     fence: DeleteFence
+    input_log: Any = None
     _nonces: dict[str, _Nonce] = field(default_factory=dict, init=False)
     _reserved: set[str] = field(default_factory=set, init=False)
     _recording: asyncio.Event | None = field(default=None, init=False)
@@ -314,6 +315,7 @@ class PurgeService:
             engine=self.engine,
             fence=self.fence,
             scope_of=self.scope_of,
+            input_log=self.input_log,
         )
         self._runner.start()
 
