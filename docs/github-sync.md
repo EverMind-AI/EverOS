@@ -35,7 +35,7 @@ community-facing text). Keep the GitHub versions:
 - `CONTRIBUTING.md` — says "curated PR contributions", not "no external PRs"
 - `.github/PULL_REQUEST_TEMPLATE.md` — GitHub PR template
 - `.github/BRANCH_PROTECTION.md` — GitHub branch protection rules
-- `.github/workflows/ci.yml` — targets `main`, uses `actions/checkout@v6`
+- `.github/workflows/ci.yml` — targets `main`, pins every action to a commit SHA
 - `.github/workflows/docs.yml` — GitHub-only doc checks
 - `.github/workflows/commits.yml` — GitHub-only commit lint
 - `.github/ISSUE_TEMPLATE/**` — `.yml` format (GitLab uses `.md`)
