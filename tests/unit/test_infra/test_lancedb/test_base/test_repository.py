@@ -37,6 +37,7 @@ from everos.infra.persistence.lancedb import (
 from everos.infra.persistence.lancedb._base import (
     LanceDailyLogRepoBase,
     ensure_fts_indexes,
+    ensure_scalar_indexes,
 )
 from everos.infra.persistence.records import DenseVector, IndexRecord
 from tests.fakes import UnusedPort, arrow_schema
@@ -472,6 +473,47 @@ async def test_ensure_fts_indexes_is_idempotent(tmp_path: Path) -> None:
     await ensure_fts_indexes(table, schema_for(_SearchNote, dim=_DIM))
     first = await table.list_indices()
     await ensure_fts_indexes(table, schema_for(_SearchNote, dim=_DIM))
+    second = await table.list_indices()
+
+    assert len(first) == len(second)
+    conn.close()
+
+
+async def test_ensure_scalar_indexes_creates_btree_on_id(tmp_path: Path) -> None:
+    """A business table gets a BTree on ``id`` for keyed lookups (#477)."""
+    mr = MemoryRoot(tmp_path)
+    mr.ensure()
+    conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
+    table = await conn.create_table(
+        "_search_note", schema=arrow_schema(_SearchNote, dim=_DIM)
+    )
+    await table.add(
+        [_SearchNote(id="1", text="hi", tokens="hi", vector=[1, 0, 0, 0]).model_dump()]
+    )
+
+    await ensure_scalar_indexes(table, schema_for(_SearchNote, dim=_DIM))
+
+    indices = await table.list_indices()
+    indexed_cols = {col for idx in indices for col in (idx.columns or [])}
+    assert "id" in indexed_cols
+    conn.close()
+
+
+async def test_ensure_scalar_indexes_is_idempotent(tmp_path: Path) -> None:
+    """Re-running ensure does not create a second ``id`` index."""
+    mr = MemoryRoot(tmp_path)
+    mr.ensure()
+    conn = await open_lancedb_connection(mr.lancedb_dir, LanceDBSettings())
+    table = await conn.create_table(
+        "_search_note", schema=arrow_schema(_SearchNote, dim=_DIM)
+    )
+    await table.add(
+        [_SearchNote(id="1", text="hi", tokens="hi", vector=[1, 0, 0, 0]).model_dump()]
+    )
+
+    await ensure_scalar_indexes(table, schema_for(_SearchNote, dim=_DIM))
+    first = await table.list_indices()
+    await ensure_scalar_indexes(table, schema_for(_SearchNote, dim=_DIM))
     second = await table.list_indices()
 
     assert len(first) == len(second)

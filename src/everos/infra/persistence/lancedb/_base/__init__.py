@@ -23,6 +23,7 @@ from .indexes import (
 )
 from .indexes import VECTOR_QUERY_NPROBES as VECTOR_QUERY_NPROBES
 from .indexes import ensure_fts_indexes as ensure_fts_indexes
+from .indexes import ensure_scalar_indexes as ensure_scalar_indexes
 from .indexes import ensure_vector_indexes as ensure_vector_indexes
 from .repository import LanceDailyLogRepoBase as LanceDailyLogRepoBase
 from .repository import LanceRepoBase as LanceRepoBase
@@ -39,6 +40,7 @@ __all__ = [
     "TableSource",
     "arrow_schema_for",
     "ensure_fts_indexes",
+    "ensure_scalar_indexes",
     "ensure_vector_indexes",
     "open_lancedb_connection",
 ]
