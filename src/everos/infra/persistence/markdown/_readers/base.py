@@ -98,7 +98,12 @@ class BaseDailyReader:
         )
         if not await anyio.Path(path).is_file():
             return None
-        return await MarkdownReader.read(path)
+        try:
+            return await MarkdownReader.read(path)
+        except FileNotFoundError:
+            # A deletion can remove the file between the check and the read;
+            # "not yet written" and "just removed" are both absent.
+            return None
 
     async def find_entry(
         self,
