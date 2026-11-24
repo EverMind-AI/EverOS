@@ -528,6 +528,8 @@ and a purge removes the covered scopes' `.input_log/` directories.
 | `max_inline_bytes` | int | `1048576` | A line larger than this keeps text verbatim but replaces each `base64` attachment with its byte length and SHA-256. |
 
 A failed log write is reported at error level and **never fails `/add`**.
+On POSIX, `.input_log/` is created `0700` and each `*.jsonl` file `0600`
+(an existing file is tightened on the next write).
 
 ### `[agent_memory]`
 

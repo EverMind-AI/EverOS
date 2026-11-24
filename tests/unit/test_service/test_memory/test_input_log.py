@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -223,3 +225,26 @@ async def test_purge_scope_removes_the_log_directory(tmp_path: Path) -> None:
         tmp_path / app_dir_name("default") / project_dir_name("default") / ".input_log"
     )
     assert not directory.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+async def test_log_files_are_private_and_tighten_existing(tmp_path: Path) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    await writer.log_add(_payload(), request_id="r1")
+    directory = (
+        tmp_path / app_dir_name("default") / project_dir_name("default") / ".input_log"
+    )
+    path = next(directory.glob("*.jsonl"))
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    os.chmod(directory, 0o755)
+    os.chmod(path, 0o644)
+    await writer.log_add(_payload(), request_id="r2")
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
