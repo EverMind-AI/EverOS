@@ -17,7 +17,8 @@ no conversation is stored twice. Each session is one or more synchronous
 that fails (not 200, or no answer) is sent again, up to ``--attempts`` times. A
 session still failing then is left unfinished, and once every worker is done the
 build exits 1 listing them: a store missing sessions is not the documented one.
-Re-running it is safe, a resent message is not stored twice. Otherwise it waits
+On EverOS 1.8.0 or later re-running it is safe: a resent message is not stored
+twice. Otherwise it waits
 until the store stops growing: facts and profiles are extracted in the
 background, so it waits for five minutes in a row of an idle cascade and
 unchanged index row counts.

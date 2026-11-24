@@ -206,6 +206,9 @@ real providers; every measurement after that uses the stubs and costs nothing.
    ```
 
    It ingests `locomo:0-9,lme:0-111` and waits until background extraction has finished.
+   A request that still fails after three attempts leaves its session unfinished, and the
+   build exits 1 listing those sessions; on 1.8.0 or later, run it again (a resent
+   message is not stored twice).
    Extraction is an LLM's work, so a rebuilt store holds about, not exactly, the same
    memories. Stop the server; its root (`EVEROS_ROOT`) is the store.
 
