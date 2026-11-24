@@ -7,6 +7,7 @@ model or running server is needed; CLI dispatch is exercised via --help.
 
 from __future__ import annotations
 
+import ctypes.util
 import json
 import os
 import subprocess
@@ -33,8 +34,8 @@ pytestmark = pytest.mark.skipif(not _glibc(), reason="requires the glibc allocat
 def _run(tmp_path: Path, arguments: list[str], overrides: dict[str, str] | None = None):
     log = tmp_path / "allocator.jsonl"
     environment = dict(os.environ)
-    environment.pop("MALLOC_ARENA_MAX", None)
-    environment.pop("GLIBC_TUNABLES", None)
+    for name in ("MALLOC_ARENA_MAX", "GLIBC_TUNABLES", "LD_PRELOAD", "MALLOC_CONF"):
+        environment.pop(name, None)
     environment.update(overrides or {})
     environment["EVEROS_ALLOCATOR_PROBE_LOG"] = str(log)
     environment["PYTHONPATH"] = os.pathsep.join(
@@ -125,3 +126,24 @@ def test_import_does_not_change_host_policy(tmp_path: Path) -> None:
     assert [r["phase"] for r in rows] == ["startup", "exit"]
     assert all(r["arena_max"] is None for r in rows)
     assert all(r["heaps"] > 2 for r in rows)
+
+
+@pytest.mark.skipif(
+    not ctypes.util.find_library("jemalloc"), reason="libjemalloc2 not installed"
+)
+def test_installed_jemalloc_is_loaded_after_the_reexec(tmp_path: Path) -> None:
+    _, rows = _run(tmp_path, ["-m", "everos.entrypoints.cli.main", "--help"])
+    assert [r["phase"] for r in rows] == ["startup", "startup", "exit"]
+    assert not rows[0]["jemalloc"]
+    assert rows[1]["jemalloc"] and rows[2]["jemalloc"]
+
+
+def test_operator_preload_skips_jemalloc(tmp_path: Path) -> None:
+    _, rows = _run(
+        tmp_path,
+        ["-m", "everos.entrypoints.cli.main", "--help"],
+        {"MALLOC_CONF": "narenas:2"},
+    )
+    assert [r["phase"] for r in rows] == ["startup", "startup", "exit"]
+    assert not any(r["jemalloc"] for r in rows)
+    assert rows[-1]["arena_max"] == "2"

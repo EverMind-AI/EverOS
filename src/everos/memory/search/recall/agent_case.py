@@ -40,11 +40,11 @@ class AgentCaseRecaller:
     async def sparse_recall(
         self, query: str, where: Filter, *, limit: int
     ) -> RecallResult[AgentCase]:
-        """Dual-column BM25 recall via OR-mode BooleanQuery per column.
+        """Dual-column BM25 recall in OR mode, per column.
 
-        Each tokenised term becomes a ``SHOULD`` clause so a single
+        Any tokenised term may match (``build_or_query``) so a single
         IDF≈0 token doesn't poison the column query (see
-        ``EpisodeRecaller.sparse_recall``). One BooleanQuery is built
+        ``EpisodeRecaller.sparse_recall``). One query is built
         per BM25 column (``MatchQuery`` is column-bound), then the
         two per-column result lists merge by id keeping the max score.
         """

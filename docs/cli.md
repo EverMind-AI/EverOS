@@ -32,10 +32,21 @@ once so glibc reads the setting at process startup; command arguments and
 Python interpreter flags are preserved. Reload workers inherit the setting.
 macOS, Windows and non-glibc Linux keep their existing allocator behavior.
 
+Where jemalloc is installed (`apt install libjemalloc2` on Debian / Ubuntu;
+found the way `ctypes.util.find_library("jemalloc")` finds it) the re-exec
+also preloads it: `LD_PRELOAD=libjemalloc.so.2` with
+`MALLOC_CONF=oversize_threshold:0,dirty_decay_ms:1000,narenas:4`. On a 4-core,
+8 GB server it doubled keyword search throughput and halved hybrid search
+latency, with a long-run footprint no larger than glibc's two arenas. Child
+processes the server starts (a document parser, for one) inherit the preload.
+
 An explicitly supplied `MALLOC_ARENA_MAX` or
-`GLIBC_TUNABLES=glibc.malloc.arena_max=...` takes precedence. For example:
+`GLIBC_TUNABLES=glibc.malloc.arena_max=...` takes precedence and keeps glibc;
+an explicit `LD_PRELOAD` or `MALLOC_CONF` keeps the operator's allocator and
+gets only the arena default. For example:
 
 ```bash
+MALLOC_ARENA_MAX=2 everos server start  # glibc with two arenas, no jemalloc
 MALLOC_ARENA_MAX=4 everos server start  # favor allocation concurrency
 MALLOC_ARENA_MAX=0 everos server start  # retain glibc's automatic arena limit
 ```

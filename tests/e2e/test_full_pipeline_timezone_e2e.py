@@ -25,6 +25,7 @@ Real LLM (boundary detection + episode extraction) + real embedder
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 from collections.abc import Awaitable, Callable
 
@@ -46,6 +47,29 @@ async def _switch_display_tz(monkeypatch: pytest.MonkeyPatch, tz: str) -> None:
     monkeypatch.setenv("EVEROS_MEMORY__TIMEZONE", tz)
     load_settings.cache_clear()
     dt_module._display_tz.cache_clear()
+
+
+async def _search_until_hit(
+    client: httpx.AsyncClient, body: dict, *, deadline_seconds: float
+) -> list[dict]:
+    """POST /search until it returns an episode or the deadline passes.
+
+    A fresh episode can be missing from keyword results until the cascade's
+    next optimize merges it into the FTS index (at most one optimize interval,
+    60s by default): lancedb 0.34 flat-scans rows the index does not cover yet
+    and drops a row whose query term occurs more than once -- this episode's
+    subject and body both say "climbing". Fixed upstream from lancedb 0.36,
+    which the ``<0.35`` pin keeps out for now.
+    """
+    loop = asyncio.get_running_loop()
+    end = loop.time() + deadline_seconds
+    while True:
+        resp = await client.post("/api/v1/memory/search", json=body, timeout=60.0)
+        assert resp.status_code == 200, resp.text
+        episodes = resp.json()["data"]["episodes"]
+        if episodes or loop.time() >= end:
+            return episodes
+        await asyncio.sleep(1.0)
 
 
 @pytest.mark.slow
@@ -117,20 +141,18 @@ async def test_full_pipeline_tz_switch_preserves_utc_instant(
     await pipeline_done_poll(deadline_seconds=600.0)
 
     # ── Step 5: /search + /get under Shanghai display tz ──
-    resp_search_sh = await async_client.post(
-        "/api/v1/memory/search",
-        json={
-            "user_id": user_id,
-            "query": "climbing",
-            "method": "keyword",  # no embedder cost; FTS index built by cascade
-            "filters": {"session_id": session_id},
-        },
-        timeout=60.0,
+    search_body = {
+        "user_id": user_id,
+        "query": "climbing",
+        "method": "keyword",  # no embedder cost; FTS index built by cascade
+        "filters": {"session_id": session_id},
+    }
+    eps_search_sh = await _search_until_hit(
+        async_client, search_body, deadline_seconds=180.0
     )
-    assert resp_search_sh.status_code == 200, resp_search_sh.text
-    eps_search_sh = resp_search_sh.json()["data"]["episodes"]
     assert eps_search_sh, (
-        f"/search must return an episode after flush+cascade; got {eps_search_sh!r}"
+        "/search must return the episode within one cascade optimize interval "
+        f"after flush; got {eps_search_sh!r}"
     )
     ts_search_sh = eps_search_sh[0]["timestamp"]
     assert ts_search_sh.endswith("+08:00"), (

@@ -6,6 +6,7 @@ arena counts are checked by the Linux subprocess integration tests.
 
 from __future__ import annotations
 
+import ctypes.util
 import os
 import sys
 
@@ -21,6 +22,9 @@ def _glibc(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os, "confstr", lambda name: "glibc 2.39", raising=False)
     monkeypatch.delenv("MALLOC_ARENA_MAX", raising=False)
     monkeypatch.delenv("GLIBC_TUNABLES", raising=False)
+    monkeypatch.delenv("LD_PRELOAD", raising=False)
+    monkeypatch.delenv("MALLOC_CONF", raising=False)
+    monkeypatch.setattr(ctypes.util, "find_library", lambda name: None)
 
 
 def test_default_reexec_preserves_python_flags_and_cli_arguments(
@@ -148,3 +152,30 @@ def test_exec_failure_is_not_reported_as_success(
     )
     with pytest.raises(OSError, match="exec failed"):
         launcher.main()
+
+
+def test_installed_jemalloc_is_preloaded_beside_the_arena_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    found = {"jemalloc": "libjemalloc.so.2"}
+    monkeypatch.setattr(ctypes.util, "find_library", found.get)
+    result = launcher._default_arena_environment()
+    assert result is not None
+    assert result["LD_PRELOAD"] == "libjemalloc.so.2"
+    assert result["MALLOC_CONF"] == launcher.JEMALLOC_CONF
+    assert result["MALLOC_ARENA_MAX"] == "2"  # a preload that fails leaves glibc
+
+
+@pytest.mark.parametrize("variable", ["LD_PRELOAD", "MALLOC_CONF"])
+def test_an_operator_allocator_choice_is_not_replaced(
+    variable: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        ctypes.util, "find_library", lambda name: pytest.fail("jemalloc probed")
+    )
+    monkeypatch.setenv(variable, "operator value")
+    result = launcher._default_arena_environment()
+    assert result is not None
+    assert result[variable] == "operator value"
+    assert result["MALLOC_ARENA_MAX"] == "2"
+    assert {"LD_PRELOAD", "MALLOC_CONF"} - {variable} - result.keys()

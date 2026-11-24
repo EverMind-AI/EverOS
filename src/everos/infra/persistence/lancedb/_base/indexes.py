@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lancedb import AsyncTable
-from lancedb.index import FTS, IvfFlat
+from lancedb.index import FTS, IvfRq
 
 if TYPE_CHECKING:
     from everos.infra.persistence.index.schema import IndexSchema
@@ -27,11 +27,24 @@ it. Each light beat with new rows adds one; probing 16 of them cost ~1-3 ms extr
 at 27k-100k rows, while a retrain rewrites the whole index (107 MB at 27k x 1024,
 391 MB at 100k), so a trickle writer must not pay that every 300 s."""
 
-VECTOR_QUERY_NPROBES = 32
-"""Partitions probed per vector query. 32 partitions of 4096 rows cover the whole
-column, i.e. exact search, up to ~130k rows; past that the unprobed partitions
-are skipped and recall degrades gradually. Every ``nearest_to`` in the tree sets
-it, so the index and the query agree on what "exact" costs."""
+VECTOR_QUERY_NPROBES = 64
+"""Partitions probed per vector query. 64 partitions of 4096 rows cover the whole
+column up to ~260k rows; past that the unprobed partitions are skipped and recall
+degrades gradually. IVF_RQ partitions hold 1-bit codes, so 64 probes cost what 32
+did (hybrid lanes 28-31 ms either way, 2026-11), while 32 of the 39 partitions of
+161k facts left recall@10 against exact search at 0.993 (1.000 with all probed).
+Every ``nearest_to`` in the tree sets it, so the index and the query agree on what
+a search costs."""
+
+VECTOR_QUERY_REFINE_FACTOR = 5
+"""IVF_RQ ranks on 1-bit codes; the top ``limit x 5`` candidates are re-ranked
+on their stored vectors, which brings recall back to the IVF_FLAT index it
+replaced (recall@10 0.97-1.0 against exact search on 161k facts, 2026-11).
+Every ``nearest_to`` sets it next to :data:`VECTOR_QUERY_NPROBES`."""
+
+_VECTOR_INDEX_TYPE = "IvfRq"
+"""``list_indices`` name of the index :func:`ensure_vector_indexes` builds; an
+index of another type (IVF_FLAT before 2026-11) is rebuilt as this one."""
 
 
 async def ensure_fts_indexes(
@@ -107,23 +120,28 @@ async def ensure_fts_indexes(
 async def ensure_vector_indexes(
     table: AsyncTable, schema: IndexSchema, *, min_rows: int
 ) -> list[str]:
-    """Keep one IVF_FLAT (cosine) index per vector column that holds at
+    """Keep one IVF_RQ (cosine) index per vector column that holds at
     least ``min_rows`` non-null vectors; return the columns touched.
 
     Without an index LanceDB answers ``nearest_to`` with a brute-force
     scan of the whole column — linear in rows and in bytes (27k rows of
     1024-dim float32 is 112 MB and ~0.6 s per query on a laptop SSD),
-    and a hybrid search issues two or three of them. IVF_FLAT keeps
-    exact distances inside the probed partitions; with
-    :data:`VECTOR_INDEX_ROWS_PER_PARTITION` rows per partition and
-    :data:`VECTOR_QUERY_NPROBES` probes the search stays exact up to
-    ~130k rows. ``cosine`` matches the query side. Columns that are
-    still all-null (a Tier 1 store has no embeddings) are skipped:
-    there is nothing to train on.
+    and a hybrid search issues two or three of them. IVF_RQ stores one
+    bit per dimension (128 bytes for 1024 dimensions) and the query
+    re-ranks its best candidates on the stored vectors
+    (:data:`VECTOR_QUERY_REFINE_FACTOR`). The IVF_FLAT index it replaced
+    stored every vector whole: 0.66 GB for 161k facts, never held by the
+    16 MB index cache, so each query read ~0.5 GB of it again (1.1 GB
+    transient memory, 449 ms); IVF_RQ took 59-130 MB and 35-50 ms with
+    the same recall (2026-11, 4 cores). ``cosine`` matches the query
+    side. Columns that are still all-null (a Tier 1 store has no
+    embeddings) are skipped: there is nothing to train on.
 
-    Two cases do work; everything else is a no-op:
+    Three cases do work; everything else is a no-op:
 
     * no index yet and the column crossed ``min_rows`` -> build one;
+    * the index is not IVF_RQ (an IVF_FLAT from an earlier version) ->
+      rebuild it as IVF_RQ, once;
     * the index has grown more than :data:`VECTOR_INDEX_MAX_DELTAS` delta
       indices -> retrain it in place. Every
       ``optimize()`` on a table with new rows appends one *delta* index
@@ -141,7 +159,9 @@ async def ensure_vector_indexes(
     ponytail: retraining (``create_index(replace=True)``) rewrites the
     whole index once per heavy beat under load; merging the deltas
     instead needs pylance's ``optimize_indices``, which is not a
-    dependency. Revisit when a table passes ~500k rows.
+    dependency. Revisit when a table passes ~500k rows. The IVF_RQ index
+    (24 MB at 161k rows) is still re-read by each query once it outgrows
+    the 16 MB index cache, ~150 MB at 1M rows.
     """
     columns = [field.name for field in schema.vector_fields]
     if not columns:
@@ -152,7 +172,7 @@ async def ensure_vector_indexes(
     touched: list[str] = []
     for column in columns:
         existing = indices.get(column)
-        if existing is not None:
+        if existing is not None and existing.index_type == _VECTOR_INDEX_TYPE:
             stats = await table.index_stats(existing.name)
             if stats is None or stats.num_indices <= VECTOR_INDEX_MAX_DELTAS:
                 continue
@@ -162,7 +182,7 @@ async def ensure_vector_indexes(
         await table.create_index(
             column,
             replace=existing is not None,
-            config=IvfFlat(
+            config=IvfRq(
                 distance_type="cosine",
                 num_partitions=max(1, rows // VECTOR_INDEX_ROWS_PER_PARTITION),
             ),

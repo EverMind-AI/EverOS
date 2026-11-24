@@ -7,7 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The LanceDB index cache is 64 MB where the open-file limit allows.**
+  `[lancedb] index_cache_size_bytes` is now unset by default and chosen when
+  the connection opens: 64 MB when the process's open-file soft limit is at
+  least 8192 (`everos server start` raises it to 32768 where the hard limit
+  allows), else the previous 16 MB. 64 MB holds a 161k-row vector index and
+  its BM25 readers, so a hybrid search's three lanes stop re-reading them
+  (30.5 -> 20.3 ms); 200 rounds of writes, optimize and index retrains kept
+  open descriptors flat (peak 75, against 65 at 16 MB and 696 and climbing
+  with no cap). The cap still bounds the stale index readers LanceDB keeps
+  after optimize, so it never goes above 64 MB. A configured value is used
+  as before; the choice is logged as `lancedb_session_caches`.
+- **An installed EverOS starts without downloading the token-counting
+  encoding.** The agent track counts prompt tokens with tiktoken's
+  `o200k_base` encoding, which tiktoken downloads (3.6 MB) the first time a
+  process uses it and caches in the temp dir: a host without internet access
+  could not start, and a cleaned temp dir meant downloading again. The wheel
+  now carries the encoding (fetched at build time by `hatch_build.py` and
+  checked against tiktoken's sha256; the wheel grows from 0.9 to 2.6 MB), and
+  the start-up warm-up copies it to where tiktoken looks. An existing
+  `TIKTOKEN_CACHE_DIR` is still honoured. A source checkout (`uv sync`) has
+  no copy and downloads as before; building a wheel needs the network.
+- **The CLI preloads jemalloc on Linux where it is installed.** With
+  `libjemalloc2` present, `everos` re-executes with
+  `LD_PRELOAD=libjemalloc.so.2` and
+  `MALLOC_CONF=oversize_threshold:0,dirty_decay_ms:1000,narenas:4` beside the
+  existing `MALLOC_ARENA_MAX=2`. On a 4-core, 8 GB server keyword search went
+  from 80 to 161 QPS and hybrid search at 5 QPS from 4.3 to 2.4 s median,
+  while the last hour of an 8-hour write-and-search soak averaged 1125 MB
+  against 1221 MB with glibc. Without jemalloc nothing changes. An explicit
+  `MALLOC_ARENA_MAX` (or the glibc tunable) keeps glibc; an explicit
+  `LD_PRELOAD` or `MALLOC_CONF` keeps the operator's choice.
+
 ### Fixed
+
+- **Two intermittently red tests now fail only on a real regression.** The
+  real-SIGINT backfill test sent its Ctrl-C from a fixed 0.3s timer; on a
+  loaded host the timer fired after the 5s mocked phase had finished, the
+  run exited 0 and the test failed. The signal now waits for the phase to
+  report itself parked, and the test runs in the default suite (it was
+  `slow` only because of that race). The full-pipeline timezone e2e searched
+  the instant the pipeline drained and failed two runs in three on a
+  LanceDB limitation, now written up in
+  [how memory works](docs/how-memory-works.md): on the pinned LanceDB 0.34 a
+  memory written since the cascade's last optimize (60s by default) is
+  missing from `keyword` results, and from hybrid's keyword leg, when it
+  repeats the query term. Vector search is unaffected and LanceDB 0.36 fixes
+  it; raising the `<0.35` pin is a separate, validated upgrade. The test now
+  waits up to one optimize interval for the hit.
 
 - **An LLM reply cut off at the output cap is sent once more instead of
   failing its call.** A generation that runs away until `max_tokens`
@@ -47,6 +96,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `last_error` stay. The sweep (this trim and the retention purge) now runs
   every `scan_interval_seconds` while the worker is busy too, not only
   between drains.
+- **A keyword search no longer reads its table once per query word.** The
+  BM25 leg (keyword, hybrid and agentic search) sent LanceDB one clause per
+  token, and LanceDB plans each clause on its own, its filter reading every
+  data file of the table; a six-word question opened each file six times.
+  Concurrent searches on a table split into many data files drove the server
+  to its 8192 open-file limit in an 8-hour soak, failing searches with "Too
+  many open files". Each search is now one OR query over all its words (a
+  repeated word adds one more clause, keeping its weight): scores and ranks
+  are unchanged, and in a 40-minute side-by-side soak the open files peaked
+  at 106 instead of 1,238 while keyword search's median latency fell from 21
+  to 13 ms.
+- **A search waits for open-file headroom instead of failing with "Too many
+  open files".** A LanceDB query holding one of the
+  `[lancedb] max_concurrent_queries` slots now waits, up to 10 s, while the
+  process holds 75% of its open-file soft limit; the searches already
+  running release their files within seconds. Counted by
+  `everos_lancedb_fd_headroom_waits_total`; a wait that runs out is logged
+  (`lancedb_fd_headroom_wait_expired`) and the query runs anyway. `everos
+  server start` raises the soft limit to 32768 instead of 8192 (still capped
+  at the hard limit), and where macOS refuses that it steps down rather than
+  staying at 256.
+- **A vector search no longer reads its whole index each time.** The vector
+  index was IVF_FLAT, which stores every vector whole (0.66 GB for 161k
+  atomic facts); the 16 MB index cache could not hold it, so each vector,
+  hybrid or agentic search read about half a gigabyte of it again: about
+  1.1 GB of transient memory and 449 ms per query. It is now IVF_RQ (one bit
+  per dimension, 24 MB for the same facts) with each query's best
+  candidates re-ranked on their stored vectors (`refine_factor` 5): 35-130 MB
+  and 20-50 ms per query. A query now probes 64 partitions instead of 32,
+  which costs nothing measurable on 1-bit codes, so results match exact search
+  up to ~260k rows per table (top 200 identical for 300 real facts at 161k
+  rows; 32 probes matched 99.3% of the top 10). An existing IVF_FLAT index
+  is rebuilt as IVF_RQ once by the cascade worker's next index upkeep
+  (seconds at 161k rows); searches keep using the old index until the new
+  one is in place.
 
 ### Security
 

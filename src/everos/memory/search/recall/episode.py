@@ -29,9 +29,9 @@ class EpisodeRecaller:
     async def sparse_recall(
         self, query: str, where: Filter, *, limit: int
     ) -> RecallResult[Episode]:
-        """BM25 recall via OR-mode BooleanQuery.
+        """BM25 recall in OR mode.
 
-        Each tokenised term becomes a ``SHOULD`` clause so a single
+        Any tokenised term may match (``build_or_query``) so a single
         IDF≈0 token (typically the partition owner's own name on
         owner-scoped corpora) cannot poison the entire query.
         Mirrors enterprise's ``bool.should + minimum_should_match=1``

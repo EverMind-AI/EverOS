@@ -43,10 +43,10 @@ class AgentSkillRecaller:
     async def sparse_recall(
         self, query: str, where: Filter, *, limit: int
     ) -> RecallResult[AgentSkill]:
-        """Dual-column BM25 recall via OR-mode BooleanQuery per column.
+        """Dual-column BM25 recall in OR mode, per column.
 
         Mirrors ``AgentCaseRecaller.sparse_recall`` — see there for
-        rationale. One BooleanQuery per BM25 column; merge by id with
+        rationale. One query per BM25 column; merge by id with
         max score.
         """
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]

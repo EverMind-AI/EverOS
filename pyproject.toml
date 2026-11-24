@@ -144,6 +144,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/everos"]
 
+# hatch_build.py puts tiktoken's o200k_base encoding into the wheel, so an
+# installed EverOS starts without downloading it.
+[tool.hatch.build.targets.wheel.hooks.custom]
+
 # ``env.template`` lives at src/everos/templates/env.template and is
 # auto-included via ``packages``. ``everos init`` reads it through
 # ``importlib.resources``. No force-include needed.
@@ -160,6 +164,7 @@ include = [
     "/tests",
     "/docs",
     "/pyproject.toml",
+    "/hatch_build.py",
     "/README.md",
     "/QUICKSTART.md",
     "/CHANGELOG.md",

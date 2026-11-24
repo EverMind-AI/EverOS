@@ -156,3 +156,62 @@ def test_metadata_cache_default_is_bounded() -> None:
     """The shipped default must be a real cap, not ``None``."""
     cap = LanceDBSettings().metadata_cache_size_bytes
     assert isinstance(cap, int) and cap > 0, f"metadata cache default is {cap!r}"
+
+
+# ── index cache size chosen from the open-file soft limit ─────────────────
+#
+# The cap bounds the descriptors stale index readers hold after optimize, so
+# it can only grow where the soft limit leaves room: 64 MB at 8192 or above
+# (everos server start raises to 32768), 16 MB otherwise, never above 64 MB.
+
+
+@pytest.mark.parametrize(
+    ("configured", "usage", "expected_mb"),
+    [
+        (None, (150, 32768), 64),  # everos server start on Linux / macOS
+        (None, (150, 8192), 64),
+        (None, (150, 8191), 16),
+        (None, (150, 1024), 16),  # direct uvicorn, or a container's hard limit
+        (None, None, 16),  # Windows, or an unlimited soft limit
+        (8 * 1024 * 1024, (150, 32768), 8),  # an operator's value is kept
+        (256 * 1024 * 1024, (150, 1024), 256),
+    ],
+)
+def test_the_index_cache_follows_the_soft_limit(
+    configured: int | None, usage: tuple[int, int] | None, expected_mb: int
+) -> None:
+    from everos.infra.persistence.lancedb._base.connection import index_cache_bytes
+
+    assert index_cache_bytes(configured, usage) == expected_mb * 1024 * 1024
+
+
+@pytest.mark.parametrize(("soft", "expected_mb"), [(32768, 64), (1024, 16)])
+async def test_the_session_gets_the_chosen_index_cache(
+    memory_root: MemoryRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    soft: int,
+    expected_mb: int,
+) -> None:
+    import lancedb
+
+    from everos.infra.persistence.lancedb._base import connection
+
+    monkeypatch.setattr(connection, "open_file_usage", lambda: (150, soft))
+    captured: dict[str, object] = {}
+    real_session = lancedb.Session
+
+    def session_spy(*args, **kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        return real_session(*args, **kwargs)
+
+    monkeypatch.setattr(lancedb, "Session", session_spy)
+    conn = await open_lancedb_connection(memory_root.lancedb_dir, LanceDBSettings())
+    try:
+        assert captured["index_cache_size_bytes"] == expected_mb * 1024 * 1024
+        assert captured["metadata_cache_size_bytes"] == 1024 * 1024
+    finally:
+        conn.close()
+
+
+def test_the_index_cache_default_is_chosen_not_fixed() -> None:
+    assert LanceDBSettings().index_cache_size_bytes is None

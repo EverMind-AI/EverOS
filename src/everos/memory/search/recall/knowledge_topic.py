@@ -59,7 +59,7 @@ class KnowledgeTopicRecaller:
     async def sparse_recall(
         self, query: str, where: Filter, *, limit: int
     ) -> TopicRecall:
-        """Dual-column BM25 recall via OR-mode BooleanQuery per column.
+        """Dual-column BM25 recall in OR mode, per column.
 
         Queries ``summary_tokens`` (primary) and ``content_tokens``
         (secondary) in parallel. Results merge by id, keeping the max

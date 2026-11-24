@@ -21,6 +21,7 @@ from everos.infra.persistence.index import schema_for
 from everos.infra.persistence.lancedb._base import indexes
 from everos.infra.persistence.lancedb._base.indexes import (
     VECTOR_QUERY_NPROBES,
+    VECTOR_QUERY_REFINE_FACTOR,
     ensure_vector_indexes,
 )
 from everos.infra.persistence.records import DenseVector, IndexRecord
@@ -88,7 +89,7 @@ async def test_below_the_row_threshold_no_index_is_built(
     assert await _vector_indices(vec_table) == []
 
 
-async def test_at_the_threshold_an_ivf_flat_index_is_built(
+async def test_at_the_threshold_an_ivf_rq_index_is_built(
     vec_table: AsyncTable,
 ) -> None:
     await vec_table.add(_dumped(60))
@@ -96,7 +97,24 @@ async def test_at_the_threshold_an_ivf_flat_index_is_built(
         vec_table, schema_for(_VecSpec, dim=_DIM), min_rows=50
     )
     assert built == ["vector"]
-    assert await _vector_indices(vec_table) == [("vector", "IvfFlat")]
+    assert await _vector_indices(vec_table) == [("vector", "IvfRq")]
+
+
+async def test_an_ivf_flat_index_from_an_earlier_version_is_rebuilt_once(
+    vec_table: AsyncTable,
+) -> None:
+    """IVF_FLAT stored every vector whole (0.66 GB at 161k facts), so each
+    query re-read it past the 16 MB index cache; the next upkeep swaps it."""
+    from lancedb.index import IvfFlat
+
+    await vec_table.add(_dumped(60))
+    await vec_table.create_index(
+        "vector", config=IvfFlat(distance_type="cosine", num_partitions=1)
+    )
+    schema = schema_for(_VecSpec, dim=_DIM)
+    assert await ensure_vector_indexes(vec_table, schema, min_rows=50) == ["vector"]
+    assert await _vector_indices(vec_table) == [("vector", "IvfRq")]
+    assert await ensure_vector_indexes(vec_table, schema, min_rows=50) == []
 
 
 async def _num_indices(table: AsyncTable) -> int:
@@ -158,6 +176,7 @@ async def test_nprobes_is_accepted_on_an_unindexed_column(
         .column("vector")
         .distance_type("cosine")
         .nprobes(VECTOR_QUERY_NPROBES)
+        .refine_factor(VECTOR_QUERY_REFINE_FACTOR)
         .limit(3)
         .to_list()
     )
@@ -181,8 +200,12 @@ async def test_all_null_vectors_are_skipped_even_above_the_threshold(
 async def test_indexed_search_returns_the_same_neighbours_as_the_scan(
     vec_table: AsyncTable,
 ) -> None:
-    """IVF_FLAT keeps exact distances inside the probed partitions: at this
-    size the top-5 must match the brute-force answer."""
+    """IVF_RQ re-ranked on the stored vectors (the refine factor every
+    ``nearest_to`` sets): the top-5 must match the brute-force answer. Asks
+    for 50 rows, the hybrid lane's floor: one bit of an 8-dim vector is too
+    coarse to rank on its own (top-5 of a 5-row query matched 0.85), so the
+    test re-ranks 250 of the 300 rows; recall on 1024-dim facts is measured
+    on :data:`VECTOR_QUERY_REFINE_FACTOR`."""
     rows = _rows(300)
     await vec_table.add([row.model_dump() for row in rows])
     q = rows[17].vector
@@ -193,11 +216,15 @@ async def test_indexed_search_returns_the_same_neighbours_as_the_scan(
             .nearest_to(q)
             .column("vector")
             .distance_type("cosine")
-            .limit(5)
+            .limit(50)
         )
         if bypass:
             query = query.bypass_vector_index()
-        return [r["id"] for r in await query.to_list()]
+        else:
+            query = query.nprobes(VECTOR_QUERY_NPROBES).refine_factor(
+                VECTOR_QUERY_REFINE_FACTOR
+            )
+        return [r["id"] for r in await query.to_list()][:5]
 
     flat = await _top5(bypass=True)
     await ensure_vector_indexes(vec_table, schema_for(_VecSpec, dim=_DIM), min_rows=50)

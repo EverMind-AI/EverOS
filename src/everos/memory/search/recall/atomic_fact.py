@@ -76,7 +76,7 @@ class AtomicFactRecaller:
     async def sparse_recall(
         self, query: str, where: Filter, *, limit: int
     ) -> RecallResult[AtomicFact]:
-        """BM25 recall via OR-mode BooleanQuery (see EpisodeRecaller docstring)."""
+        """BM25 recall in OR mode (see EpisodeRecaller docstring)."""
         terms = [term for term in self._deps.tokenizer.tokenize(query) if term]
         if not terms:
             return RecallResult.empty()

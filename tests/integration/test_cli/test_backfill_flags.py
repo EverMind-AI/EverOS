@@ -40,7 +40,6 @@ import os
 import signal
 import sys
 import threading
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
@@ -267,7 +266,6 @@ def test_backfill_cli_synchronous_keyboard_interrupt_exits_130(
     assert result.exit_code == 130
 
 
-@pytest.mark.slow
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="os.kill(pid, SIGINT) is TerminateProcess on Windows: it kills the "
@@ -283,9 +281,8 @@ def test_real_sigint_during_phase_await_returns_130_with_resume_hint(
     converts a real SIGINT into ``main_task.cancel()``, raising
     ``asyncio.CancelledError`` — not ``KeyboardInterrupt`` — at the
     suspended ``await``. A background thread sends a real ``SIGINT`` to
-    this test process while a mocked phase is parked in
-    ``asyncio.sleep``, reproducing that exact mechanism rather than a
-    synchronous stand-in.
+    this test process once a mocked phase is parked in ``asyncio.sleep``,
+    reproducing that exact mechanism rather than a synchronous stand-in.
 
     Runs synchronously (not ``async def``): ``pytest-asyncio`` drives
     its tests off a bare event loop via ``run_until_complete``, not
@@ -293,27 +290,30 @@ def test_real_sigint_during_phase_await_returns_130_with_resume_hint(
     under test. The CLI command's own ``asyncio.run()`` call is what
     must install it, so this test must invoke the CLI command directly.
 
-    Marked ``slow`` — and therefore excluded from the default
-    ``-m "not slow"`` run — because the ``0.3s`` timer that sends the
-    signal races ``asyncio.Runner``'s SIGINT-handler installation. On
-    a fast host the handler is in place well before ``0.3s`` elapses;
-    on a heavily loaded CI runner the signal can land on pytest's
-    default handler and kill the test process. Opt-in execution keeps
-    the guard available for local repro without destabilising CI.
+    The signal waits for the phase to report itself parked rather than
+    for a fixed delay: a timer guessed both ends of a window. Too early
+    and the signal lands before ``asyncio.Runner`` installs its handler;
+    too late (a loaded host wakes a sleeping thread seconds late) and the
+    phase has finished, so the run exits 0. Once parked, the run is
+    inside ``asyncio.run`` with the handler installed, and the park only
+    ends by cancellation (the 60s cap bounds a run that never sees it).
     """
 
     asyncio.run(storage_view.repos.episode.add([_episode("ep1")]))
 
-    async def _slow_embedding() -> None:
-        await asyncio.sleep(5)
+    parked = threading.Event()
 
-    embedder.before_embed = _slow_embedding
+    async def _park_in_embedding() -> None:
+        parked.set()
+        await asyncio.sleep(60)
 
-    def _send_sigint_soon() -> None:
-        time.sleep(0.3)
-        os.kill(os.getpid(), signal.SIGINT)
+    embedder.before_embed = _park_in_embedding
 
-    threading.Thread(target=_send_sigint_soon, daemon=True).start()
+    def _send_sigint_once_parked() -> None:
+        if parked.wait(timeout=60):
+            os.kill(os.getpid(), signal.SIGINT)
+
+    threading.Thread(target=_send_sigint_once_parked, daemon=True).start()
 
     result = CliRunner().invoke(
         cascade_mod.app, ["backfill", "--phase", "vectors", "--yes"]
