@@ -161,4 +161,4 @@ export EVEROS_MEMTRACE_DIR=/tmp/everos-memtrace
   tests/unit/test_infra/test_memtrace_regressions.py
 ```
 
-新增插桩后，至少补充一条对应的成功、空结果或失败测试，并检查导出的 JSON 能被 `smartcomment.runtime.ExecNetwork.import_graph()` 重新读取。更完整的图归因示例见 [memtrace-graphs.md](memtrace-graphs.md)，历史审阅记录见 [memtrace-attribution-review.zh-CN.md](memtrace-attribution-review.zh-CN.md)。
+新增插桩后，至少补充一条对应的成功、空结果或失败测试，并检查导出的 JSON 能被 `smartcomment.runtime.ExecNetwork.import_graph()` 重新读取。更完整的图归因示例见 [memtrace-graphs.md](memtrace-graphs.md)。
