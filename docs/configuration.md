@@ -366,7 +366,7 @@ Episodes are folded one owner at a time. A run folds the episode that triggered 
 | `api_key` | string | — | **Yes** | API key. |
 | `base_url` | string | — | No | Custom endpoint URL. |
 | `max_concurrency` | int | `4` | No | Max parallel parsing requests. |
-| `file_uri_allow_dirs` | list[string] | `[]` | No | Base dirs `file://` URIs may be read from. Empty = `file://` URIs are refused. |
+| `file_uri_allow_dirs` | list[string] | `[]` | No | Base dirs `file://` URIs may be read from. Empty = `file://` URIs are refused. `["/"]` lets any caller read every file the server can, at your own risk; never combine it with a non-loopback `[api] host` such as `0.0.0.0`. |
 | `file_uri_max_bytes` | int | `52428800` | No | Max size (bytes) of a `file://` asset; larger files are rejected. |
 
 ### `[embedding]`

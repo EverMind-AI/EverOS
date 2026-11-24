@@ -195,7 +195,8 @@ max_concurrency = 4
 # truncated_reply_retries = 1
 # file:// content-item support (read locally by EverOS, not everalgo).
 # file_uri_allow_dirs: empty (default) = file:// uris are refused; list the
-# base dirs EverOS may read from to opt in.
+# base dirs EverOS may read from to opt in. ["/"] lets any caller read every
+# file the server can (your own risk); never pair it with host = "0.0.0.0".
 # file_uri_allow_dirs = ["/srv/uploads"]
 # file_uri_max_bytes = 52428800   # 50 MiB cap per file:// asset
 
