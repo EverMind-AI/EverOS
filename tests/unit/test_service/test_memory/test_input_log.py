@@ -225,7 +225,9 @@ async def test_purge_scope_removes_the_log_directory(tmp_path: Path) -> None:
     assert not directory.exists()
 
 
-async def test_delete_owner_keeps_other_owners_in_the_line(tmp_path: Path) -> None:
+async def test_delete_owner_drops_a_whole_line_with_other_owners(
+    tmp_path: Path,
+) -> None:
     writer = InputLogWriter(
         root=tmp_path,
         settings=InputLogSettings(enabled=True),
@@ -236,6 +238,24 @@ async def test_delete_owner_keeps_other_owners_in_the_line(tmp_path: Path) -> No
     payload["messages"].append(
         {"role": "assistant", "sender_id": "u2", "timestamp": 2, "content": "hi"}
     )
+    await writer.log_add(payload, request_id="r1")
+
+    await writer.delete_owner(app_id="default", project_id="default", owner_id="u1")
+
+    assert _lines(tmp_path) == []
+
+
+async def test_delete_owner_keeps_a_line_with_only_other_owners(
+    tmp_path: Path,
+) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    payload = _payload()
+    payload["messages"][0]["sender_id"] = "u2"
     await writer.log_add(payload, request_id="r1")
 
     await writer.delete_owner(app_id="default", project_id="default", owner_id="u1")

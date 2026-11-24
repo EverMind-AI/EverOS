@@ -111,10 +111,11 @@ class InputLogWriter:
         owner_id: str,
         session_id: str | None = None,
     ) -> None:
-        """Redact one owner's messages, optionally only in one session.
+        """Drop every line that contains one owner's messages.
 
-        A line that still has other owners' messages stays; a line with no
-        messages left is removed. Other owners' raw input is not touched.
+        Privacy takes precedence over keeping other owners' raw text: a line
+        with the deleted owner and another owner is removed whole. The
+        ``session_id`` filter limits which lines are considered.
         """
         directory = (
             self._root
@@ -149,23 +150,13 @@ class InputLogWriter:
                 if not isinstance(messages, list):
                     kept.append(line)
                     continue
-                remaining = [
-                    message
+                if any(
+                    isinstance(message, dict) and message.get("sender_id") == owner_id
                     for message in messages
-                    if not (
-                        isinstance(message, dict)
-                        and message.get("sender_id") == owner_id
-                    )
-                ]
-                if not remaining:
+                ):
                     changed = True
                     continue
-                if len(remaining) != len(messages):
-                    record["messages"] = remaining
-                    kept.append(_encode(record))
-                    changed = True
-                else:
-                    kept.append(line)
+                kept.append(line)
             if not kept:
                 path.unlink(missing_ok=True)
             elif changed:
