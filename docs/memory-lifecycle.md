@@ -91,7 +91,7 @@ Pinned by
   covered log directories.
 
 Pinned by `tests/unit/test_service/test_memory/test_input_log.py` and
-`tests/unit/test_service/test_memory/test_delete_cancellation.py`.
+`tests/unit/test_service/test_delete_cancellation.py`.
 
 ## In review
 
