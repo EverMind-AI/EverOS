@@ -258,10 +258,14 @@ def test_credentials_validate_pairs_and_environment(
     path.write_text(
         json.dumps(
             {"api_keys": ["fake-unit-key"], "base_urls": ["https://example.invalid/v1"]}
-        )
+        ),
+        encoding="utf-8",
     )
     assert load_credentials(path) == ("fake-unit-key", "https://example.invalid/v1")
-    path.write_text(json.dumps({"api_keys": ["fake-unit-key"], "base_urls": []}))
+    path.write_text(
+        json.dumps({"api_keys": ["fake-unit-key"], "base_urls": []}),
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError):
         load_credentials(path)
     monkeypatch.setenv("OPENAI_API_KEY", "fake-env-key")

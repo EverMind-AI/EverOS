@@ -206,7 +206,7 @@ def repair_root(root: Path, *, apply: bool) -> dict:
     report = {"root": str(root), "applied": apply, "graphs": results}
     if apply and results:
         (root.parent / "construction_repair.json").write_text(
-            json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
     return report
 

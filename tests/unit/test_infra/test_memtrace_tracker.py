@@ -265,7 +265,7 @@ def _load_export(
     tracker: MemTraceTracker,
     key: GraphKey = ("default", "default", "alice", "global"),
 ) -> dict:
-    return json.loads(tracker._graph_path(key).read_text())
+    return json.loads(tracker._graph_path(key).read_text(encoding="utf-8"))
 
 
 def _nodes_by_name(data: dict) -> dict[str, list[dict]]:
@@ -979,7 +979,7 @@ async def test_graph_file_names_are_collision_proof(
     # Each graph holds exactly its own owner's query.
     for owner in owners:
         path = tracker._graph_path(("default", "default", owner, "global"))
-        nodes = _nodes_by_name(json.loads(path.read_text()))
+        nodes = _nodes_by_name(json.loads(path.read_text(encoding="utf-8")))
         queries = [name for name in nodes if name.startswith("query-")]
         assert len(queries) == 1
         assert queries[0].startswith(f"query-{owner}-")
@@ -1096,7 +1096,7 @@ async def test_foresights_reuse_one_memcell_boundary(
     )
     episode = tmp_path / "users/alice/episodes/2026-01-01.md"
     episode.parent.mkdir(parents=True)
-    episode.write_text(_EPISODE_MD)
+    episode.write_text(_EPISODE_MD, encoding="utf-8")
     await tracker.sync_now()
     if restart:
         tracker = MemTraceTracker()
@@ -1116,7 +1116,8 @@ async def test_foresights_reuse_one_memcell_boundary(
             "**parent_type**: memcell\n**parent_id**: mc_1\n"
             f"### Foresight\nPrediction {index}.\n<!-- /entry:fs_{index} -->"
             for index in range(5)
-        )
+        ),
+        encoding="utf-8",
     )
     await tracker.sync_now()
     data = _load_export(tracker, ("default", "default", "alice", "sess_a"))
@@ -1169,7 +1170,7 @@ async def test_later_boundary_uses_the_buffer_after_the_next_add(
         defer_extraction=True,
         result=None,
     )
-    episode.write_text(_EPISODE_MD)
+    episode.write_text(_EPISODE_MD, encoding="utf-8")
     await tracker.sync_now()
     await tracker.on_memorize(
         _payload(_message("second", _TS_MS + 1)),
@@ -1177,7 +1178,7 @@ async def test_later_boundary_uses_the_buffer_after_the_next_add(
         defer_extraction=True,
         result=None,
     )
-    episode.write_text(_TWO_MEMCELL_MD)
+    episode.write_text(_TWO_MEMCELL_MD, encoding="utf-8")
     await tracker.sync_now()
     data = _load_export(tracker, ("default", "default", "alice", "sess_a"))
     edges = _edge_pairs(data)
@@ -1216,13 +1217,14 @@ async def test_exact_memcell_boundary_is_not_downgraded_by_later_lookup_failure(
     )
     episode = tmp_path / "users/alice/episodes/2026-01-01.md"
     episode.parent.mkdir(parents=True)
-    episode.write_text(_EPISODE_MD)
+    episode.write_text(_EPISODE_MD, encoding="utf-8")
     await tracker.sync_now()
     for index, next_state in enumerate(("exact", "failed"), 2):
         state = next_state
         episode.write_text(
             _EPISODE_MD
-            + _EPISODE_MD.split("---\n", 2)[-1].replace("ep_1", f"ep_{index}")
+            + _EPISODE_MD.split("---\n", 2)[-1].replace("ep_1", f"ep_{index}"),
+            encoding="utf-8",
         )
         await tracker.sync_now()
     data = _load_export(tracker, ("default", "default", "alice", "sess_a"))
