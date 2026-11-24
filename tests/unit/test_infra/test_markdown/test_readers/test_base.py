@@ -10,6 +10,7 @@ import datetime as dt
 from pathlib import Path
 from typing import ClassVar, Literal
 
+import anyio
 import pytest
 
 from everos.infra.persistence import MemoryRoot
@@ -85,6 +86,24 @@ async def test_read_for_returns_parsed_when_file_exists(
     assert parsed is not None
     assert len(parsed.entries) == 1
     assert parsed.entries[0].body == "first body"
+
+
+async def test_read_for_returns_none_when_file_vanishes_after_stat(
+    tmp_path: Path, root: MemoryRoot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deletion between is_file() and the read is "not found"."""
+    writer = _DemoWriter(root)
+    await writer.append("u_jason", "first body", date=dt.date(2026, 4, 22))
+    reader = _DemoReader(root)
+    original_is_file = anyio.Path.is_file
+
+    async def is_file_then_delete(self: anyio.Path) -> bool:
+        result = await original_is_file(self)
+        await self.unlink()
+        return result
+
+    monkeypatch.setattr(anyio.Path, "is_file", is_file_then_delete)
+    assert await reader.read_for("u_jason", dt.date(2026, 4, 22)) is None
 
 
 async def test_read_for_today_default(root: MemoryRoot) -> None:
