@@ -611,15 +611,19 @@ class LanceRepoBase[T: IndexRecord]:
     async def optimize(self) -> None:
         """Compact fragments + merge new data into the FTS / vector indexes.
 
-        ``optimize()`` is a **performance + storage-hygiene** operation,
-        **not** a correctness/visibility one. LanceDB's ``merge_insert``
-        writes new data into a fresh fragment that the FTS / vector
-        indexes don't cover yet; queries stay correct regardless because
-        LanceDB transparently brute-force flat-scans that unindexed tail
-        and unions it with the indexed hits. Verified on lancedb 0.30.2:
-        after ``create_index`` + ``merge_insert`` (no ``optimize()``), a
-        ``nearest_to_text`` for a token present only in the new rows
-        returns those rows immediately.
+        LanceDB's ``merge_insert`` writes new data into a fresh fragment
+        that the FTS / vector indexes don't cover yet; queries brute-force
+        flat-scan that unindexed tail and union it with the indexed hits.
+        Verified on lancedb 0.30.2: after ``create_index`` + ``merge_insert``
+        (no ``optimize()``), a ``nearest_to_text`` for a token present only
+        in the new rows returns those rows immediately.
+
+        **Except on lancedb 0.34** (the pinned line): its FTS flat scan
+        drops a row whose query term occurs more than once (measured
+        2026-11: "climbing climbing" no hit, "climbing" one hit; fixed from
+        0.36). Until this merges the tail into the index, keyword search
+        misses such fresh rows, so on 0.34 this also bounds how long a new
+        row can stay invisible to BM25 -- one throttle interval.
 
         (Older lancedb — at/below the ``>=0.13.0`` floor this repo once
         pinned — did **not** flat-scan the FTS tail, so post-build rows
@@ -642,8 +646,8 @@ class LanceRepoBase[T: IndexRecord]:
         one run per throttle window per kind, decoupled from the drain
         loop, with a 60s heartbeat sweep as a safety net. Cost is
         O(N) data-rewrite per optimized fragment; the throttle is how
-        we cap it under sustained write pressure. Because visibility no
-        longer depends on it, the throttle window can be generous.
+        we cap it under sustained write pressure. On lancedb 0.34 the
+        window is also the BM25 visibility bound above, so keep it short.
 
         This is **compaction only** — physical reclamation of superseded
         files is :meth:`prune`, a separate write-locked call. Kept lock-free

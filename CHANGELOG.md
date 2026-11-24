@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two intermittently red tests now fail only on a real regression.** The
+  real-SIGINT backfill test sent its Ctrl-C from a fixed 0.3s timer; on a
+  loaded host the timer fired after the 5s mocked phase had finished, the
+  run exited 0 and the test failed. The signal now waits for the phase to
+  report itself parked, and the test runs in the default suite (it was
+  `slow` only because of that race). The full-pipeline timezone e2e searched
+  the instant the pipeline drained and failed two runs in three on a
+  LanceDB limitation, now written up in
+  [how memory works](docs/how-memory-works.md): on the pinned LanceDB 0.34 a
+  memory written since the cascade's last optimize (60s by default) is
+  missing from `keyword` results, and from hybrid's keyword leg, when it
+  repeats the query term. Vector search is unaffected and LanceDB 0.36 fixes
+  it; raising the `<0.35` pin is a separate, validated upgrade. The test now
+  waits up to one optimize interval for the hit.
+
 - **An LLM reply cut off at the output cap is sent once more instead of
   failing its call.** A generation that runs away until `max_tokens`
   (`finish_reason` `length`) usually finishes when the identical request is

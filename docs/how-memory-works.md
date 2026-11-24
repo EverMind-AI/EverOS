@@ -169,7 +169,12 @@ index catches up asynchronously.
   is produced **asynchronously** by the OME — see
   [the OME section](#the-offline-memory-engine-ome).
 - The **cascade daemon** turns every `.md` write into LanceDB rows so the
-  content becomes searchable.
+  content becomes searchable. Known limitation on the pinned LanceDB 0.34: a
+  row written in the last minute (one cascade optimize interval) can be
+  missing from **keyword** results -- and from the keyword leg of hybrid --
+  when the query term occurs in it more than once, until the optimize merges
+  it into the full-text index. Vector search is unaffected; LanceDB 0.36
+  fixes it.
 
 ## Memory types & storage strategies
 
