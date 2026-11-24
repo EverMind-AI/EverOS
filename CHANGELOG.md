@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Search throughput results and the harness that measures them.**
+  [`benchmarks/throughput.md`](benchmarks/throughput.md) gives the sustained
+  `hybrid` and `keyword` search rates, with latency, CPU and memory, of 1.7.1
+  and 1.8.0 on a 4-core, 8 GB server holding 169k memories: `hybrid` 4 against
+  14 to 16 requests per second, `keyword` 60 against 120 to at least 140.
+  `benchmarks/throughput/` reproduces them: a store built from LoCoMo10 and
+  LongMemEval-S by EverOS's own extraction, stub model providers that replay
+  recorded query-embedding latency, and open-loop load with a kept-up verdict
+  per step.
+
 ### Changed
 
 - **The LanceDB index cache is 64 MB where the open-file limit allows.**
