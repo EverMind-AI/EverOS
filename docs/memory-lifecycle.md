@@ -94,19 +94,20 @@ Pinned by
 Pinned by `tests/unit/test_service/test_memory/test_input_log.py` and
 `tests/unit/test_service/test_memory/test_delete_cancellation.py`.
 
+## In review
+
+These are being addressed but are not guaranteed on `main` yet:
+
+- owner-only deletion log redaction — #640;
+- private `.input_log` directory/file modes — #636;
+- idle-scope retention sweep at startup — #637.
+
 ## Known gaps
 
 These are intentionally not claimed as invariants yet:
 
-1. An owner-only deletion (`user_id` or `agent_id` without `session_id`)
-   removes the owner's memories but does not scrub that owner's messages from
-   the input log.
-2. `/memory/device/add` does not write an input-log line.
-3. Retention runs only when a scope writes; a scope that stops writing keeps
-   its old files until a startup sweep exists.
-4. The input log is created with the process umask; private directory/file
-   modes are not guaranteed yet.
-5. A request rejected by queue admission (429) can still have been logged.
+1. `/memory/device/add` does not write an input-log line.
+2. A request rejected by queue admission (429) can still have been logged.
 
 Each gap needs a contract decision before it becomes a fix. The point of this
 list is to keep the guaranteed and unguaranteed parts separate.
