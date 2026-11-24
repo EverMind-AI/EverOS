@@ -13,10 +13,14 @@ embedding providers) under app ``perf`` / project ``real100k``:
 (``bash benchmarks/download_data.sh locomo`` / ``longmemeval``). A LongMemEval
 session shared by several questions goes to the first of them in plan order, so
 no conversation is stored twice. Each session is one or more synchronous
-``/memory/add`` calls of at most 50 messages, then ``/memory/flush``. After the
-last session, waits until the store stops growing: facts and profiles are
-extracted in the background, so it waits for five minutes in a row of an idle
-cascade and unchanged index row counts.
+``/memory/add`` calls of at most 50 messages, then ``/memory/flush``; a call
+that fails (not 200, or no answer) is sent again, up to ``--attempts`` times. A
+session still failing then is left unfinished, and once every worker is done the
+build exits 1 listing them: a store missing sessions is not the documented one.
+Re-running it is safe, a resent message is not stored twice. Otherwise it waits
+until the store stops growing: facts and profiles are extracted in the
+background, so it waits for five minutes in a row of an idle cascade and
+unchanged index row counts.
 """
 
 from __future__ import annotations
@@ -98,6 +102,23 @@ def sessions(plan: str, sources: Path) -> list[tuple[str, list[dict]]]:
     return [(sid, msgs) for sid, msgs in out if msgs]
 
 
+async def post(
+    client: httpx.AsyncClient, path: str, body: dict, attempts: int, wait: float
+) -> int | str:
+    """POST until a 200, at most ``attempts`` times; the last status or error."""
+    status: int | str = "not sent"
+    for attempt in range(attempts):
+        if attempt:
+            await asyncio.sleep(wait * attempt)
+        try:
+            status = (await client.post(path, json=body)).status_code
+        except httpx.HTTPError as e:
+            status = f"error:{type(e).__name__}"
+        if status == 200:
+            break
+    return status
+
+
 async def index_state(client: httpx.AsyncClient) -> tuple[int, dict[str, int]]:
     """The cascade's pending count and the row count of each index table."""
     cascade = (await client.get("/health")).json().get("cascade") or {}
@@ -110,6 +131,8 @@ async def main() -> None:
     ap.add_argument("sources", type=Path)
     ap.add_argument("--plan", default="locomo:0-9,lme:0-111")
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--attempts", type=int, default=3)
+    ap.add_argument("--retry-wait", type=float, default=5.0)
     a = ap.parse_args()
     todo = sessions(a.plan, a.sources)
     queue: asyncio.Queue[tuple[str, list[dict]]] = asyncio.Queue()
@@ -121,22 +144,30 @@ async def main() -> None:
         async def worker() -> None:
             while not queue.empty():
                 sid, msgs = queue.get_nowait()
-                codes = []
-                for i in range(0, len(msgs), 50):
-                    body = {"session_id": sid, "messages": msgs[i : i + 50], **WHERE}
-                    r = await client.post("/api/v2/memory/add", json=body)
-                    codes.append(r.status_code)
-                r = await client.post(
-                    "/api/v2/memory/flush", json={"session_id": sid, **WHERE}
-                )
-                codes.append(r.status_code)
-                if any(c != 200 for c in codes):
-                    failed.append((sid, codes))
+                calls = [
+                    (
+                        "/api/v2/memory/add",
+                        {"session_id": sid, "messages": msgs[i : i + 50]},
+                    )
+                    for i in range(0, len(msgs), 50)
+                ] + [("/api/v2/memory/flush", {"session_id": sid})]
+                codes: list[int | str] = []
+                for path, body in calls:
+                    codes.append(
+                        await post(client, path, body | WHERE, a.attempts, a.retry_wait)
+                    )
+                    if codes[-1] != 200:
+                        failed.append((sid, codes))
+                        break
                 done = len(todo) - queue.qsize()
                 print(f"{done}/{len(todo)} {sid} {codes}", flush=True)
 
         await asyncio.gather(*(worker() for _ in range(a.workers)))
-        print(f"ingested in {time.monotonic() - started:.0f} s, failed {failed}")
+        print(f"ingested in {time.monotonic() - started:.0f} s", flush=True)
+        if failed:
+            for sid, codes in failed:
+                print(f"FAILED {sid} {codes}", flush=True)
+            raise SystemExit(f"{len(failed)} sessions failed; the store is incomplete")
         calm, last = 0, None
         while calm < 5:
             await asyncio.sleep(60)
