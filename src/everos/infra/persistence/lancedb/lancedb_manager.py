@@ -20,7 +20,8 @@ from lancedb import AsyncConnection, AsyncTable
 
 from everos.config import LanceDBSettings
 from everos.core.observability.logging import get_logger
-from everos.core.observability.metrics import Gauge, Histogram
+from everos.core.observability.metrics import Counter, Gauge, Histogram
+from everos.core.utils.open_files import open_file_usage
 from everos.infra.persistence.lancedb._base.connection import open_lancedb_connection
 from everos.infra.persistence.memory_root import MemoryRoot
 
@@ -37,6 +38,61 @@ _queries_in_flight = Gauge(
     description="LanceDB search queries holding a slot now.",
     namespace="everos",
 )
+_fd_headroom_waits = Counter(
+    name="lancedb_fd_headroom_waits_total",
+    description="Search queries that waited for open-file headroom.",
+    namespace="everos",
+)
+
+FD_HIGH_WATER = 0.75
+"""Share of the open-file soft limit at which a search, once it holds a slot,
+waits before it runs. A search opens the data files its table is split into,
+so concurrent searches on a fragmented table spiked to 6,000 descriptors for
+a few seconds in a 2026-11 soak and once hit the 8192 limit; waiting for
+those to finish beats failing with "Too many open files". The wait holds the
+slot, so at most ``max_concurrent_queries`` searches resume together."""
+_FD_RECHECK_S = 0.02
+"""How old a descriptor count may be. Waiters share one reading: counting
+costs 2 ms at 6,000 descriptors, on the event loop."""
+_FD_WAIT_MAX_S = 10.0
+"""A search waits at most this long, then runs anyway (and is logged): a
+leak, not a burst, keeps descriptors high that long."""
+_fd_reading: tuple[float, tuple[int, int] | None] = (float("-inf"), None)
+
+
+def _fd_usage() -> tuple[int, int] | None:
+    """:func:`open_file_usage`, re-read at most every ``_FD_RECHECK_S``."""
+    global _fd_reading
+    now = time.monotonic()
+    if now - _fd_reading[0] >= _FD_RECHECK_S:
+        _fd_reading = (now, open_file_usage())
+    return _fd_reading[1]
+
+
+def _over_high_water(usage: tuple[int, int] | None) -> bool:
+    return usage is not None and usage[0] >= usage[1] * FD_HIGH_WATER
+
+
+async def _wait_for_fd_headroom() -> None:
+    """Return once open descriptors are under :data:`FD_HIGH_WATER` of the
+    soft limit, or after ``_FD_WAIT_MAX_S``."""
+    usage = _fd_usage()
+    if not _over_high_water(usage):
+        return
+    _fd_headroom_waits.inc()
+    deadline = time.monotonic() + _FD_WAIT_MAX_S
+    while time.monotonic() < deadline:
+        await asyncio.sleep(_FD_RECHECK_S)
+        usage = _fd_usage()
+        if not _over_high_water(usage):
+            return
+    assert usage is not None
+    logger.warning(
+        "lancedb_fd_headroom_wait_expired",
+        open_files=usage[0],
+        soft_limit=usage[1],
+        waited_s=_FD_WAIT_MAX_S,
+    )
 
 
 class LanceDbConnection:
@@ -68,10 +124,12 @@ class LanceDbConnection:
 
     @asynccontextmanager
     async def query_slot(self) -> AsyncIterator[None]:
-        """Hold one of ``max_concurrent_queries`` search-query slots."""
+        """Hold one of ``max_concurrent_queries`` search-query slots, then wait
+        for open-file headroom (:data:`FD_HIGH_WATER`) before the query runs."""
         slots = self._slots_of_running_loop()
         started = time.monotonic()
         async with slots:
+            await _wait_for_fd_headroom()
             _query_wait_seconds.observe(time.monotonic() - started)
             _queries_in_flight.inc()
             try:

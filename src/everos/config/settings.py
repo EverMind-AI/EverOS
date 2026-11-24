@@ -906,7 +906,7 @@ class LanceDBSettings(BaseModel):
       ``2 MB``     ~45                ~5 ms
       ``4 MB``     ~52                ~3 ms
       ``8 MB``     ~140               ~2.4 ms
-      ``16 MB``    ~290               ~2.3 ms   ← default
+      ``16 MB``    ~290               ~2.3 ms   ← default, low limit
       ``32 MB``    ~630               ~1.4 ms
       ``unbound``  >960 (leaks)       ~1.3 ms
       ===========  =================  ===================
@@ -919,10 +919,17 @@ class LanceDBSettings(BaseModel):
       common ulimits (macOS default 256 needs ``ulimit -n 1024`` first;
       Linux default 1024 is fine out of the box).
 
-      Override via ``EVEROS_LANCEDB__INDEX_CACHE_SIZE_BYTES`` if your
-      working set is much larger (heavier table count or much wider
-      indexes) or if you hit a tighter ``ulimit -n`` (containers / dev
-      boxes).
+      Unset (the default) it is chosen when the connection opens: 64 MB
+      when the open-file soft limit is at least 8192 (``everos server
+      start`` raises it to 32768 where the hard limit allows), else 16 MB.
+      64 MB holds a 161k-row IVF_RQ vector index and its BM25 readers, so
+      hybrid search stops re-reading them, and 200 write / optimize /
+      retrain rounds kept descriptors flat at 64 MB (2026-11); see
+      ``infra.persistence.lancedb._base.connection``. Never more than
+      64 MB is chosen: the cap is what bounds the stale readers.
+
+      Set ``EVEROS_LANCEDB__INDEX_CACHE_SIZE_BYTES`` to pin a value, e.g.
+      lower under a tight ``ulimit -n`` (containers / dev boxes).
 
     ``metadata_cache_size_bytes``:
       Upper bound on LanceDB's session metadata cache. An earlier note here
@@ -968,7 +975,7 @@ class LanceDBSettings(BaseModel):
     """
 
     read_consistency_seconds: float | None = None
-    index_cache_size_bytes: int = 16 * 1024 * 1024
+    index_cache_size_bytes: int | None = None
     metadata_cache_size_bytes: int = 1024 * 1024
     vector_index_min_rows: int = Field(default=2000, ge=1)
     """Rows (with a non-null vector) a table needs before its vector columns

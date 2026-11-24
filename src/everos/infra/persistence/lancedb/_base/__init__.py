@@ -22,6 +22,7 @@ from .indexes import (
     VECTOR_INDEX_ROWS_PER_PARTITION as VECTOR_INDEX_ROWS_PER_PARTITION,
 )
 from .indexes import VECTOR_QUERY_NPROBES as VECTOR_QUERY_NPROBES
+from .indexes import VECTOR_QUERY_REFINE_FACTOR as VECTOR_QUERY_REFINE_FACTOR
 from .indexes import ensure_fts_indexes as ensure_fts_indexes
 from .indexes import ensure_vector_indexes as ensure_vector_indexes
 from .repository import LanceDailyLogRepoBase as LanceDailyLogRepoBase
@@ -33,6 +34,7 @@ __all__ = [
     "VECTOR_INDEX_MAX_DELTAS",
     "VECTOR_INDEX_ROWS_PER_PARTITION",
     "VECTOR_QUERY_NPROBES",
+    "VECTOR_QUERY_REFINE_FACTOR",
     "LanceDailyLogRepoBase",
     "LanceRepoBase",
     "LanceTimeouts",
