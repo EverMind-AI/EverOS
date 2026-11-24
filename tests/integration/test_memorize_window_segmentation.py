@@ -32,6 +32,7 @@ boundary decisions deterministically so we own exact slicing.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 from collections.abc import AsyncIterator, Callable
@@ -460,3 +461,78 @@ async def test_two_messages_with_one_millisecond_in_two_requests_both_stay(
     await memorize({"session_id": session, "messages": [second]})
 
     assert len(await _buffer_rows(storage, session)) == 2
+
+
+def _episodes(root: Path) -> int:
+    """Episode entries written under ``root``, across users and days."""
+    return sum(
+        path.read_text(encoding="utf-8").count("<!-- entry:")
+        for path in root.glob("**/episodes/*.md")
+    )
+
+
+async def test_resend_cuts_again_a_memcell_whose_extraction_was_lost(
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage, tmp_path: Path
+) -> None:
+    """[m0,m1,m2] cut after 2; the memcell's extraction is lost (it fails here,
+    as a crash or an abandoned shutdown leaves it: not running, no episode).
+    The identical resend, a client retry or a queue replay, must cut m0, m1
+    again so they get an episode, not be dropped as already cut."""
+    base = memorize_llm([[2], [2], []])
+    lost = {"extraction": True}
+
+    def answer(messages: Any, **kwargs: Any) -> str:
+        if kwargs["response_format"].__name__ == "_EpisodeReply" and lost["extraction"]:
+            raise RuntimeError("extraction lost")
+        return base._handler(messages, **kwargs)  # type: ignore[misc]
+
+    await memorize_env_scripted(fake_llm=FakeLLMClient(handler=answer))
+    session = "s_lost"
+    batch = {"session_id": session, "messages": [_msg(i) for i in range(3)]}
+
+    with pytest.raises(RuntimeError, match="extraction lost"):
+        await memorize(batch)
+    assert _episodes(tmp_path) == 0
+    lost["extraction"] = False
+    await memorize(batch)
+
+    cells = await _memcell_rows(storage, session)
+    assert [len(ids) for _, ids in cells] == [2, 2], cells
+    assert cells[0][1] == cells[1][1]
+    assert _episodes(tmp_path) == 1
+
+
+async def test_resend_while_the_extraction_runs_is_dropped(
+    memorize_env_scripted: Callable[..., AsyncMock], storage: Storage, tmp_path: Path
+) -> None:
+    """The retry of #274 lands while the first call's extraction still runs:
+    that memcell will get its episode, so the resend is dropped. Had it not
+    been, the second boundary call would cut m0, m1 into a second memcell."""
+    base = memorize_llm([[2], [2], []])
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def answer(messages: Any, **kwargs: Any) -> str:
+        if (
+            kwargs["response_format"].__name__ == "_EpisodeReply"
+            and not started.is_set()
+        ):
+            started.set()  # only the first call's extraction is held
+            await release.wait()
+        return base._handler(messages, **kwargs)  # type: ignore[misc]
+
+    await memorize_env_scripted(fake_llm=FakeLLMClient(handler=answer))
+    session = "s_running"
+    batch = {"session_id": session, "messages": [_msg(i) for i in range(3)]}
+
+    first = asyncio.create_task(memorize(batch))
+    await asyncio.wait_for(started.wait(), timeout=30)
+    await asyncio.wait_for(memorize(batch), timeout=30)
+    release.set()
+    await asyncio.wait_for(first, timeout=30)
+
+    cells = await _memcell_rows(storage, session)
+    assert [len(ids) for _, ids in cells] == [2], cells
+    assert [mid for mid, _ in await _buffer_rows(storage, session)] == message_ids(
+        session, [_msg(2)]
+    )
+    assert _episodes(tmp_path) == 1

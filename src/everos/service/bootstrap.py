@@ -143,7 +143,12 @@ from everos.memory.search.recall import (
 from everos.memory.strategies import STRATEGY_SPECS
 from everos.service._warmup import warm_token_counter
 from everos.service.knowledge import KnowledgeExtractor, KnowledgeService
-from everos.service.memory import InputLogWriter, MemoryService
+from everos.service.memory import (
+    ExtractionSupervisor,
+    FinishedMemcells,
+    InputLogWriter,
+    MemoryService,
+)
 from everos.service.ops import BackfillDeps, Capabilities, OpsService
 from everos.service.purge import PurgeRunGate, PurgeService
 
@@ -656,7 +661,9 @@ def _build_memory_service(
 ) -> MemoryService:
     stores, indexes = deps.stores, deps.indexes
     recaller_deps = RecallerDeps(tokenizer=tokenizer)
+    extractions = ExtractionSupervisor()
     return MemoryService(
+        extractions=extractions,
         index_eraser=index_eraser,
         memtrace_tracker=memtrace_tracker,
         purge_marks=purge_marks,
@@ -670,6 +677,7 @@ def _build_memory_service(
             settings=settings.boundary_detection,
             attempt_timeout=settings.memorize.session_lock_timeout_seconds,
             tz=deps.tz,
+            finished=FinishedMemcells(extractions, indexes.episode),
         ),
         multimodal_llm=providers.multimodal_llm,
         stores=stores,

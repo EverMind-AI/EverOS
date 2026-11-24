@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
-__all__ = ["ExtractionSupervisor"]
+__all__ = ["ExtractionSupervisor", "FinishedMemcells"]
 
 import asyncio
+from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from everos.core.observability.logging import get_logger
+from everos.memory.ports import all_of, eq
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Collection, Coroutine
+
+    from everos.memory.ports import EpisodeIndex
 
 logger = get_logger("everos.service.memory")
+
+_SUCCEEDED_KEPT = 10_000
+"""How many memcells that extracted cleanly :meth:`ExtractionSupervisor.accounted_for`
+remembers. It only has to outlast the episode index's lag (the cascade's
+delay, seconds); older memcells are found in the index.
+
+ponytail: a fixed count, not a time; at 15 memcells a second it still spans
+ten minutes."""
 
 
 class ExtractionSupervisor:
@@ -33,6 +45,16 @@ class ExtractionSupervisor:
 
     def __init__(self) -> None:
         self._tasks: set[asyncio.Task[Any]] = set()
+        self._running: Counter[str] = Counter()
+        self._succeeded: dict[str, None] = {}  # insertion-ordered set
+
+    def accounted_for(self, memcell_ids: Collection[str]) -> set[str]:
+        """Of ``memcell_ids``, those extracting now or recently extracted here.
+
+        Recently: among the last ``_SUCCEEDED_KEPT`` that finished without
+        an error in this process.
+        """
+        return {m for m in memcell_ids if m in self._running or m in self._succeeded}
 
     def supervise[T](
         self,
@@ -50,9 +72,16 @@ class ExtractionSupervisor:
         """
         task: asyncio.Task[T] = asyncio.ensure_future(coro)
         self._tasks.add(task)
+        self._running.update(memcell_ids)
 
         def _done(t: asyncio.Task[T]) -> None:
             self._tasks.discard(t)
+            self._running.subtract(memcell_ids)
+            self._running = +self._running  # drop the ids no task holds
+            if not t.cancelled() and t.exception() is None:
+                self._succeeded.update(dict.fromkeys(memcell_ids))
+                while len(self._succeeded) > _SUCCEEDED_KEPT:
+                    del self._succeeded[next(iter(self._succeeded))]
             if t.cancelled():
                 logger.error(
                     f"{label}_cancelled",
@@ -96,3 +125,38 @@ class ExtractionSupervisor:
                 in_flight=left,
                 waited_seconds=wait_seconds,
             )
+
+
+class FinishedMemcells:
+    """Which memcells a resend of their messages may be dropped for (#609).
+
+    Finished means the memcell gets its episode without the resend: its
+    extraction still runs in this process or extracted cleanly here lately
+    (:meth:`ExtractionSupervisor.accounted_for`), or an episode with the
+    memcell as parent is indexed (one a previous process extracted). Anything
+    else -- a memcell a crash or an abandoned shutdown left without one, or
+    whose extraction failed -- is not, and its messages are cut again: an
+    extra memcell beats losing them.
+
+    The one place that decides it; a delivery state kept on the memcell
+    (#516) replaces it.
+
+    ponytail: after a restart the index is the only record, and it trails the
+    markdown by the cascade's delay: a memcell extracted just before a crash
+    and replayed before the restarted cascade indexed its episode is cut again
+    (a duplicate, as before #609). The delivery state of #516 closes it.
+    """
+
+    def __init__(
+        self, extractions: ExtractionSupervisor, episodes: EpisodeIndex
+    ) -> None:
+        self._extractions = extractions
+        self._episodes = episodes
+
+    async def __call__(self, memcell_ids: Collection[str]) -> set[str]:
+        finished = self._extractions.accounted_for(memcell_ids)
+        for memcell_id in set(memcell_ids) - finished:
+            parent = all_of(eq("parent_type", "memcell"), eq("parent_id", memcell_id))
+            if await self._episodes.find(parent, limit=1):
+                finished.add(memcell_id)
+        return finished

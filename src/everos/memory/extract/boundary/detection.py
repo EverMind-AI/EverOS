@@ -27,7 +27,7 @@ __all__ = ["BoundaryDetection", "BoundaryOperator", "BoundaryOutcome", "Status"]
 
 import asyncio
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from datetime import UTC, tzinfo
 from typing import Any, Literal, NamedTuple, Protocol
 
@@ -134,6 +134,9 @@ class BoundaryDetection:
         attempt_timeout: Seconds one model attempt may take; ``None`` for no
             bound. It runs before any write, so a timeout changes nothing.
         tz: The zone message times are shown to the model in.
+        finished: Of the memcell ids given, the ones that get their episode
+            without a resend (service ``FinishedMemcells``). ``None`` takes
+            every memcell as finished.
     """
 
     def __init__(
@@ -145,8 +148,10 @@ class BoundaryDetection:
         settings: BoundaryDetectionSettings,
         attempt_timeout: float | None = None,
         tz: tzinfo = UTC,
+        finished: Callable[[Collection[str]], Awaitable[Collection[str]]] | None = None,
     ) -> None:
         self._detector = detector
+        self._finished = finished
         self._instructions = instructions
         self._session_buffer = session_buffer
         self._settings = settings
@@ -251,7 +256,7 @@ class BoundaryDetection:
         fresh: list[CanonicalMessage],
         buffered: Sequence[CanonicalMessage],
     ) -> list[CanonicalMessage]:
-        """``fresh`` without the messages a memcell of the session already holds.
+        """``fresh`` without the messages a finished memcell already holds.
 
         A client that resends a batch after a timeout sends messages the first
         call may have cut already; those left the buffer, so the merge alone
@@ -259,7 +264,7 @@ class BoundaryDetection:
         may share rows with the last cell.
         """
         held = {m.message_id for m in buffered}
-        cut = await self._session_buffer.already_cut(
+        cut = await self._held_by_finished_memcell(
             session, [m.message_id for m in fresh if m.message_id not in held]
         )
         if not cut:
@@ -270,6 +275,23 @@ class BoundaryDetection:
             count=len(cut),
         )
         return [m for m in fresh if m.message_id not in cut]
+
+    async def _held_by_finished_memcell(
+        self, session: SessionKey, message_ids: Sequence[str]
+    ) -> set[str]:
+        """The ``message_ids`` a memcell holds that gets its episode anyway.
+
+        A memcell whose extraction was lost (a crash, an abandoned shutdown)
+        is not finished: its messages are cut again on a resend or a queue
+        replay rather than dropped with no episode ever written.
+        """
+        memcell_of = await self._session_buffer.held_by(session, message_ids)
+        if not memcell_of:
+            return set()
+        if self._finished is None:
+            return set(memcell_of)
+        finished = await self._finished(set(memcell_of.values()))
+        return {m for m, cell in memcell_of.items() if cell in finished}
 
     async def _segment_or_quarantine(
         self,

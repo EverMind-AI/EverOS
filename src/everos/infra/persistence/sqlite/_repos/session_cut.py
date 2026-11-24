@@ -68,7 +68,7 @@ class SessionCutRepo(RepoBase[UnprocessedBuffer]):
             await _replace_buffer(s, keys, tail)
             await s.commit()
 
-    async def already_cut(
+    async def held_by(
         self,
         session_id: str,
         track: str,
@@ -76,19 +76,20 @@ class SessionCutRepo(RepoBase[UnprocessedBuffer]):
         *,
         app_id: str,
         project_id: str,
-    ) -> set[str]:
-        """Which of ``message_ids`` a memcell of the (session, track) holds.
+    ) -> dict[str, str]:
+        """The memcell of the (session, track) holding each of ``message_ids``.
 
         The memcells a cut inserts are its record of what it consumed, in the
-        same transaction, so a message is "already cut" exactly when one of
-        them lists it.
+        same transaction, so a message has been cut exactly when one of them
+        lists it. A message is in one memcell; were it in two, either is
+        returned.
         """
         if not message_ids:
-            return set()
+            return {}
         # ponytail: scans the session's memcells; a (session, message_id)
         # table if one session ever holds enough memcells for this to show.
         stmt = text(
-            "SELECT DISTINCT j.value FROM memcell AS m, "
+            "SELECT j.value, m.memcell_id FROM memcell AS m, "
             "json_each(m.message_ids_json) AS j "
             "WHERE m.app_id = :app_id AND m.project_id = :project_id "
             "AND m.session_id = :session_id AND m.track = :track "
@@ -98,7 +99,7 @@ class SessionCutRepo(RepoBase[UnprocessedBuffer]):
             "ids": list(message_ids)
         }
         async with session_scope(self._factory) as s:
-            return set((await s.execute(stmt, params)).scalars())
+            return {row[0]: row[1] for row in await s.execute(stmt, params)}
 
 
 def _keys(app_id: str, project_id: str, session_id: str, track: str) -> dict[str, str]:

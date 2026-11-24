@@ -137,10 +137,10 @@ class SqliteSessionBufferStore:
             project_id=session.project_id,
         )
 
-    async def already_cut(
+    async def held_by(
         self, session: SessionKey, message_ids: Sequence[str]
-    ) -> set[str]:
-        return await self._cut.already_cut(
+    ) -> dict[str, str]:
+        return await self._cut.held_by(
             session.session_id,
             _SESSION_TRACK,
             message_ids,
