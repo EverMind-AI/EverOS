@@ -10,13 +10,15 @@ returning an empty token stream.
 
 from __future__ import annotations
 
+import os
 import sys
 import warnings
+from pathlib import Path
 
 import nltk
 import pytest
 
-from everos.component.tokenizer import build_tokenizer
+from everos.component.tokenizer import build_tokenizer, nltk_provider
 from everos.component.tokenizer.nltk_provider import NltkTokenizer
 from everos.config import TokenizerSettings
 from everos.core.errors import CapabilityError
@@ -51,6 +53,17 @@ def test_tokens_match_the_everalgo_harness(text: str, expected: list[str]) -> No
     assert NltkTokenizer().tokenize(text) == expected
 
 
+def test_a_word_after_an_opening_quote_is_kept() -> None:
+    """NLTK 3.10 splits a leading quote off a word; 3.9.4 dropped the word.
+
+    The one token difference between the two releases on LoCoMo + LongMemEval
+    text (449 of 83,484 texts). The harness above ran 3.9.4, so it has no
+    such case; this pins the pinned release's behaviour.
+    """
+    text = "Camping with my fam, 'cause nature helps."
+    assert NltkTokenizer().tokenize(text) == ["camp", "fam", "caus", "natur", "help"]
+
+
 def test_tokenize_batch_preserves_order() -> None:
     texts = ["What did Melanie paint?", "", "swimming lessons"]
     assert NltkTokenizer().tokenize_batch(texts) == [
@@ -69,9 +82,38 @@ def test_missing_nltk_data_fails_at_construction(
         raise LookupError(resource)
 
     monkeypatch.setattr(nltk.data, "find", _missing)
+    monkeypatch.setattr(nltk.data, "path", [])  # nothing on disk either
     with pytest.raises(CapabilityError) as err:
         NltkTokenizer()
     assert "python -m nltk.downloader punkt_tab stopwords" in str(err.value)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="NLTK checks ownership on POSIX only")
+def test_data_another_account_could_write_is_named_with_the_fix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """NLTK >= 3.10 skips group- or world-writable data, so it reads as missing.
+
+    The error must say why and how to fix it, not ask for a download.
+    """
+    root = tmp_path / "nltk_data"
+    for resource in ("tokenizers/punkt_tab/english", "corpora/stopwords"):
+        (root / resource).mkdir(parents=True)
+    monkeypatch.setattr(nltk.data, "path", [str(root)])
+
+    for d in [root, *root.rglob("*")]:
+        d.chmod(0o775)
+    with (
+        pytest.warns(RuntimeWarning, match="NLTK will not read"),
+        pytest.raises(CapabilityError) as err,
+    ):
+        nltk_provider._require_data()
+    assert f"chmod -R go-w {root}" in str(err.value)
+    assert "nltk.downloader" not in str(err.value)
+
+    for d in [root, *root.rglob("*")]:
+        d.chmod(0o755)
+    nltk_provider._require_data()  # the same data, private: accepted
 
 
 def test_the_factory_builds_nltk_when_selected() -> None:

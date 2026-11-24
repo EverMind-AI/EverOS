@@ -132,6 +132,12 @@ pip install "everos[nltk]"
 python -m nltk.downloader punkt_tab stopwords
 ```
 
+On Linux and macOS, NLTK 3.10 and later will not read data that another
+account could write (a group or world write bit, or another owner), and that
+data then reads as missing. Keep the data directory private to its owner
+(`chmod -R go-w <dir>`); the startup error names the directory when this is
+the cause.
+
 The LanceDB keyword index lowercases, Snowball-stems and ASCII-folds tokens on
 both the indexed and the query side, so on that backend `nltk` tokens are
 stemmed a second time; matching stays symmetric.

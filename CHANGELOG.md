@@ -48,6 +48,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every `scan_interval_seconds` while the worker is busy too, not only
   between drains.
 
+### Security
+
+- **The `[nltk]` extra now pins NLTK 3.10.4** (was 3.9.4). 3.9.4's
+  `PorterStemmer.stem()` can be driven into a slow path by a crafted word
+  (PYSEC-2026-3738, fixed in 3.10.3), and the `nltk` tokenizer stems every
+  token of ingested text. The two releases tokenize alike except for a word
+  right after an opening quote (`'cause`), which 3.9.4 dropped: 449 of
+  83,484 LoCoMo and LongMemEval texts change. Turn-level BM25 over the 1,977
+  LoCoMo questions with evidence is unchanged (Hit@5 60.09% -> 60.04%, MRR
+  0.4600 -> 0.4600).
+
+### Upgrade
+
+- A store indexed with `[tokenizer] name = "nltk"` should run
+  `everos cascade rebuild` after upgrading, so stored tokens and query
+  tokens come from the same NLTK release. On Linux and macOS, NLTK 3.10 also
+  refuses data another account could write: if the `nltk` tokenizer now
+  reports its data missing, run `chmod -R go-w` on the data directory the
+  error names. The default `jieba` tokenizer is unaffected.
+
 ## [1.7.1] - 2026-11-20
 
 EverOS 1.7.1 writes each conversation's memory in its own language: a short

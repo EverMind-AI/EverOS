@@ -27,10 +27,13 @@ help:
 
 # Sync deps from uv.lock; CI calls this directly. --frozen means "lock is the
 # source of truth — fail rather than update it". Then fetch the NLTK data the
-# nltk tokenizer reads, into the venv where NLTK looks for it.
+# nltk tokenizer reads, into the venv where NLTK looks for it, private to its
+# owner: NLTK >= 3.10 will not read data another account could write, which a
+# group-writable checkout (umask 002) would otherwise give it.
 install-deps:
 	uv sync --frozen
 	uv run --frozen python -m nltk.downloader -q -e -d .venv/nltk_data punkt_tab stopwords
+	chmod -R go-w .venv/nltk_data
 
 # One-stop dev setup: deps + pre-commit hooks (both pre-commit and commit-msg
 # stages — gitlint runs on commit-msg).

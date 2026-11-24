@@ -124,10 +124,12 @@ otel = [
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
 ]
 milvus = ["pymilvus>=3.0.0"]
-# NLTK keyword tokenizer (`[tokenizer] name = "nltk"`). Pinned to the release the
-# EverAlgo LoCoMo harness used: tokens change across NLTK releases, and the
-# indexed side and the query side must produce the same ones.
-nltk = ["nltk==3.9.4"]
+# NLTK keyword tokenizer (`[tokenizer] name = "nltk"`). Pinned exactly: tokens
+# change across NLTK releases, and the indexed side and the query side must
+# produce the same ones. 3.10.4 fixes a PorterStemmer DoS (PYSEC-2026-3738) on
+# the path every token takes; a store indexed under another release needs
+# `everos cascade rebuild`.
+nltk = ["nltk==3.10.4"]
 
 [project.urls]
 Homepage = "https://evermind.ai"
@@ -572,6 +574,6 @@ dev = [
     "smartcomment>=0.1.2",
     "pymilvus>=3.0.0",
     # The NLTK tokenizer tests must run, not skip, so the [nltk] extra is present too.
-    "nltk==3.9.4",
+    "nltk==3.10.4",
     "hypothesis>=6.100",
 ]
