@@ -372,17 +372,23 @@ def _validate(text: str, response_format: type[BaseModel]) -> str:
     and which resending the identical request tends to reproduce. Such a
     reply is validated once more with those commas removed.
 
+    Others wrap the JSON in a markdown code fence (``\\u0060\\u0060\\u0060json
+    ... \\u0060\\u0060\\u0060``) when no schema is enforced on the wire
+    (``json_object`` / ``prompt_only``). Such a reply is validated once more
+    with the fence stripped. Both repairs run before a resend.
+
     Returns:
         The text the operator should parse: ``text``, or its repair.
 
     Raises:
-        _AttemptFailedError: Neither ``text`` nor its repair validates;
+        _AttemptFailedError: Neither ``text`` nor a repair validates;
             chained to the ``ValidationError`` of ``text``.
     """
     try:
         response_format.model_validate_json(text)
     except ValidationError as exc:
-        repaired = _strip_trailing_commas(text)
+        unfenced = _strip_markdown_fence(text)
+        repaired = _strip_trailing_commas(unfenced)
         if repaired != text and _validates(repaired, response_format):
             return repaired
         raise _AttemptFailedError(
@@ -428,3 +434,30 @@ def _strip_trailing_commas(text: str) -> str:
         out.append(ch)
         in_string = ch == '"'
     return "".join(out)
+
+
+def _strip_markdown_fence(text: str) -> str:
+    """Strip a leading and trailing markdown code fence from ``text``.
+
+    When no schema is enforced on the wire (``json_object`` / ``prompt_only``),
+    some OpenAI-compatible models wrap the JSON reply in a ```` ```json ... ``` ````
+    fence. ``model_validate_json`` rejects the fence, so the fenced reply is
+    repaired before validation by dropping a leading ```` ``` ```` (with an
+    optional language tag such as ``json``) and a trailing ```` ``` ````.
+
+    Only a single outer fence is stripped; fenced code that appears inside a
+    string value is part of the reply's content and is left untouched, as it is
+    only reachable after the surrounding JSON has been parsed. A reply that is
+    not fenced is returned unchanged.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return text
+    # Drop the opening fence line (``` or ```json).
+    first_newline = stripped.find("\n")
+    if first_newline == -1:
+        return text  # one line, no JSON to recover
+    inner = stripped[first_newline + 1 :]
+    if inner.endswith("```"):
+        inner = inner[:-3]
+    return inner.strip()

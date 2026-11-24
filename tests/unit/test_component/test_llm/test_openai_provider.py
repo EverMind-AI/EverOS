@@ -267,6 +267,58 @@ async def test_repair_that_still_fails_validation_is_resent() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Markdown code fence (#627)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("reply", "repaired"),
+    [
+        # ```json fence, single object.
+        ('```json\n{"text": "ok", "items": []}\n```', '{"text": "ok", "items": []}'),
+        # Bare ``` fence.
+        ('```\n{"text": "ok", "items": []}\n```', '{"text": "ok", "items": []}'),
+        # Fence with no trailing newline before the closing fence.
+        ('```json\n{"text": "ok", "items": []}```', '{"text": "ok", "items": []}'),
+        # Fence combined with a trailing comma inside: both repairs apply.
+        ('```json\n{"text": "ok", "items": [],}\n```', '{"text": "ok", "items": []}'),
+        # A fenced code block inside a string value is content, not an outer
+        # fence: the reply already validates, so no repair runs.
+        (
+            '{"text": "```python\\nx = 1\\n```", "items": []}',
+            '{"text": "```python\\nx = 1\\n```", "items": []}',
+        ),
+    ],
+    ids=[
+        "json-fence",
+        "bare-fence",
+        "no-trailing-newline",
+        "fence-and-comma",
+        "fence-in-string",
+    ],
+)
+async def test_markdown_fence_is_stripped_without_a_resend(
+    reply: str, repaired: str
+) -> None:
+    upstream = _Upstream(_completion(reply))
+    text = await _provider(upstream, invalid_reply_retries=0).achat(
+        _prompt(), response_format=_Items
+    )
+    assert text == repaired
+    assert len(upstream.bodies) == 1
+
+
+async def test_fence_repair_that_still_fails_validation_is_resent() -> None:
+    """Stripping the fence does not excuse a missing field."""
+    upstream = _Upstream(_completion('```json\n{"items": ["a"]}\n```'), _completion())
+    text = await _provider(upstream, invalid_reply_retries=1).achat(
+        _prompt(), response_format=_Reply
+    )
+    assert text == _VALID
+    assert len(upstream.bodies) == 2
+
+
+# ---------------------------------------------------------------------------
 # Observer
 # ---------------------------------------------------------------------------
 
