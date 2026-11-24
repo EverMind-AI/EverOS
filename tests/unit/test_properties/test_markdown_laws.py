@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import re
 import tempfile
 from pathlib import Path
 
@@ -117,7 +118,9 @@ def test_split_and_find_recover_every_entry(items: list[tuple[str, str]]) -> Non
 
 _section_body = st.text(max_size=120).filter(
     lambda s: (
-        not s.startswith("\n")
+        # The H3 pattern's trailing ``\s*`` runs on over a whitespace-only first
+        # line ("\n", "\r\n", "\x0c\n", "  \n" ...), so it is not kept.
+        "\n" not in re.match(r"\s*", s).group()
         and not any(line.startswith("###") for line in s.splitlines())
     )
 )
