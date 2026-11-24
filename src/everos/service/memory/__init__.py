@@ -194,11 +194,22 @@ class MemoryService:
                 agent_id=agent_id,
                 session_id=session_id,
             )
-            if session_id is not None and self._input_log is not None:
+            if self._input_log is not None:
+                owner_id = user_id or agent_id
                 try:
-                    await self._input_log.delete_session(
-                        app_id=app_id, project_id=project_id, session_id=session_id
-                    )
+                    if session_id is not None and owner_id is None:
+                        await self._input_log.delete_session(
+                            app_id=app_id,
+                            project_id=project_id,
+                            session_id=session_id,
+                        )
+                    elif owner_id is not None:
+                        await self._input_log.delete_owner(
+                            app_id=app_id,
+                            project_id=project_id,
+                            owner_id=owner_id,
+                            session_id=session_id,
+                        )
                 except Exception as exc:
                     # The memories are gone but the privacy log is not; report
                     # the deletion as incomplete so a retry finishes it.
