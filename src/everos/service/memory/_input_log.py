@@ -103,6 +103,17 @@ class InputLogWriter:
                 temp.write_text("\n".join(kept) + "\n", encoding="utf-8")
                 temp.replace(path)
 
+    async def sweep_retention(self) -> None:
+        """Apply retention to every scope at startup, not only on its next write."""
+        async with self._lock:
+            await asyncio.to_thread(self._sweep_retention_sync)
+
+    def _sweep_retention_sync(self) -> None:
+        today = get_now_with_timezone().date()
+        for directory in self._root.glob("*/*/.input_log"):
+            if directory.is_dir():
+                self._prune(directory, today)
+
     async def purge_scope(self, scope: Any) -> None:
         """Remove every ``.input_log`` directory the purge scope covers."""
         async with self._lock:

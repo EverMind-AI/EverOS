@@ -150,6 +150,8 @@ class MemoryService:
 
     async def start(self) -> None:
         """Start delivering the ``async_mode`` queue."""
+        if self._input_log is not None:
+            await self._input_log.sweep_retention()
         if not self._queue.accepting:
             logger.info("memorize_queue_not_accepting_async")
         await self._queue.start()

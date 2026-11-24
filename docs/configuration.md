@@ -527,6 +527,9 @@ and a purge removes the covered scopes' `.input_log/` directories.
 | `retention_days` | int | `30` | Daily files older than this are removed when the scope next writes. |
 | `max_inline_bytes` | int | `1048576` | A line larger than this keeps text verbatim but replaces each `base64` attachment with its byte length and SHA-256. |
 
+Retention is applied when a scope writes and, at startup, to every existing
+scope, so an idle scope's old files do not accumulate forever.
+
 A failed log write is reported at error level and **never fails `/add`**.
 
 ### `[agent_memory]`
