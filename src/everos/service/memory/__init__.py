@@ -21,6 +21,7 @@ __all__ = [
     "TASK_STATUSES",
     "DeleteResult",
     "ExtractionSupervisor",
+    "FinishedMemcells",
     "FlushResult",
     "InputLogWriter",
     "MemorizeResult",
@@ -51,6 +52,7 @@ from everos.memory.search.trace import collect_search_trace
 from ._delete import Deleter
 from ._delete import DeleteResult as DeleteResult
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
+from ._extraction import FinishedMemcells as FinishedMemcells
 from ._input_log import InputLogWriter
 from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
@@ -103,6 +105,9 @@ class MemoryService:
         purge_marks: The root's purge marks: the async queue drops rows a
             purge superseded; each delivery and each extraction is registered
             while it runs, so a purge can wait for it. ``None`` ignores purges.
+        extractions: Keeps extractions alive past their request; bootstrap
+            shares it with ``boundary``, which asks which memcells are still
+            extracting. A fresh one when omitted.
     """
 
     def __init__(
@@ -122,12 +127,13 @@ class MemoryService:
         memtrace_tracker: Any = None,
         purge_marks: PurgeMarks | None = None,
         input_log: InputLogWriter | None = None,
+        extractions: ExtractionSupervisor | None = None,
     ) -> None:
         self._memtrace_tracker = memtrace_tracker
         self._search_manager = search_manager
         self._get_manager = get_manager
         self._input_log = input_log
-        self._extractions = ExtractionSupervisor()
+        self._extractions = extractions or ExtractionSupervisor()
         self._stores = stores
         self._deleter = Deleter(
             stores=stores, eraser=index_eraser, settings=settings.memorize

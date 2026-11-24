@@ -613,9 +613,13 @@ its session, its `timestamp` and what was said by whom (`sender_id`, `role`,
 request are not part of it (a message repeated verbatim within one request
 counts as many times as it appears).
 A resent message that is still buffered, or already part of a memory cell
-of the session, is dropped, so a retry (whole, split or regrouped) never
-writes it twice and answers `200` (`"accumulated"` when it cut nothing
-new). Two different messages with one `timestamp` are both kept. After the
+of the session whose memories were written or are still being written, is
+dropped, so a retry (whole, split or regrouped) never writes it twice and
+answers `200` (`"accumulated"` when it cut nothing new). A memory cell whose
+extraction never finished -- the server stopped or crashed in the middle, or
+the extraction failed -- does not hold its messages: the retry, or the async
+queue's replay after a restart, cuts them again so they are memorized, at the
+cost of one memory cell without memories. Two different messages with one `timestamp` are both kept. After the
 session's memories are deleted (`/memory/delete` with its `session_id`), a
 resend is memorized again.
 

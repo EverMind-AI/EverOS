@@ -145,6 +145,8 @@ class Memorizer:
         nothing retried it -- the cell stayed without an episode for good
         (found by the concurrent-memorize property test). Extraction runs
         after the lock is released; it only reads memcells, never the buffer.
+        It is handed to the supervisor before the release, so a resend that
+        takes the lock next already sees its memcells as extracting.
         """
         mode = self._settings.memorize.mode
         session_id = payload["session_id"]
@@ -183,27 +185,28 @@ class Memorizer:
                     is_final=is_final,
                     defer_extraction=defer_extraction,
                 )
-            if isinstance(prepared, MemorizeResult):
-                return prepared
-            ingested, boundary = prepared
-            # The cells exist, so their extraction must not die with a
-            # cancelled request (a client that went away). The task is owned
-            # by the supervisor, which keeps it, retrieves its outcome and
-            # waits for it at shutdown; the request only shields it.
-            work = self._extract(payload, ingested, boundary, mode=mode)
-            if self._purge_marks is not None:
-                # Tracked so a purge of the scope waits for it, even after
-                # the request is gone.
-                where = (
-                    payload.get("app_id", "default"),
-                    payload.get("project_id", "default"),
+                if isinstance(prepared, MemorizeResult):
+                    return prepared
+                ingested, boundary = prepared
+                # The cells exist, so their extraction must not die with a
+                # cancelled request (a client that went away). The task is
+                # owned by the supervisor, which keeps it, retrieves its
+                # outcome and waits for it at shutdown; the request only
+                # shields it. Handed over under the lock: see the docstring.
+                work = self._extract(payload, ingested, boundary, mode=mode)
+                if self._purge_marks is not None:
+                    # Tracked so a purge of the scope waits for it, even after
+                    # the request is gone.
+                    where = (
+                        payload.get("app_id", "default"),
+                        payload.get("project_id", "default"),
+                    )
+                    work = _tracked(work, self._purge_marks, origin_or_now(), where)
+                extraction = self._extractions.supervise(
+                    work,
+                    session_id=session_id,
+                    memcell_ids=boundary.memcell_ids,
                 )
-                work = _tracked(work, self._purge_marks, origin_or_now(), where)
-            extraction = self._extractions.supervise(
-                work,
-                session_id=session_id,
-                memcell_ids=boundary.memcell_ids,
-            )
             try:
                 return await asyncio.shield(extraction)
             except asyncio.CancelledError:

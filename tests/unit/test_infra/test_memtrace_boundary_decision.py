@@ -58,8 +58,8 @@ class _Buffer:
     async def cut(self, *args: object, **kwargs: object) -> None:
         return None
 
-    async def already_cut(self, session: object, message_ids: object) -> set[str]:
-        return set()
+    async def held_by(self, session: object, message_ids: object) -> dict[str, str]:
+        return {}
 
 
 @pytest.mark.parametrize("mode", ["chat", "agent"])
@@ -188,8 +188,10 @@ class _AllCutBuffer(_Buffer):
     async def list(self, session: object) -> list[CanonicalMessage]:
         return list(self._held)
 
-    async def already_cut(self, session: object, message_ids: object) -> set[str]:
-        return set(message_ids)
+    async def held_by(
+        self, session: object, message_ids: Sequence[str]
+    ) -> dict[str, str]:
+        return dict.fromkeys(message_ids, "mc_held")
 
 
 @pytest.mark.parametrize("call", ["buffer", "detect"])

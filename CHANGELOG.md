@@ -76,7 +76,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retrying after a timeout re-sent messages the first call had already cut
   into a memory cell, and they became a second memcell and episode. The
   boundary stage now drops fresh messages a memcell of the session already
-  holds. Message ids no longer depend on where a message sits in its request:
+  holds, when that memcell's memories were written or are still being
+  written. A memcell whose extraction never finished -- the server crashed
+  or stopped in the middle, or the extraction failed -- does not hold them:
+  the retry, or the async queue's replay after a restart, cuts them again,
+  so they are memorized rather than dropped for good (one memcell is left
+  without memories). Message ids no longer depend on where a message sits in its request:
   `m_<session>_<timestamp>_<digest>`, `digest` covering who said what (a
   message repeated verbatim in one request is told apart by its repeat
   count), so a resend -- whole, split or regrouped, within one millisecond
