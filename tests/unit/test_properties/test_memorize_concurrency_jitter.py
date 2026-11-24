@@ -253,7 +253,14 @@ async def _jittered(
                 run.consecutive_failures[session] = 0
                 event("call: session buffer quarantined")
                 return
-            except (LLMOutputError, BoundaryLLMError):
+            except BoundaryLLMError:
+                # Infrastructure failure: expected, but it must not count
+                # toward the poison-output streak.
+                run.note(f"call#{k} -> boundary infrastructure failed")
+                unknown[session].update(ids)
+                event("call: boundary infrastructure failed")
+                return
+            except LLMOutputError:
                 run.note(f"call#{k} -> boundary failed")
                 unknown[session].update(ids)
                 run.consecutive_failures[session] += 1
