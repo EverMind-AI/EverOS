@@ -15,19 +15,17 @@ does not belong here.
 ## I1 — one message belongs to exactly one memcell
 
 Boundary detection is the only memorize stage that runs before the memcell
-and session-buffer write. A failure there leaves no state behind, so it can
-be retried; a failure after it cannot.
+and session-buffer write. A failure there leaves no state behind; a failure
+after it cannot be retried the same way.
 
 - A session cut writes the memcells, the `last_memcell_ts`, and the remaining
   buffer in one SQLite transaction.
-- The queue retries only `BoundaryLLMError` with `boundary_max_attempts`;
-  every other failure keeps `max_attempts = 1`.
 - A message must not appear in two memcells, or in both a memcell and the
   buffer.
 
-Pinned by `tests/unit/test_properties/test_boundary_stateful.py`,
-`tests/unit/test_memorize_queue.py::test_boundary_llm_failure_has_its_own_retry_budget`,
-and the session-cut atomicity tests.
+Pinned by `tests/unit/test_properties/test_boundary_stateful.py` and the
+session-cut atomicity tests. The boundary-specific retry budget is in review
+(#577).
 
 ## I2 — Markdown is the truth; the index is a projection
 
@@ -37,8 +35,9 @@ and the session-cut atomicity tests.
 - A tombstone is written only for a real deletion, not for a scan/watcher
   race.
 - A stale claim cannot overwrite a newer claim's index rows.
-- `cascade rebuild` recreates the index from Markdown, including the scalar
-  indexes.
+- `cascade rebuild` recreates the index from Markdown.
+
+The BTree index on the business-table `id` is in review (#578).
 
 Pinned by `tests/unit/test_infra/test_cascade/test_worker_stateful.py`,
 `tests/unit/test_infra/test_cascade/test_fence_permutations.py`, and
@@ -98,6 +97,8 @@ Pinned by `tests/unit/test_service/test_memory/test_input_log.py` and
 
 These are being addressed but are not guaranteed on `main` yet:
 
+- boundary LLM retry budget — #577;
+- BTree index on the business-table `id` — #578;
 - owner-only deletion log redaction — #640;
 - private `.input_log` directory/file modes — #636;
 - idle-scope retention sweep at startup — #637.
