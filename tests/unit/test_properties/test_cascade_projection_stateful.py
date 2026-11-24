@@ -28,7 +28,6 @@ in the settled state.
 
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
 import os
 import shutil
@@ -62,6 +61,7 @@ from everos.infra.persistence.sqlite._repos.md_change_state import MdChangeState
 from everos.infra.persistence.sqlite._tables import MdChangeState
 from everos.memory.ports.query import eq
 from tests.fakes import TEST_DIM, arrow_schema, handler_deps, index_repositories
+from tests.helpers.event_loop import new_stepped_loop
 
 settings.register_profile(
     "ci",
@@ -120,7 +120,7 @@ class _Embedder(EmbeddingProvider):
 class CascadeProjectionMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.tmp = Path(tempfile.mkdtemp(prefix="cascade_projection_"))
         self.root = MemoryRoot(self.tmp)
         self.root.ensure()

@@ -30,7 +30,6 @@ it reported ``will_run=True`` for an event ``dispatch`` would not route.
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import datetime as dt
 import os
@@ -53,6 +52,7 @@ from everos.infra.ome._stores.counter import CounterStore
 from everos.infra.ome._stores.storage import OMEStorage
 from everos.memory.deps import MemoryDeps
 from everos.memory.ports import Counter, Event, Immediate
+from tests.helpers.event_loop import new_stepped_loop
 from tests.helpers.ome import ome_strategy
 
 settings.register_profile(
@@ -140,7 +140,7 @@ class _Clock:
 class CounterGateMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.tmp = Path(tempfile.mkdtemp(prefix="counter_gate_"))
         self.clock = _Clock()
         self._patch = mock.patch.object(counter_mod, "get_utc_now", self.clock.now)

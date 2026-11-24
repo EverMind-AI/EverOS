@@ -89,6 +89,7 @@ from everos.infra.cascade._worker import _supervision as supervision
 from everos.infra.cascade._worker import _tuning as tuning
 from everos.infra.cascade._worker import _worker as worker_impl
 from everos.infra.cascade.models import HandlerOutcome
+from tests.helpers.event_loop import new_stepped_loop
 
 settings.register_profile(
     "ci",
@@ -278,7 +279,7 @@ class MaintenanceMachine(RuleBasedStateMachine):
 
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.clock = _Clock()
         self._patches = [
             mock.patch.object(worker_impl, "time", self.clock),

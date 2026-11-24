@@ -57,6 +57,7 @@ from everos.service.memory._queue import MemorizeQueueWorker
 from everos.service.memory._queue_steps import recover_processing
 from everos.service.purge import PurgeRunGate
 from tests.fakes.storage import make_storage
+from tests.helpers.event_loop import new_stepped_loop
 from tests.helpers.ome import ome_strategy
 from tests.unit.test_service.test_purge._harness import Purge, make_purge
 
@@ -124,7 +125,7 @@ async def _deliver(payload: dict[str, Any], **_: Any) -> MemorizeResult:
 class PurgeMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.tmp = Path(tempfile.mkdtemp(prefix="purge-prop-"))
         MARKS.reset()
         LOCKS.reset()

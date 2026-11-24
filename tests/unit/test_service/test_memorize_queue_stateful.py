@@ -102,6 +102,7 @@ from everos.infra.persistence.sqlite._tables import MemorizeInbox
 from everos.service import MemorizeResult
 from everos.service.memory import _queue as mq
 from tests.fakes.application import make_ops
+from tests.helpers.event_loop import new_stepped_loop
 
 settings.register_profile(
     "ci",
@@ -223,7 +224,7 @@ class _Queue:
 class MemorizeQueueMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.q = _Queue(self._fake_memorize, _settings())
         self.run(self.q.setup())
         # The model: request id -> expected state, plus the delivery log as
