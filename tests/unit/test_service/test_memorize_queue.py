@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -78,7 +79,9 @@ def _ops() -> OpsService:
 
 
 @pytest.fixture
-async def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemorizeInboxRepo:
+async def repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[MemorizeInboxRepo]:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     engine = create_system_engine(mr.system_db, SqliteSettings())
@@ -88,7 +91,8 @@ async def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MemorizeInbox
     inbox = MemorizeInboxRepo(session_factory=factory)
     store = SqliteMemorizeInboxStore(inbox)
     _wiring["inbox"] = store
-    return inbox
+    yield inbox
+    await engine.dispose()
 
 
 def _settings(**overrides: Any) -> AsyncQueueSettings:

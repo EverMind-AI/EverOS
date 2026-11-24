@@ -15,6 +15,7 @@ Pins the ``find_by_ids`` contract:
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -31,14 +32,15 @@ from everos.infra.persistence.sqlite._tables import Memcell
 
 
 @pytest.fixture
-async def repo(tmp_path: Path) -> MemcellRepo:
+async def repo(tmp_path: Path) -> AsyncIterator[MemcellRepo]:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     engine = create_system_engine(mr.system_db, SqliteSettings())
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    return MemcellRepo(session_factory=factory)
+    yield MemcellRepo(session_factory=factory)
+    await engine.dispose()
 
 
 def _memcell(memcell_id: str) -> Memcell:

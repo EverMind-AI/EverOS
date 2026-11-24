@@ -8,7 +8,7 @@ tracked while it runs.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -43,15 +43,16 @@ def _clean() -> Iterator[None]:
 
 
 @pytest.fixture
-async def inbox(tmp_path: Path) -> SqliteMemorizeInboxStore:
+async def inbox(tmp_path: Path) -> AsyncIterator[SqliteMemorizeInboxStore]:
     root = MemoryRoot(tmp_path)
     root.ensure()
     engine = create_system_engine(root.system_db, SqliteSettings())
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    return SqliteMemorizeInboxStore(
+    yield SqliteMemorizeInboxStore(
         MemorizeInboxRepo(session_factory=create_session_factory(engine))
     )
+    await engine.dispose()
 
 
 @pytest.fixture
