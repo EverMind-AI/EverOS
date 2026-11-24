@@ -151,7 +151,11 @@ class MarkdownKnowledgeStore:
         index = await _locate_index(self._knowledge_dir(app_id, project_id), doc_id)
         if index is None:
             return None
-        fm, _ = parse_frontmatter(await MarkdownReader.read_text(index))
+        try:
+            fm, _ = parse_frontmatter(await MarkdownReader.read_text(index))
+        except FileNotFoundError:
+            # A deletion can remove the index between locating and reading it.
+            return None
         return KnowledgeDocument(
             doc_id=doc_id,
             app_id=app_id,
@@ -259,7 +263,12 @@ async def _locate_index(knowledge_dir: Path, doc_id: str) -> Path | None:
     if not await adir.exists():
         return None
     async for index in adir.rglob(_INDEX_FILE):
-        fm, _ = parse_frontmatter(await MarkdownReader.read_text(index))
+        try:
+            fm, _ = parse_frontmatter(await MarkdownReader.read_text(index))
+        except FileNotFoundError:
+            # The scan can race a document deletion; a vanished file matches
+            # nothing rather than failing the lookup.
+            continue
         if fm.get("doc_id") == doc_id:
             return Path(str(index))
     return None

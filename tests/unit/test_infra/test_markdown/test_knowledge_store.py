@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import anyio
 import pytest
 
 from everos.core.errors import DocumentNotFoundError
 from everos.infra.persistence import MemoryRoot
-from everos.infra.persistence.markdown import MarkdownKnowledgeStore
+from everos.infra.persistence.markdown import MarkdownKnowledgeStore, MarkdownReader
 from everos.memory.models import KnowledgeMemory
 from everos.memory.ports import KnowledgeStore
 
@@ -86,6 +87,24 @@ async def test_write_read_update_delete_round_trip(root: MemoryRoot) -> None:
 
     removed = await store.delete_document("app", "proj", _DOC)
     assert removed == 2
+    assert await store.read_document("app", "proj", _DOC) is None
+
+
+async def test_read_document_returns_none_when_index_vanishes(
+    root: MemoryRoot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = MarkdownKnowledgeStore(root)
+    await store.write_document(
+        "app", "proj", _memories(), source_name=None, source_type=None, original=None
+    )
+    original = MarkdownReader.read_text
+
+    async def vanishing(path: object) -> str:
+        await original(path)
+        await anyio.Path(str(path)).unlink()
+        raise FileNotFoundError(str(path))
+
+    monkeypatch.setattr(MarkdownReader, "read_text", vanishing)
     assert await store.read_document("app", "proj", _DOC) is None
 
 
