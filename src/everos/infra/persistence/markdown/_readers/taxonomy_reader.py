@@ -178,7 +178,11 @@ async def parse_taxonomy(path: anyio.Path | Path) -> list[CategorySpec]:
     apath = anyio.Path(path) if not isinstance(path, anyio.Path) else path
     if not await apath.exists():
         return []
-    text = await MarkdownReader.read_text(apath)
+    try:
+        text = await MarkdownReader.read_text(apath)
+    except FileNotFoundError:
+        # A deletion can remove the taxonomy between the check and the read.
+        return []
     parts = text.split("---", 2)
     if len(parts) < 3:
         return []

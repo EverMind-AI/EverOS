@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import anyio
 import pytest
 
 from everos.infra.persistence.markdown import ensure_taxonomy, parse_taxonomy
@@ -31,6 +32,19 @@ class TestParseTaxonomy:
         assert len(entries) == 2
         assert entries[0].id == "Sports"
         assert entries[0].description == "Content about sports events."
+
+    async def test_returns_empty_when_file_vanishes_after_exists(
+        self, taxonomy_md: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original_exists = anyio.Path.exists
+
+        async def exists_then_delete(self: anyio.Path) -> bool:
+            result = await original_exists(self)
+            await self.unlink()
+            return result
+
+        monkeypatch.setattr(anyio.Path, "exists", exists_then_delete)
+        assert await parse_taxonomy(taxonomy_md) == []
 
     async def test_empty_categories_returns_empty(self, tmp_path: Path) -> None:
         p = tmp_path / ".taxonomy.md"
