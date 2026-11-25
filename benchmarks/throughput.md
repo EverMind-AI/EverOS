@@ -2,7 +2,7 @@
 
 On a 4-core, 8 GB server holding 168,821 memories, `hybrid` search sustains
 **14 to 16 requests per second on 1.8.0, against 4 on 1.7.1**, in about a sixth of
-the memory; `keyword` search sustains **120 to at least 140, against 60**.
+the memory; `keyword` search sustains **120 to 140, against 70**.
 Measured on main at `c5d9ace9`, ahead of the 1.8.0 release, with the model providers
 stubbed so that only EverOS is measured. Everything needed to reproduce it is in
 [`throughput/`](throughput/); [Reproduce](#reproduce) has the steps.
@@ -11,27 +11,32 @@ stubbed so that only EverOS is measured. Everything needed to reproduce it is in
 
 ## Results
 
-Two rounds per configuration; a rate counts only when both rounds kept up at it.
-`glibc` and `jemalloc` are the same 1.8.0 build: on Linux the 1.8.0 CLI preloads
+`hybrid` ran two rounds and `keyword` three; a rate counts only when every round kept
+up at it. `keyword` was sent by four load-generator processes, since one cannot send
+much past 140 requests/s (see [Limits](#limits)). `glibc` and `jemalloc` are the same
+1.8.0 build: on Linux the 1.8.0 CLI preloads
 jemalloc when `libjemalloc2` is installed, and runs on glibc otherwise.
 
-**Highest sustained rate**, with latency, CPU and peak memory at that rate (the worse
-of the two rounds):
+**Highest sustained rate**, with latency, CPU and peak memory at that rate (the worst
+round), and the highest rate any single round kept up at:
 
-| Search | Version | Sustained requests/s | p50 | p95 | CPU (cores) | Peak memory |
-|---|---|---|---|---|---|---|
-| `hybrid` | 1.7.1 | 4 | 4.50 s | 8.70 s | 3.45 | 4,093 MB |
-| `hybrid` | 1.8.0, glibc | 14 | 1.06 s | 3.41 s | 2.50 | 681 MB |
-| `hybrid` | 1.8.0, jemalloc | 16 | 0.72 s | 2.48 s | 2.07 | 595 MB |
-| `keyword` | 1.7.1 | 60 | 27 ms | 50 ms | 1.91 | 590 MB |
-| `keyword` | 1.8.0, glibc | 120 | 26 ms | 210 ms | 1.72 | 640 MB |
-| `keyword` | 1.8.0, jemalloc | ≥ 140 | 18 ms | 256 ms | 1.59 | 468 MB |
+| Search | Version | Sustained requests/s | p50 | p95 | CPU (cores) | Peak memory | Best round |
+|---|---|---|---|---|---|---|---|
+| `hybrid` | 1.7.1 | 4 | 4.50 s | 8.70 s | 3.45 | 4,093 MB | 6 |
+| `hybrid` | 1.8.0, glibc | 14 | 1.06 s | 3.41 s | 2.50 | 681 MB | 14 |
+| `hybrid` | 1.8.0, jemalloc | 16 | 0.72 s | 2.48 s | 2.07 | 595 MB | 16 |
+| `keyword` | 1.7.1 | 70 | 75 ms | 345 ms | 2.35 | 597 MB | 70 |
+| `keyword` | 1.8.0, glibc | 120 | 25 ms | 197 ms | 1.75 | 700 MB | 150 |
+| `keyword` | 1.8.0, jemalloc | 140 | 24 ms | 241 ms | 1.56 | 563 MB | 170 |
 
-≥ 140: the next rate, 160, kept up in one round and failed in the other only because
-the load generator stalled (see [Limits](#limits)); the server's own ceiling is
-higher.
+Near the top the rounds disagree. A step there can fall behind after a stall of a few
+seconds that the little headroom left cannot clear within the step: in the first
+`jemalloc` round 130 fell behind while 140 and 150 kept up, and the third round kept up
+to 170. What stalls the server was not found; its log shows nothing at those moments.
 
-**At the same load**, the highest rate all three sustain:
+**At the same load**: `hybrid` at the highest rate all three sustain, and `keyword` at
+60/s from the first run (one load generator, 30 s steps, two rounds), where all three
+kept up:
 
 | Search, rate | Version | p50 | p95 | CPU (cores) | Peak memory |
 |---|---|---|---|---|---|
@@ -100,6 +105,77 @@ written by 1.7.1 is converted on its first maintenance pass after the upgrade.
 | hybrid | v1.7.1 | 6 | r2 | 360/360 | 4.4 | 12641 ms | 17468 ms | 3.43 | 3533 MB | yes |
 | hybrid | v1.7.1 | 8 | r2 | 480/480 | 3.7 | 30924 ms | 40560 ms | 3.5 | 4081 MB | no |
 | hybrid | v1.7.1 | 10 | r2 | 575/600 | 3 | 52015 ms | 59110 ms | 3.45 | 4254 MB | no |
+| keyword | 1.8.0-glibc | 100 | r1 | 6000/6000 | 100 | 23 ms | 34 ms | 1.45 | 613 MB | yes |
+| keyword | 1.8.0-glibc | 100 | r2 | 6000/6000 | 100 | 28 ms | 73 ms | 1.55 | 681 MB | yes |
+| keyword | 1.8.0-glibc | 100 | r3 | 6000/6000 | 100 | 25 ms | 111 ms | 1.48 | 699 MB | yes |
+| keyword | 1.8.0-glibc | 110 | r1 | 6600/6600 | 110 | 24 ms | 56 ms | 1.59 | 613 MB | yes |
+| keyword | 1.8.0-glibc | 110 | r2 | 6600/6600 | 109.9 | 22 ms | 39 ms | 1.53 | 681 MB | yes |
+| keyword | 1.8.0-glibc | 110 | r3 | 6600/6600 | 110 | 26 ms | 122 ms | 1.62 | 700 MB | yes |
+| keyword | 1.8.0-glibc | 120 | r1 | 7200/7200 | 120 | 22 ms | 117 ms | 1.71 | 613 MB | yes |
+| keyword | 1.8.0-glibc | 120 | r2 | 7200/7200 | 120 | 18 ms | 33 ms | 1.55 | 681 MB | yes |
+| keyword | 1.8.0-glibc | 120 | r3 | 7200/7200 | 120 | 25 ms | 197 ms | 1.75 | 700 MB | yes |
+| keyword | 1.8.0-glibc | 130 | r1 | 7800/7800 | 130 | 35 ms | 221 ms | 1.98 | 614 MB | yes |
+| keyword | 1.8.0-glibc | 130 | r2 | 7800/7800 | 129.9 | 46 ms | 351 ms | 1.99 | 684 MB | yes |
+| keyword | 1.8.0-glibc | 130 | r3 | 7800/7800 | 99.7 | 5485 ms | 19056 ms | 2.05 | 780 MB | no |
+| keyword | 1.8.0-glibc | 140 | r1 | 8400/8400 | 139.2 | 40 ms | 263 ms | 2.12 | 614 MB | yes |
+| keyword | 1.8.0-glibc | 140 | r2 | 8400/8400 | 102.4 | 7889 ms | 22638 ms | 2.04 | 780 MB | no |
+| keyword | 1.8.0-glibc | 140 | r3 | 8400/8400 | 99.7 | 8157 ms | 27920 ms | 2.03 | 789 MB | no |
+| keyword | 1.8.0-glibc | 150 | r1 | 9000/9000 | 149.9 | 106 ms | 354 ms | 2.34 | 615 MB | yes |
+| keyword | 1.8.0-glibc | 150 | r2 | 9000/9000 | 103.5 | 9037 ms | 29356 ms | 2.03 | 782 MB | no |
+| keyword | 1.8.0-glibc | 160 | r1 | 9600/9600 | 107.1 | 9800 ms | 32184 ms | 2.1 | 720 MB | no |
+| keyword | 1.8.0-glibc | 170 | r1 | 10200/10200 | 101.4 | 12189 ms | 41712 ms | 2.06 | 726 MB | no |
+| keyword | 1.8.0-jemalloc | 100 | r1 | 6000/6000 | 100 | 14 ms | 24 ms | 1.07 | 464 MB | yes |
+| keyword | 1.8.0-jemalloc | 100 | r2 | 6000/6000 | 100 | 18 ms | 26 ms | 1.15 | 466 MB | yes |
+| keyword | 1.8.0-jemalloc | 100 | r3 | 6000/6000 | 100 | 17 ms | 27 ms | 1.21 | 461 MB | yes |
+| keyword | 1.8.0-jemalloc | 110 | r1 | 6600/6600 | 110 | 14 ms | 24 ms | 1.17 | 466 MB | yes |
+| keyword | 1.8.0-jemalloc | 110 | r2 | 6600/6600 | 110 | 20 ms | 31 ms | 1.19 | 473 MB | yes |
+| keyword | 1.8.0-jemalloc | 110 | r3 | 6600/6600 | 110 | 17 ms | 307 ms | 1.34 | 473 MB | yes |
+| keyword | 1.8.0-jemalloc | 120 | r1 | 7200/7200 | 117.8 | 21 ms | 739 ms | 1.3 | 479 MB | yes |
+| keyword | 1.8.0-jemalloc | 120 | r2 | 7200/7200 | 120 | 19 ms | 31 ms | 1.31 | 468 MB | yes |
+| keyword | 1.8.0-jemalloc | 120 | r3 | 7200/7200 | 120 | 18 ms | 58 ms | 1.29 | 472 MB | yes |
+| keyword | 1.8.0-jemalloc | 130 | r1 | 7800/7800 | 97.4 | 7261 ms | 19846 ms | 1.49 | 607 MB | no |
+| keyword | 1.8.0-jemalloc | 130 | r2 | 7800/7800 | 130 | 17 ms | 36 ms | 1.36 | 471 MB | yes |
+| keyword | 1.8.0-jemalloc | 130 | r3 | 7800/7800 | 130 | 18 ms | 70 ms | 1.39 | 470 MB | yes |
+| keyword | 1.8.0-jemalloc | 140 | r1 | 8400/8400 | 139.9 | 21 ms | 241 ms | 1.55 | 563 MB | yes |
+| keyword | 1.8.0-jemalloc | 140 | r2 | 8400/8400 | 140 | 24 ms | 219 ms | 1.56 | 473 MB | yes |
+| keyword | 1.8.0-jemalloc | 140 | r3 | 8400/8400 | 140 | 19 ms | 233 ms | 1.49 | 471 MB | yes |
+| keyword | 1.8.0-jemalloc | 150 | r1 | 9000/9000 | 149.9 | 31 ms | 316 ms | 1.66 | 562 MB | yes |
+| keyword | 1.8.0-jemalloc | 150 | r2 | 9000/9000 | 130.2 | 327 ms | 8754 ms | 1.69 | 544 MB | no |
+| keyword | 1.8.0-jemalloc | 150 | r3 | 9000/9000 | 149.9 | 18 ms | 195 ms | 1.58 | 470 MB | yes |
+| keyword | 1.8.0-jemalloc | 160 | r1 | 9600/9600 | 102.2 | 10378 ms | 35900 ms | 1.54 | 606 MB | no |
+| keyword | 1.8.0-jemalloc | 160 | r2 | 9600/9600 | 97.2 | 10287 ms | 42540 ms | 1.63 | 601 MB | no |
+| keyword | 1.8.0-jemalloc | 160 | r3 | 9600/9600 | 160 | 22 ms | 380 ms | 1.68 | 479 MB | yes |
+| keyword | 1.8.0-jemalloc | 170 | r3 | 10200/10200 | 169.5 | 74 ms | 347 ms | 1.81 | 482 MB | yes |
+| keyword | 1.8.0-jemalloc | 180 | r3 | 10791/10800 | 103.9 | 12592 ms | 42714 ms | 1.63 | 588 MB | no |
+| keyword | v1.7.1 | 40 | r1 | 2400/2400 | 40 | 43 ms | 60 ms | 1.25 | 596 MB | yes |
+| keyword | v1.7.1 | 40 | r2 | 2400/2400 | 40 | 52 ms | 69 ms | 1.29 | 530 MB | yes |
+| keyword | v1.7.1 | 40 | r3 | 2400/2400 | 40 | 52 ms | 66 ms | 1.29 | 546 MB | yes |
+| keyword | v1.7.1 | 50 | r1 | 3000/3000 | 50 | 55 ms | 67 ms | 1.59 | 596 MB | yes |
+| keyword | v1.7.1 | 50 | r2 | 3000/3000 | 50 | 54 ms | 71 ms | 1.63 | 530 MB | yes |
+| keyword | v1.7.1 | 50 | r3 | 3000/3000 | 50 | 54 ms | 69 ms | 1.65 | 546 MB | yes |
+| keyword | v1.7.1 | 60 | r1 | 3600/3600 | 60 | 49 ms | 67 ms | 1.86 | 596 MB | yes |
+| keyword | v1.7.1 | 60 | r2 | 3600/3600 | 59.7 | 52 ms | 108 ms | 1.92 | 530 MB | yes |
+| keyword | v1.7.1 | 60 | r3 | 3600/3600 | 59.9 | 53 ms | 123 ms | 1.98 | 546 MB | yes |
+| keyword | v1.7.1 | 70 | r1 | 4200/4200 | 70 | 56 ms | 226 ms | 2.25 | 597 MB | yes |
+| keyword | v1.7.1 | 70 | r2 | 4200/4200 | 70 | 36 ms | 118 ms | 2.23 | 586 MB | yes |
+| keyword | v1.7.1 | 70 | r3 | 4200/4200 | 69.5 | 75 ms | 345 ms | 2.35 | 547 MB | yes |
+| keyword | v1.7.1 | 80 | r1 | 4800/4800 | 78.8 | 308 ms | 1065 ms | 2.67 | 600 MB | no |
+| keyword | v1.7.1 | 80 | r2 | 4800/4800 | 69.4 | 4111 ms | 8022 ms | 2.67 | 629 MB | no |
+| keyword | v1.7.1 | 80 | r3 | 4800/4800 | 74.7 | 590 ms | 3967 ms | 2.72 | 567 MB | no |
+| keyword | v1.7.1 | 90 | r1 | 5400/5400 | 73.3 | 6157 ms | 11616 ms | 2.74 | 666 MB | no |
+| keyword | v1.7.1 | 90 | r2 | 5400/5400 | 67.3 | 9534 ms | 16985 ms | 2.65 | 682 MB | no |
+| keyword | v1.7.1 | 90 | r3 | 5399/5400 | 65.5 | 9638 ms | 20018 ms | 2.78 | 648 MB | no |
+
+</details>
+
+<details>
+<summary>The first <code>keyword</code> run: one load generator, 30 s steps</summary>
+
+| Method | Server | QPS | Round | OK | Done/s | p50 | p95 | CPU | Memory | Kept up |
+|---|---|---|---|---|---|---|---|---|---|---|
+| keyword | 1.8.0-glibc | 120 | 26 ms | 210 ms | 1.72 | 640 MB | 120 |
+| keyword | 1.8.0-jemalloc | >=140 | 18 ms | 256 ms | 1.59 | 468 MB | 160 |
+| keyword | v1.7.1 | 60 | 27 ms | 50 ms | 1.91 | 590 MB | 60 |
 | keyword | 1.8.0-glibc | 40 | r1 | 1200/1200 | 40 | 14 ms | 20 ms | 0.56 | 639 MB | yes |
 | keyword | 1.8.0-glibc | 40 | r2 | 1200/1200 | 40 | 16 ms | 22 ms | 0.6 | 601 MB | yes |
 | keyword | 1.8.0-glibc | 60 | r1 | 1800/1800 | 60 | 14 ms | 18 ms | 0.77 | 639 MB | yes |
@@ -167,20 +243,26 @@ at random from 14,252 recorded calls to `Qwen/Qwen3-Embedding-4B` on DeepInfra (
 
 **Load.** Open loop: request *i* of a step goes out at *i* / rate seconds whether or not
 earlier requests have returned, so a server that falls behind shows climbing latency
-instead of quietly lowering the rate. Each step lasts 60 s for `hybrid` and 30 s for
-`keyword`, on a freshly started server after a 30 s warm-up at 2 requests/s that is not
+instead of quietly lowering the rate. Each step lasts 60 s (30 s in the first `keyword`
+run), on a freshly started server after a 30 s warm-up at 2 requests/s that is not
 counted. A step **kept up** when every request returned 200 and the median latency of its
 last third stayed under twice that of its first third, or within 0.5 s of it. Rates rise
 until two steps fall behind.
 
-**Rounds.** Every sweep ran twice, the second round with the servers in reverse order. The
-**sustained rate** is the highest rate at which both rounds kept up; the latency, CPU and
-memory beside it are the worse of the two rounds. CPU is cores in use while requests were
+**Rounds.** `hybrid` ran twice, the second round with the servers in reverse order;
+`keyword` ran three times, the servers in a different order each round. The
+**sustained rate** is the highest rate at which every round kept up; the latency, CPU and
+memory beside it are the worst round's. CPU is cores in use while requests were
 being sent; memory is the server's peak resident set.
 
 **Versions.** 1.7.1 from PyPI (`pip install everos==1.7.1`), and main at
 `c5d9ace9` installed from GitHub, ahead of the 1.8.0 release. Each version ran on its
 own copy of the store; 1.8.0's copy was converted to IVF_RQ before the first round.
+
+**Second `keyword` run.** The `keyword` rates come from a second run on 2026-11-25, on the
+same machine, store and builds, with four load-generator processes (`SENDERS=4`) and 60 s
+steps (`STEP_SECONDS=60`). Round 2 of both 1.8.0 configurations was run again, because
+other jobs ran on the machine during it.
 
 ## Reproduce
 
@@ -230,10 +312,13 @@ real providers; every measurement after that uses the stubs and costs nothing.
    ```bash
    export SERVER_WRAP="systemd-run --user --scope --quiet -p MemoryMax=8G -p CPUQuota=400% taskset -c 0-3"
    export CLIENT_WRAP="taskset -c 4-7"
-   for method in hybrid keyword; do
-     bash benchmarks/throughput/sweep.sh v1.7.1/bin/everos <store> results/v1.7.1/r1/$method $method
-   done
+   bash benchmarks/throughput/sweep.sh v1.7.1/bin/everos <store> results/v1.7.1/r1/hybrid hybrid
+   SENDERS=4 STEP_SECONDS=60 \
+     bash benchmarks/throughput/sweep.sh v1.7.1/bin/everos <store> results/v1.7.1/r1/keyword keyword
    ```
+
+   `keyword` is sent by four `load.py` processes: one cannot send much past 140
+   requests/s.
 
    A store written by v1.7.1 or earlier gets its vector indexes rebuilt as IVF_RQ by
    later versions, a few minutes after start-up; set `WAIT_INDEX=IvfRq` so the sweep
@@ -251,9 +336,9 @@ real providers; every measurement after that uses the stubs and costs nothing.
 - **One provider's latency.** `hybrid` waits for the query embedding; a slower provider
   raises its latency and, once EverOS's concurrent query embeddings
   (`[embedding] query_max_concurrent`, 16) are all waiting, lowers its sustained rate.
-- **One load generator process.** On this machine's client cores one `load.py`
-  stalls somewhere between 140 and 180 requests/s: it cannot keep its send schedule,
-  latency and throughput collapse, and the server sits nearly idle. `summarize.py`
-  marks a rate as a lower bound (≥) when the rate above it failed only that way
-  (server under 0.3 cores while requests went out). Measure higher `keyword` rates
-  with several `load.py` processes (`--seed` gives each its own query order).
+- **Load generator.** On this machine's client cores one `load.py` process stalls
+  somewhere between 140 and 180 requests/s: it cannot keep its send schedule, latency
+  and throughput collapse, and the server sits nearly idle. The `keyword` rates above
+  were sent by four processes (`SENDERS=4`, each with its own query order).
+  `summarize.py` marks a rate as a lower bound (≥) when the rate above it failed only
+  that way (server under 0.3 cores while requests went out).
