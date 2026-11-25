@@ -36,7 +36,24 @@
 
 `hybrid` 几行背后是向量索引。1.7.1 给原子事实建的 IVF_FLAT 索引有 0.66 GB，放不进索引缓存，每次查询要把其中约 0.5 GB 重读一遍：在这份库上单独测，每次查询 449 ms、临时占 1.1 GB 内存。1.8.0 建 IVF_RQ 索引（同样的事实 24 MB）：35 到 50 ms，59 到 130 MB。1.7.1 写的库，升级后第一次维护时就会转换。
 
-`jemalloc` 的 `hybrid` 每秒 16 次，卡住它的可能是查询向量，而不是 EverOS 本身。一次 `hybrid` 检索要等一个查询向量，EverOS 同时最多算 16 个（`[embedding] query_max_concurrent`）。每秒 20 次、替身平均耗时 0.78 秒时，平均约有 15.6 个在途，接近这个上限，而服务只用了 4 核里的 2.35 核。调大这个上限或换更快的服务商再测一次就能分清，这次没有测。glibc 在每秒 16 次时就已跟不上，当时用了 2.7 核。
+`jemalloc` 的 `hybrid` 每秒 16 次是 EverOS 自己的上限，不是查询向量卡的。一次 `hybrid` 检索要等一个查询向量，EverOS 同时最多算 16 个（`[embedding] query_max_concurrent`）；每秒 20 次、替身平均耗时 0.78 秒时，平均约有 15.6 个在途，接近这个上限。2026-11-25 的对照测试把上限调到 64：同时发出的向量请求最多到了 60 个，`jemalloc` 仍然是每秒 16 次撑住、20 次跟不上，两轮都一样，每秒只处理完约 16 次，4 核只用了约 2.3 核。卡在 EverOS 的哪一部分没有查到。
+
+<details>
+<summary>对照测试：查询向量并发上限 16 和 64，<code>jemalloc</code></summary>
+
+| Method | Server | QPS | Round | OK | Done/s | p50 | p95 | CPU | Memory | Kept up |
+|---|---|---|---|---|---|---|---|---|---|---|
+| hybrid | 1.8.0-jemalloc-qmc16 | 16 | r1 | 960/960 | 15.8 | 728 ms | 2802 ms | 2.14 | 536 MB | yes |
+| hybrid | 1.8.0-jemalloc-qmc16 | 20 | r1 | 1200/1200 | 16.8 | 6100 ms | 9933 ms | 2.37 | 572 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc16 | 24 | r1 | 1440/1440 | 16.2 | 14019 ms | 24387 ms | 2.29 | 594 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc64 | 16 | r1 | 960/960 | 15.7 | 711 ms | 2760 ms | 2.06 | 537 MB | yes |
+| hybrid | 1.8.0-jemalloc-qmc64 | 16 | r2 | 960/960 | 15.8 | 702 ms | 2898 ms | 2.07 | 542 MB | yes |
+| hybrid | 1.8.0-jemalloc-qmc64 | 20 | r1 | 1200/1200 | 15.8 | 7081 ms | 15346 ms | 2.31 | 629 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc64 | 20 | r2 | 1200/1200 | 15.9 | 5846 ms | 15041 ms | 2.31 | 620 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc64 | 24 | r1 | 1440/1440 | 15.3 | 17685 ms | 29169 ms | 2.24 | 624 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc64 | 24 | r2 | 1440/1440 | 14.7 | 19242 ms | 32716 ms | 2.22 | 646 MB | no |
+
+</details>
 
 <details>
 <summary>每一轮的每一档</summary>
@@ -203,7 +220,7 @@
 
 **机器。** 一台 Linux 服务器，Intel Xeon Silver 4310（2.1 GHz）。EverOS 跑在 4 个核上（`taskset -c 0-3`、`CPUQuota=400%`），内存 8 GB（`MemoryMax=8G`，systemd scope）；发压程序和模型替身跑在另外 4 个核上。吞吐取决于单核速度：这台机器上 `core_bench.py` 是 506 ms（Python 循环）和 2,160 ms（numpy），拿你的数字和这里比之前先跑一下它。
 
-**数据。** 132 个用户的 168,821 条记忆（7,375 个情节、161,446 条原子事实），由 EverOS 自己的抽取从公开对话建成：LoCoMo10 的全部 10 段对话（每个说话人是一个用户），和 LongMemEval-S 前 112 题的对话堆（每题一个用户）。抽取用 `openai/gpt-4.1-mini`，向量用 `Qwen/Qwen3-Embedding-4B`，1024 维。每个用户的记忆数中位 1,346 条，最多 1,661 条。这份库由 EverOS main 的 `c2c8d6fc`（1.7.0 与 1.7.1 之间）建成；1.7.1 直接检索它，1.8.0 检索的是一份向量索引已重建为 IVF_RQ 的拷贝。
+**数据。** 132 个用户的 168,821 条记忆（7,375 个情节、161,446 条原子事实），由 EverOS 自己的抽取从公开对话建成：LoCoMo10 的全部 10 段对话（每个说话人是一个用户），和 LongMemEval-S 前 112 题的对话堆（每题一个用户）。抽取用 `openai/gpt-4.1-mini`，向量用 `Qwen/Qwen3-Embedding-4B`，1024 维。每个用户的记忆数中位 1,346 条，最多 1,661 条。这份库由 EverOS main 的 `c2c8d6fc`（1.7.0 与 1.7.1 之间）建成；1.7.1 直接检索它，1.8.0 检索的是一份向量索引已重建为 IVF_RQ 的拷贝。用 1.8.0 建的库没有拿 1.7.1 测过。
 
 **问题。** 同两个数据集里的 2,270 个问题，每个都以它所问的用户身份发出：LongMemEval 的每道题发给它那堆对话的用户，LoCoMo 的每道题发给题里点名的说话人。每个请求随机抽一个问题，取前 10 条。
 

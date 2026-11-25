@@ -57,12 +57,31 @@ query. 1.8.0 builds
 IVF_RQ indexes (24 MB for the same facts): 35 to 50 ms and 59 to 130 MB. A store
 written by 1.7.1 is converted on its first maintenance pass after the upgrade.
 
-`jemalloc`'s 16 `hybrid` searches per second may be set by the query embedding rather
-than by EverOS. A `hybrid` search waits for one query embedding, and EverOS runs at most
-16 at once (`[embedding] query_max_concurrent`). At 20/s, with the stub's mean latency of
-0.78 s, about 15.6 are in flight on average, close to that cap, while the server used
-2.35 of its 4 cores. A run with a larger cap or a faster provider would tell; it was not
-made. On glibc, 16/s already fell behind with 2.7 cores in use.
+`jemalloc`'s 16 `hybrid` searches per second are EverOS's own limit, not the query
+embedding's. A `hybrid` search waits for one query embedding, and EverOS runs at most 16
+at once (`[embedding] query_max_concurrent`); at 20/s, with the stub's mean latency of
+0.78 s, about 15.6 would be in flight, close to that cap. A control run on 2026-11-25
+raised the cap to 64: up to 60 embedding requests were then open at once, yet `jemalloc`
+still kept up at 16/s and fell behind at 20/s in both rounds, completing about 16 per
+second with about 2.3 of its 4 cores in use. Which part of EverOS sets that limit was
+not found.
+
+<details>
+<summary>Control run: query embedding cap 16 and 64, <code>jemalloc</code></summary>
+
+| Method | Server | QPS | Round | OK | Done/s | p50 | p95 | CPU | Memory | Kept up |
+|---|---|---|---|---|---|---|---|---|---|---|
+| hybrid | 1.8.0-jemalloc-qmc16 | 16 | r1 | 960/960 | 15.8 | 728 ms | 2802 ms | 2.14 | 536 MB | yes |
+| hybrid | 1.8.0-jemalloc-qmc16 | 20 | r1 | 1200/1200 | 16.8 | 6100 ms | 9933 ms | 2.37 | 572 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc16 | 24 | r1 | 1440/1440 | 16.2 | 14019 ms | 24387 ms | 2.29 | 594 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc64 | 16 | r1 | 960/960 | 15.7 | 711 ms | 2760 ms | 2.06 | 537 MB | yes |
+| hybrid | 1.8.0-jemalloc-qmc64 | 16 | r2 | 960/960 | 15.8 | 702 ms | 2898 ms | 2.07 | 542 MB | yes |
+| hybrid | 1.8.0-jemalloc-qmc64 | 20 | r1 | 1200/1200 | 15.8 | 7081 ms | 15346 ms | 2.31 | 629 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc64 | 20 | r2 | 1200/1200 | 15.9 | 5846 ms | 15041 ms | 2.31 | 620 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc64 | 24 | r1 | 1440/1440 | 15.3 | 17685 ms | 29169 ms | 2.24 | 624 MB | no |
+| hybrid | 1.8.0-jemalloc-qmc64 | 24 | r2 | 1440/1440 | 14.7 | 19242 ms | 32716 ms | 2.22 | 646 MB | no |
+
+</details>
 
 <details>
 <summary>Every step of every round</summary>
@@ -239,7 +258,8 @@ speaker is a user) and the haystacks of the first 112 LongMemEval-S questions (o
 each). Extraction used `openai/gpt-4.1-mini`; embeddings were `Qwen/Qwen3-Embedding-4B` at
 1024 dimensions. A user holds 1,346 memories at the median and 1,661 at most. The store
 was built by EverOS main at `c2c8d6fc`, between 1.7.0 and 1.7.1; 1.7.1 searched it as
-built, and 1.8.0 searched a copy whose vector indexes it had rebuilt as IVF_RQ.
+built, and 1.8.0 searched a copy whose vector indexes it had rebuilt as IVF_RQ. A store
+built by 1.8.0 was not searched with 1.7.1.
 
 **Queries.** 2,270 questions from the same datasets, each asked as the user it is about:
 every LongMemEval question to its haystack's user, every LoCoMo question to the speaker it
