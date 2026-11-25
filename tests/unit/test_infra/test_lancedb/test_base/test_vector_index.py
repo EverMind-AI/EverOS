@@ -24,6 +24,8 @@ from everos.infra.persistence.lancedb._base.indexes import (
     VECTOR_QUERY_REFINE_FACTOR,
     ensure_vector_indexes,
 )
+from everos.infra.persistence.lancedb._base.repository import LanceRepoBase
+from everos.infra.persistence.lancedb._repos._contract import LanceIndexContract
 from everos.infra.persistence.records import DenseVector, IndexRecord
 from tests.fakes import arrow_schema
 
@@ -197,37 +199,44 @@ async def test_all_null_vectors_are_skipped_even_above_the_threshold(
     assert await _vector_indices(vec_table) == []
 
 
-async def test_indexed_search_returns_the_same_neighbours_as_the_scan(
+class _VecRepo(LanceIndexContract[_VecSpec], LanceRepoBase[_VecSpec]):
+    schema = _VecSpec
+
+
+async def _scan_top5(table: AsyncTable, vector: list[float]) -> set[str]:
+    """The exact top 5 by cosine distance, the index bypassed."""
+    rows = await (
+        table.query()
+        .nearest_to(vector)
+        .column("vector")
+        .distance_type("cosine")
+        .bypass_vector_index()
+        .limit(5)
+        .to_list()
+    )
+    return {r["id"] for r in rows}
+
+
+async def test_dense_search_returns_the_same_neighbours_as_the_scan(
     vec_table: AsyncTable,
 ) -> None:
-    """IVF_RQ re-ranked on the stored vectors (the refine factor every
-    ``nearest_to`` sets): the top-5 must match the brute-force answer. Asks
-    for 50 rows, the hybrid lane's floor: one bit of an 8-dim vector is too
-    coarse to rank on its own (top-5 of a 5-row query matched 0.85), so the
-    test re-ranks 250 of the 300 rows; recall on 1024-dim facts is measured
-    on :data:`VECTOR_QUERY_REFINE_FACTOR`."""
+    """``dense_search`` on an IVF_RQ index re-ranks its candidates on the
+    stored vectors (:data:`VECTOR_QUERY_REFINE_FACTOR`), so its top 5 match
+    the brute-force answer. Ranked on one bit per dimension alone they do not:
+    an 8-dim code is too coarse, and dropping the re-rank from ``dense_search``
+    fails this test. Asks for 50 rows, the hybrid lane's floor, so the re-rank
+    covers 250 of the 300 rows; recall on 1024-dim facts was measured for the
+    constant (real questions, 161k facts: top 10 identical to exact search)."""
     rows = _rows(300)
     await vec_table.add([row.model_dump() for row in rows])
-    q = rows[17].vector
+    queries = [rows[i].vector for i in range(0, 300, 30)]
+    flat = [await _scan_top5(vec_table, q) for q in queries]
 
-    async def _top5(bypass: bool) -> list[str]:
-        query = (
-            vec_table.query()
-            .nearest_to(q)
-            .column("vector")
-            .distance_type("cosine")
-            .limit(50)
-        )
-        if bypass:
-            query = query.bypass_vector_index()
-        else:
-            query = query.nprobes(VECTOR_QUERY_NPROBES).refine_factor(
-                VECTOR_QUERY_REFINE_FACTOR
-            )
-        return [r["id"] for r in await query.to_list()][:5]
-
-    flat = await _top5(bypass=True)
     await ensure_vector_indexes(vec_table, schema_for(_VecSpec, dim=_DIM), min_rows=50)
-    indexed = await _top5(bypass=False)
-    assert indexed[0] == "r17"
-    assert set(indexed) == set(flat)
+    assert await _vector_indices(vec_table) == [("vector", "IvfRq")]
+    repo = _VecRepo(vec_table, dim=_DIM)
+    indexed = [
+        {r["id"] for r in (await repo.dense_search(q, None, limit=50))[:5]}
+        for q in queries
+    ]
+    assert indexed == flat
