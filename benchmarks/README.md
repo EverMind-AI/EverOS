@@ -34,6 +34,9 @@ its corrected answers.
 
 - [LoCoMo](locomo.md): accuracy and search time of every retrieval method across models,
   batch or step boundary detection, and write latency per stage.
+- [Search throughput](throughput.md): sustained `hybrid` and `keyword` search rates,
+  latency, CPU and memory on a 4-core, 8 GB server, 1.7.1 against 1.8.0, and the
+  harness in `throughput/` that measures them.
 
 ## Quick start
 

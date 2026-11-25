@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Search throughput results and the harness that measures them.**
+  [`benchmarks/throughput.md`](benchmarks/throughput.md) gives the sustained
+  `hybrid` and `keyword` search rates, with latency, CPU and memory, of 1.7.1
+  and 1.8.0 on a 4-core, 8 GB server holding 169k memories: `hybrid` under 4
+  against 14 to 16 requests per second, `keyword` 70 against 120 to 140.
+  `benchmarks/throughput/` reproduces them: a store built from LoCoMo10 and
+  LongMemEval-S by EverOS's own extraction, stub model providers that replay
+  recorded query-embedding latency, and open-loop load with a kept-up verdict
+  per step.
+
 ### Changed
 
 - **The LanceDB index cache is 64 MB where the open-file limit allows.**
@@ -34,10 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `libjemalloc2` present, `everos` re-executes with
   `LD_PRELOAD=libjemalloc.so.2` and
   `MALLOC_CONF=oversize_threshold:0,dirty_decay_ms:1000,narenas:4` beside the
-  existing `MALLOC_ARENA_MAX=2`. On a 4-core, 8 GB server keyword search went
-  from 80 to 161 QPS and hybrid search at 5 QPS from 4.3 to 2.4 s median,
-  while the last hour of an 8-hour write-and-search soak averaged 1125 MB
-  against 1221 MB with glibc. Without jemalloc nothing changes. An explicit
+  existing `MALLOC_ARENA_MAX=2`. On a 4-core, 8 GB server, before this
+  release's search fixes, keyword search went from 80 to 161 QPS and hybrid
+  search at 5 QPS from 4.3 to 2.4 s median, while the last hour of an 8-hour
+  write-and-search soak averaged 1125 MB against 1221 MB with glibc. With
+  those fixes the gap is smaller: keyword sustains 140 against 120 requests/s
+  and hybrid 16 against 14 (`benchmarks/throughput.md`), and the soak's last
+  hour averaged 1033 against 1036 MB. Without jemalloc nothing changes. An explicit
   `MALLOC_ARENA_MAX` (or the glibc tunable) keeps glibc; an explicit
   `LD_PRELOAD` or `MALLOC_CONF` keeps the operator's choice.
 

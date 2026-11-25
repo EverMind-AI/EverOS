@@ -105,6 +105,11 @@ Accuracy and search time across models and retrieval methods are in
 [benchmarks/locomo.md](benchmarks/locomo.md); how to reproduce every number is in
 [benchmarks/README.md](benchmarks/README.md).
 
+Under load, on a 4-core, 8 GB server with 169k memories, 1.8.0 (pre-release main)
+sustains 14 to 16 `hybrid` searches per second (1.7.1: under 4) and 120 to 140
+`keyword` searches (1.7.1: 70); setup, latency, memory and how to reproduce are in
+[benchmarks/throughput.md](benchmarks/throughput.md).
+
 <br>
 
 ## Ecosystem Integrations
