@@ -310,7 +310,8 @@ miss it. The markdown is durable regardless; index lag never loses data. If
 you need read-your-write, retry with backoff (the running server is the
 only index writer; `everos cascade sync` is for when no server is running).
 
-Integrity is anchored by a few invariants (details in
+Integrity is anchored by the invariants in
+[memory-lifecycle.md](memory-lifecycle.md) (storage layout details in
 [storage_layout.md](storage_layout.md)): the frontmatter `id` /
 `entry_id` is the immutable join key; `content_sha256` decides whether an
 entry needs re-embedding; an LSN watermark (in `system.db`) orders

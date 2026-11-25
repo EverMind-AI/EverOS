@@ -39,6 +39,7 @@ why the system is shaped the way it is.
 |---|---|
 | [overview.md](overview.md) | Project vision, scope, design philosophy |
 | [how-memory-works.md](how-memory-works.md) | Storage stack + on-disk paths + write→index→read pipeline + consistency |
+| [memory-lifecycle.md](memory-lifecycle.md) | Invariants connecting Markdown, SQLite, the derived index, and the input log — with tests and known gaps |
 | [architecture.md](architecture.md) | DDD layered architecture + dependency rules |
 | [datetime.md](datetime.md) | Two-zone discipline — UTC at storage, display tz at boundaries |
 | [device-assistant.md](device-assistant.md) | One agent, many people: identity mapping, request surface and cost for a hardware device |
