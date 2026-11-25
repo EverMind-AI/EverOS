@@ -84,6 +84,8 @@ everos init --root /data/everos
 |---|---|---|---|
 | `host` | string | `"127.0.0.1"` | HTTP server bind address. |
 | `port` | int | `8000` | HTTP server bind port (1–65535). |
+| `allowed_hosts` | list[string] | `[]` | Public domain names the server is reached under, such as a reverse proxy's. A request whose `Host` is any other public domain is refused with `403 CROSS_SITE_REFUSED`, which stops DNS rebinding. IP addresses, single-label names (a compose service, or a k8s service in the same namespace) and names under `localhost` / `internal` / `test` / `invalid` / `home.arpa` are always accepted; `"*"` accepts any. Other private names must be listed: a k8s name with its namespace (`everos.ns.svc.cluster.local`) and mDNS `.local` names, which any machine on the LAN can answer for. List bare names: an entry with a scheme, path or port fails at startup. |
+| `cors_origins` | list[string] | `[]` | Browser origins (`scheme://host[:port]`) allowed to call the API from another site, such as a local web UI. A request carrying any other site's `Origin` is refused with `403 CROSS_SITE_REFUSED`; curl, SDKs, MCP and the plugins send no `Origin` and are unaffected. A listed origin can use every route, purge included, so list only web UIs you trust. `"*"` fails at startup: with no authentication it would let every site read, write and purge memories. Entries are compared as browsers send them (lower case, no default port); one with a path, query, fragment or userinfo fails at startup. |
 
 ### `[sqlite]`
 
@@ -364,7 +366,7 @@ Episodes are folded one owner at a time. A run folds the episode that triggered 
 | `api_key` | string | — | **Yes** | API key. |
 | `base_url` | string | — | No | Custom endpoint URL. |
 | `max_concurrency` | int | `4` | No | Max parallel parsing requests. |
-| `file_uri_allow_dirs` | list[string] | `[]` | No | Allowlisted base dirs for `file://` URIs. Empty = allow any readable file. |
+| `file_uri_allow_dirs` | list[string] | `[]` | No | Base dirs `file://` URIs may be read from. Empty = `file://` URIs are refused. |
 | `file_uri_max_bytes` | int | `52428800` | No | Max size (bytes) of a `file://` asset; larger files are rejected. |
 
 ### `[embedding]`

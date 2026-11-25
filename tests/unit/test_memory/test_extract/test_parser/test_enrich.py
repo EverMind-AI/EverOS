@@ -173,7 +173,10 @@ async def test_enrich_file_uri_hydrates_and_parses(
     f = tmp_path / "doc.html"
     f.write_bytes(b"<html>hello</html>")
     items = [{"type": "html", "uri": f.as_uri()}]
-    await enrich_content_items(items, llm=_LLM, raw_file_builder=_BUILD_RAW_FILE)
+    settings = Settings()
+    settings.multimodal.file_uri_allow_dirs = [str(tmp_path)]
+    builder = partial(build_raw_file, settings_source=lambda: settings)
+    await enrich_content_items(items, llm=_LLM, raw_file_builder=builder)
 
     assert items[0]["parsed_content"] == "FILE PARSED"
     assert items[0]["parse_status"] == "success"

@@ -24,6 +24,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -42,6 +52,16 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           }
@@ -81,6 +101,16 @@
                     }
                   ],
                   "title": "Response Add Memory Api V1 Memory Add Post"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -161,6 +191,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "202": {
             "description": "Queued: async_mode, or the session already had a backlog",
             "content": {
@@ -237,6 +277,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "202": {
             "description": "Queued behind the session's backlog, how a flush is queued",
             "content": {
@@ -302,6 +352,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -344,6 +404,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -382,6 +452,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DeleteResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -441,6 +521,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Deletion incomplete; send the same request again",
             "content": {
@@ -494,7 +584,7 @@
             }
           },
           "403": {
-            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site",
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
             "content": {
               "application/json": {
                 "schema": {
@@ -546,7 +636,7 @@
             }
           },
           "403": {
-            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site",
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
             "content": {
               "application/json": {
                 "schema": {
@@ -621,6 +711,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such job",
             "content": {
@@ -673,6 +773,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -711,6 +821,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DocumentCreateResponse_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -845,6 +965,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -895,6 +1025,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DocumentCreateResponse_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -969,6 +1109,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1031,6 +1181,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1079,6 +1239,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DocumentPatchResponse_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1157,6 +1327,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1195,6 +1375,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_KnowledgeSearchResponse_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1253,6 +1443,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1281,6 +1481,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuiesceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1383,6 +1593,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1422,6 +1642,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_TaskItem_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1472,6 +1702,16 @@
                     }
                   ],
                   "title": "Response Add Memory Api V2 Memory Add Post"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1552,6 +1792,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "202": {
             "description": "Queued: async_mode, or the session already had a backlog",
             "content": {
@@ -1628,6 +1878,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "202": {
             "description": "Queued behind the session's backlog, how a flush is queued",
             "content": {
@@ -1693,6 +1953,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1735,6 +2005,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1773,6 +2053,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DeleteResponseData_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1832,6 +2122,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Deletion incomplete; send the same request again",
             "content": {
@@ -1885,7 +2185,7 @@
             }
           },
           "403": {
-            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site",
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
             "content": {
               "application/json": {
                 "schema": {
@@ -1937,7 +2237,7 @@
             }
           },
           "403": {
-            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site",
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
             "content": {
               "application/json": {
                 "schema": {
@@ -2012,6 +2312,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such job",
             "content": {
@@ -2064,6 +2374,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2102,6 +2422,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DocumentCreateResponse_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2236,6 +2566,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2286,6 +2626,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DocumentCreateResponse_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2360,6 +2710,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2422,6 +2782,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2470,6 +2840,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_DocumentPatchResponse_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2548,6 +2928,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2586,6 +2976,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_KnowledgeSearchResponse_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2644,6 +3044,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2672,6 +3082,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuiesceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2774,6 +3194,16 @@
               }
             }
           },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -2813,6 +3243,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope_TaskItem_"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CROSS_SITE_REFUSED: sent by a browser page of another site, or under a Host not accepted by [api] allowed_hosts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

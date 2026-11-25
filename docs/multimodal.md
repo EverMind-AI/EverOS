@@ -228,12 +228,11 @@ optional allowlist:
 
 Guardrails (a violation surfaces as `415`):
 
-- the resolved path (symlinks followed) must be an existing regular file;
-- size ≤ `EVEROS_MULTIMODAL__FILE_URI_MAX_BYTES` (default 50 MiB);
-- if `EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS` is set, the path must lie
-  within one of the listed roots (unset = any readable file, the
-  local-first default — confine this when exposing the API beyond
-  loopback).
+- `file://` is off until `EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS` lists at
+  least one directory, and the resolved path (symlinks followed) must lie
+  within one of them;
+- the path must be an existing regular file;
+- size ≤ `EVEROS_MULTIMODAL__FILE_URI_MAX_BYTES` (default 50 MiB).
 
 ### Calling from Python (plain HTTP)
 
@@ -275,7 +274,7 @@ containers and CI).
 | `api_key` | — (required) | API key for the endpoint above |
 | `max_concurrency` | `4` | Cap on parallel multimodal calls within one extraction |
 | `file_uri_max_bytes` | `52428800` (50 MiB) | Max size of a `file://` asset |
-| `file_uri_allow_dirs` | `[]` (any) | Allowlisted base dirs for `file://` URIs |
+| `file_uri_allow_dirs` | `[]` (off) | Base dirs `file://` URIs may be read from; empty refuses them |
 
 ## Errors and limits
 

@@ -88,6 +88,23 @@ EverOS ships **no built-in authentication**. The server binds to
 before exposing the API on any other interface. See
 [../SECURITY.md](../SECURITY.md) for the threat model.
 
+Because a browser on the same machine can reach a loopback server, every
+route (including CORS preflights, `/health` and `/metrics`) answers
+`403 CROSS_SITE_REFUSED` and does nothing when the request:
+
+- carries an `Origin` that is neither this server's own address nor listed in
+  `[api] cors_origins` (a page of another site);
+- carries no `Origin` but `Sec-Fetch-Site: cross-site` (an `<img>`,
+  `<script>` or navigation from another site);
+- arrives under a public domain name in `Host` that is not listed in
+  `[api] allowed_hosts` (DNS rebinding). IP addresses, single-label names and
+  names under `localhost`, `internal`, `test`, `invalid` and `home.arpa` are
+  always accepted;
+- has a `Host` or `Origin` header that does not parse.
+
+curl, SDKs, MCP and the plugins send no `Origin` and are not affected. See
+[configuration.md](configuration.md) for the two settings.
+
 ### Response envelope
 
 Successful responses from the business endpoints (`/memory/*`,
@@ -247,6 +264,7 @@ parsing the human-readable `message` field.
 | `QUEUE_SATURATED` | `429` | Yes | The memorize queue is at its per-session or global cap; the batch was not accepted — retry later or keep it client-side |
 | `SESSION_BUSY` | `503` | Yes | `/delete` of a session that is still being memorized (queued work, or an `/add` holding it past `delete_wait_seconds`); nothing was deleted |
 | `PURGE_NONCE_INVALID` | `404` | No | `/purge/confirm` with an unknown, expired or used nonce; request a new one |
+| `CROSS_SITE_REFUSED` | `403` | No | Any route: sent by a browser page of another site, or under a `Host` that `[api] allowed_hosts` does not accept; nothing was done. See [Authentication](#authentication) |
 | `EXTERNAL_SERVICE_UNAVAILABLE` | `503` | **Yes** | An external service (LLM, embedding, rerank) returned an error or timed out, or the local database stayed locked by another writer past `[sqlite] busy_timeout_ms` (message: `"database is busy"`) |
 | `CAPABILITY_UNAVAILABLE` | `503` | No | A required server-side capability is missing (e.g. `everos[multimodal]` extra not installed, LibreOffice absent) — requires admin action, not retry |
 | `CONFIGURATION_ERROR` | `500` | No | A required configuration is missing or invalid (e.g. embedding model not set) |
@@ -362,11 +380,11 @@ URL, http server). A `file://` uri is read from the **server's** local
 filesystem (the path must be reachable by the server process), subject
 to these guardrails:
 
-- the resolved path (symlinks followed) must be an existing regular file;
-- its size must be ≤ `EVEROS_MULTIMODAL__FILE_URI_MAX_BYTES` (default 50 MiB);
-- when `EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS` is set, the path must lie
-  within one of the listed roots (unset = any readable file, the
-  local-first default).
+- `file://` is off until `EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS` lists at
+  least one directory, and the resolved path (symlinks followed) must lie
+  within one of them;
+- the path must be an existing regular file;
+- its size must be ≤ `EVEROS_MULTIMODAL__FILE_URI_MAX_BYTES` (default 50 MiB).
 
 A guardrail violation surfaces as `415`. Mutually exclusive with `base64`.
 
@@ -1709,7 +1727,7 @@ mid-purge resumes the job when it starts again.
 | `404` | `PURGE_NONCE_INVALID` | The nonce is unknown, expired or already used; request a new one |
 | `503` | `EXTERNAL_SERVICE_UNAVAILABLE` | The job could not be recorded; nothing started and the nonce is still valid |
 | `404` | `NOT_FOUND` | `GET` of an unknown `job_id` |
-| `403` | `CROSS_SITE_REFUSED` | `POST /purge` or `/purge/confirm` sent by a browser page of another site (an `Origin` header that is not this server's address); nothing started |
+| `403` | `CROSS_SITE_REFUSED` | Sent by a browser page of another site, or under a `Host` that is not accepted, as on every route (see [Authentication](#authentication)); nothing started |
 | `409` | `PURGE_IN_PROGRESS` | A write (`/add`, `/flush`, knowledge document upload, replace or patch) into the range a running purge is clearing; resend after the job ends |
 
 The Cloud API spells the same conditions in lower case
@@ -1745,12 +1763,15 @@ the code of a dropped queued request is the lower-case `purge_in_progress`.
   the port can clear the whole root: when the API is exposed beyond
   `127.0.0.1`, block `/api/*/memory/purge*` at your reverse proxy unless
   the caller is trusted.
-- **A browser page of another site cannot purge.** A request or confirm
-  carrying an `Origin` header that is not this server's own address
-  answers `403` `CROSS_SITE_REFUSED` and starts nothing, so a web page the
-  user happens to open cannot clear the local root. Clients that send no
-  `Origin` (curl, SDKs, MCP, the plugins) are not affected, nor is a page
-  this server serves itself (`/docs`).
+- **A browser page of another site cannot purge**, as it cannot call any
+  other route: a request or confirm carrying an `Origin` that is neither
+  this server's own address nor listed in `[api] cors_origins` answers
+  `403` `CROSS_SITE_REFUSED` and starts nothing (see
+  [Authentication](#authentication)). An origin you list in `cors_origins`
+  can purge like any other caller, so list only web UIs you trust; `"*"` is
+  refused at startup. Clients that send no `Origin` (curl, SDKs, MCP, the
+  plugins) are not affected, nor is a page this server serves itself
+  (`/docs`).
 - To reset memory between tests, point each run at a fresh temporary
   memory root (`--root`) instead of purging a shared one: that is the
   deterministic reset.

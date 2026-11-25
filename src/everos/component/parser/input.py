@@ -63,23 +63,29 @@ def _is_file_uri(uri: str) -> bool:
     return urlparse(uri).scheme == "file"
 
 
-def _resolve_file_uri(uri: str) -> Path:
-    """Parse a ``file://`` uri into a canonical local path (symlinks resolved).
+def _file_uri_path(uri: str) -> Path:
+    """Parse a ``file://`` uri into a local path with its symlinks resolved.
 
     ``url2pathname`` does the percent-decoding and, on Windows, turns the
     URI's leading-slash drive form (``/C:/x``) into a real path — a plain
     ``unquote`` leaves ``/C:/x``, which is not the same file.
 
-    Raises ``ValueError`` for a remote host component or a path that does not
-    exist (``resolve(strict=True)``).
+    The resolve is non-strict: a missing path is not an error here, so the
+    allowlist can be checked before the caller learns whether the file exists.
+
+    Raises ``ValueError`` for a remote host component or a path that cannot be
+    canonicalised (a symlink loop). Messages name the caller's ``uri``, never
+    the resolved path, which would reveal where a symlink points or the
+    server's working directory.
     """
     parsed = urlparse(uri)
     if parsed.netloc and parsed.netloc not in ("", "localhost"):
         raise ValueError(f"file uri with remote host not supported: {parsed.netloc!r}")
     try:
-        return Path(url2pathname(parsed.path)).expanduser().resolve(strict=True)
-    except OSError as exc:
-        raise ValueError(f"cannot resolve file uri {uri!r}: {exc}") from exc
+        return Path(url2pathname(parsed.path)).expanduser().resolve()
+    except (OSError, RuntimeError) as exc:
+        logger.debug("file_uri_unresolvable", uri=uri, error=str(exc))
+        raise ValueError(f"cannot resolve file uri {uri!r}") from exc
 
 
 def _validated_file_path(uri: str, settings_source: Callable[[], Settings]) -> Path:
@@ -88,26 +94,48 @@ def _validated_file_path(uri: str, settings_source: Callable[[], Settings]) -> P
     This is the host-filesystem access everalgo refuses by design, so the
     guardrails live here (the application trust boundary):
 
-    * canonical, symlink-resolved path that must be an existing regular file;
-    * size-capped by ``settings.multimodal.file_uri_max_bytes``;
-    * confined to ``settings.multimodal.file_uri_allow_dirs`` when that
-      allowlist is non-empty (empty = allow any readable file, the
-      local-first default).
+    * refused outright unless ``settings.multimodal.file_uri_allow_dirs`` names
+      at least one directory (default-deny: an API caller must not be able to
+      read arbitrary host files, such as ``~/.ssh``), before the path is
+      touched at all;
+    * the symlink-resolved path must lie inside one of those directories, and
+      that is checked before the file is looked at, so a refused path does not
+      reveal whether it exists;
+    * the path that is read is checked again, so a directory swapped for a
+      symlink between the two resolves cannot lead outside the roots;
+    * the path must be an existing regular file;
+    * size-capped by ``settings.multimodal.file_uri_max_bytes``.
+
+    Error messages name the caller's ``uri`` only, never a resolved path.
 
     Raises:
-        ValueError: missing / non-regular / oversized / out-of-allowlist file.
+        ValueError: disabled / out-of-allowlist / missing / non-regular /
+            oversized file.
     """
     cfg = settings_source().multimodal
-    path = _resolve_file_uri(uri)
-    if not path.is_file():
-        raise ValueError(f"file uri target is not a regular file: {path}")
-
-    allow = [Path(d).expanduser().resolve() for d in cfg.file_uri_allow_dirs]
-    if allow and not any(path.is_relative_to(r) for r in allow):
+    if not cfg.file_uri_allow_dirs:
         raise ValueError(
-            f"file uri {path} is outside the allowed roots "
-            "(set EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS to permit it)"
+            "file uri reading is disabled; set EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS "
+            "to the directories EverOS may read"
         )
+    allow = [Path(d).expanduser().resolve() for d in cfg.file_uri_allow_dirs]
+    outside = ValueError(
+        f"file uri {uri!r} is outside the allowed roots "
+        "(set EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS to permit it)"
+    )
+    path = _file_uri_path(uri)
+    if not any(path.is_relative_to(r) for r in allow):
+        raise outside
+
+    try:
+        path = path.resolve(strict=True)
+    except OSError as exc:
+        logger.debug("file_uri_unresolvable", uri=uri, error=str(exc))
+        raise ValueError(f"cannot resolve file uri {uri!r}") from exc
+    if not any(path.is_relative_to(r) for r in allow):
+        raise outside
+    if not path.is_file():
+        raise ValueError(f"file uri {uri!r} is not a regular file")
 
     size = path.stat().st_size
     if size > cfg.file_uri_max_bytes:

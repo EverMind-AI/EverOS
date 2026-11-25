@@ -31,6 +31,7 @@ import httpx
 import pytest
 from sqlalchemy import text as sql_text
 
+from everos.config import load_settings
 from tests.fakes.storage import StorageView
 
 pytest.importorskip("everalgo.parser")
@@ -135,13 +136,19 @@ async def test_add_html_https_uri_parsed_into_buffer(
 
 
 async def test_add_html_file_uri_parsed_into_buffer(
-    async_client: httpx.AsyncClient, tmp_path: Path, storage_view: StorageView
+    async_client: httpx.AsyncClient,
+    tmp_path: Path,
+    storage_view: StorageView,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A file:// html asset is read locally (hydrated) + parsed into buffer.
 
     Exercises EverOS-side file:// support: the parser receives bytes, never
-    the path. Default allowlist is empty (local-first) so the temp file reads.
+    the path. ``file://`` is refused by default, so the test opts its temp dir
+    in (the reader loads settings per file).
     """
+    monkeypatch.setenv("EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS", f'["{tmp_path}"]')
+    load_settings.cache_clear()
     doc = tmp_path / "release.html"
     doc.write_text("<html><body><p>Version 9.9.9 ships Dark Mode.</p></body></html>")
     sid = "e2e-mm-html-file"

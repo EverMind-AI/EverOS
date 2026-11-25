@@ -49,6 +49,12 @@ following in mind:
   is loopback-only. Only set the bind to `0.0.0.0` (or any routable interface)
   after you have placed your own gateway / auth layer in front;
   `everos server start` will log a warning when you bind to `0.0.0.0`.
+- A browser on the same machine can reach a loopback server, so the API
+  refuses requests that only a browser page of another site would send: an
+  `Origin` of another site (unless listed in `[api] cors_origins`) and a
+  public domain name in `Host` (DNS rebinding; unless listed in
+  `[api] allowed_hosts`). `cors_origins` does not accept `"*"`: a listed
+  origin can use every route, purge included.
 - **Documents you ingest are untrusted input.** Filenames, metadata, and
   content that originate outside your control are parsed, indexed, and written
   to disk. An instance that ingests third-party documents is processing

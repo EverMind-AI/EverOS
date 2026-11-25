@@ -172,6 +172,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reports its data missing, run `chmod -R go-w` on the data directory the
   error names. The default `jieba` tokenizer is unaffected.
 
+### Security
+
+- **Browser pages of other sites can no longer call the API.** CORS used to
+  allow every origin, so any page open in a browser on the same machine could
+  read, write and delete memories through a loopback server, and a page that
+  rebinds its own domain to `127.0.0.1` could do the same. Every route now
+  answers `403 CROSS_SITE_REFUSED` to a request carrying another site's
+  `Origin` or arriving under a public domain name in `Host`. Before only the
+  purge routes refused cross-site requests. CORS no longer allows
+  credentials, and `[api] cors_origins = ["*"]` is refused at startup: with
+  no authentication it would open every route, purge included, to every
+  site.
+- **`file://` content items are refused unless you opt in.** With
+  `[multimodal] file_uri_allow_dirs` empty (the default), a `file://` item
+  could make the server read any file its process can see, and the parsed text
+  came back through search. Such items are now refused until that list names a
+  directory. The allowlist is checked before the file is looked at and again
+  on the path that is read, and refusals name only the uri that was sent, so
+  a refused path no longer reveals whether it exists or where a symlink
+  points.
+
+### Upgrade
+
+- curl, SDKs, MCP, the plugins and a compose service name are unaffected. A
+  web UI on another origin that calls the API from the browser needs its
+  origin in `[api] cors_origins`; a reverse proxy that forwards its own domain
+  in `Host` needs that domain in `[api] allowed_hosts`.
+- Some private host names are refused until listed in `[api] allowed_hosts`,
+  `/health` and `/metrics` included: a k8s service reached with its namespace
+  (`everos.ns`, `everos.ns.svc.cluster.local`) and mDNS names
+  (`mybox.local`), which any machine on the LAN can answer for. IP
+  addresses, single-label names and names under `localhost`, `internal`,
+  `test`, `invalid` and `home.arpa` need nothing.
+- `[api] cors_origins = ["*"]` now fails at startup; list the origins of the
+  web UIs that need access.
+- A client that sends `file://` content items needs the directories it reads
+  from in `[multimodal] file_uri_allow_dirs`
+  (`EVEROS_MULTIMODAL__FILE_URI_ALLOW_DIRS`); until then `/memory/add` answers
+  `415` naming that setting. `cors_origins` entries that are not an origin
+  (no scheme, a path, a fragment or userinfo) and `allowed_hosts` entries
+  that are not a bare host name (a scheme, path or port) now fail at
+  startup.
+- `everos.core.errors.CrossSiteRefusedError` (shipped in 1.7.1) is removed:
+  the refusal now happens in the HTTP middleware, which still answers
+  `403 CROSS_SITE_REFUSED`. Code that caught the exception has nothing to
+  catch.
+
 ## [1.7.1] - 2026-11-20
 
 EverOS 1.7.1 writes each conversation's memory in its own language: a short

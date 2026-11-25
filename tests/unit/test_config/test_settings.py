@@ -192,3 +192,83 @@ def test_memorize_async_queue_defaults_and_env_override(
     monkeypatch.setenv("EVEROS_MEMORIZE__ASYNC_QUEUE__MAX_PENDING_PER_SESSION", "7")
     load_settings.cache_clear()
     assert load_settings().memorize.async_queue.max_pending_per_session == 7
+
+
+def test_cors_origins_are_normalised_to_match_the_origin_header() -> None:
+    from everos.config.settings import ApiSettings
+
+    api = ApiSettings(
+        cors_origins=[
+            " HTTP://localhost:3000/ ",
+            "http://localhost:80",  # browsers drop the default port
+            "https://ui.example:443",
+            "https://ui.example:8443",
+        ]
+    )
+    assert api.cors_origins == [
+        "http://localhost:3000",
+        "http://localhost",
+        "https://ui.example",
+        "https://ui.example:8443",
+    ]
+
+
+def test_a_star_cors_origin_fails_at_load() -> None:
+    """``"*"`` would let every site read, write and purge: no authentication."""
+    from pydantic import ValidationError
+
+    from everos.config.settings import ApiSettings
+
+    with pytest.raises(ValidationError, match="is not allowed"):
+        ApiSettings(cors_origins=["*"])
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "localhost:3000",
+        "http://localhost:3000/app",
+        "http://x?y=1",
+        "",
+        "http://x#frag",
+        "http://user@x",
+        "ftp://x",
+    ],
+)
+def test_a_cors_origins_entry_that_is_not_an_origin_fails_at_load(
+    entry: str,
+) -> None:
+    from pydantic import ValidationError
+
+    from everos.config.settings import ApiSettings
+
+    with pytest.raises(ValidationError, match="is not an origin"):
+        ApiSettings(cors_origins=[entry])
+
+
+def test_allowed_hosts_are_lower_cased() -> None:
+    from everos.config.settings import ApiSettings
+
+    api = ApiSettings(allowed_hosts=[" Memory.Example.com ", "*"])
+    assert api.allowed_hosts == ["memory.example.com", "*"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "memory.example.com:8443",  # the guard compares the name without port
+        "https://memory.example.com",
+        "memory.example.com/api",
+        "user@memory.example.com",
+        "",
+    ],
+)
+def test_an_allowed_hosts_entry_that_never_matches_fails_at_load(
+    entry: str,
+) -> None:
+    from pydantic import ValidationError
+
+    from everos.config.settings import ApiSettings
+
+    with pytest.raises(ValidationError, match="is not a host name"):
+        ApiSettings(allowed_hosts=[entry])

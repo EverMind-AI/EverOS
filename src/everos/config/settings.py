@@ -30,6 +30,7 @@ from functools import cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final, Literal
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -110,13 +111,104 @@ class ApiSettings(BaseModel):
     (``0.0.0.0`` etc.) without your own gateway / auth layer in front
     is unsupported.
 
+    A browser can still reach a loopback server: a page of another site can
+    send it requests, and DNS rebinding can make such a page same-origin with
+    it. Requests are therefore refused when their ``Host`` is a public domain
+    name not listed in ``allowed_hosts``, or when they carry the ``Origin`` of
+    another site not listed in ``cors_origins``.
+
     Env binding:
         EVEROS_API__HOST
         EVEROS_API__PORT
+        EVEROS_API__ALLOWED_HOSTS   (JSON list, e.g. '["memory.example.com"]')
+        EVEROS_API__CORS_ORIGINS    (JSON list, e.g. '["http://localhost:3000"]')
     """
 
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
+    allowed_hosts: list[str] = []
+    """Public domain names this server is reached under, such as a reverse
+    proxy's (``"*"`` accepts any). IP addresses, single-label names and the
+    reserved ``localhost`` / ``internal`` / ``test`` / ``invalid`` /
+    ``home.arpa`` domains are always accepted.
+
+    Entries are bare host names, lower-cased at load; an entry with a scheme,
+    path or port is rejected instead of silently never matching (the guard
+    compares the name without its port)."""
+    cors_origins: list[str] = []
+    """Browser origins (``scheme://host[:port]``) allowed to call the API from
+    another site, such as a local web UI. Empty: none. ``"*"`` is rejected:
+    the API has no authentication, so it would let every site read, write and
+    purge memories.
+
+    Entries are normalised (lower case, no trailing ``/``, no default port) so
+    the cross-site guard and CORS compare the string a browser sends; an entry
+    with a path, query, fragment, userinfo or no scheme is rejected at load
+    time instead of silently never matching."""
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def _normalise_hosts(cls, v: list[str]) -> list[str]:
+        out = []
+        for raw in v:
+            host = raw.strip().lower()
+            if host == "*":
+                out.append(host)
+                continue
+            try:
+                parts = urlsplit(f"//{host}")
+                port = parts.port
+            except ValueError:
+                port = parts = None
+            if (
+                not host
+                or parts is None
+                or any(c in host for c in "/@?#")
+                or port is not None
+                or parts.hostname != host.strip("[]")
+            ):
+                raise ValueError(
+                    f"allowed_hosts entry {raw!r} is not a host name; list the "
+                    "bare name without scheme, path or port, e.g. memory.example.com"
+                )
+            out.append(parts.hostname)
+        return out
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _normalise_origins(cls, v: list[str]) -> list[str]:
+        out = []
+        for raw in v:
+            origin = raw.strip().rstrip("/").lower()
+            if origin == "*":
+                raise ValueError(
+                    'cors_origins entry "*" is not allowed: EverOS has no '
+                    "authentication, so it would let every web site read, write "
+                    "and purge memories; list the origins that need access"
+                )
+            parts = urlsplit(origin)
+            try:
+                port = parts.port
+            except ValueError:
+                port = -1
+            if (
+                parts.scheme not in ("http", "https")
+                or not parts.hostname
+                or port == -1
+                or "@" in parts.netloc
+                or parts.path
+                or parts.query
+                or parts.fragment
+                or "#" in origin
+            ):
+                raise ValueError(
+                    f"cors_origins entry {raw!r} is not an origin; use "
+                    "scheme://host[:port], e.g. http://localhost:3000"
+                )
+            if (parts.scheme, port) in (("http", 80), ("https", 443)):
+                origin = origin.rsplit(":", 1)[0]
+            out.append(origin)
+        return out
 
 
 class SqliteSettings(BaseModel):
@@ -608,8 +700,8 @@ class MultimodalSettings(BaseModel):
 
     # ``file://`` content-item support (read locally by EverOS, not everalgo).
     file_uri_allow_dirs: list[str] = []
-    """Allowlisted base dirs for ``file://`` uris. Empty = allow any readable
-    file (local-first default); set to confine reads when the API is exposed."""
+    """Base dirs ``file://`` uris may be read from. Empty (the default) refuses
+    every ``file://`` uri; list directories to opt in."""
     file_uri_max_bytes: int = 50 * 1024 * 1024
     """Max size (bytes) of a ``file://`` asset; larger files are rejected."""
 

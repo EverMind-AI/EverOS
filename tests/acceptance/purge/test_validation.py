@@ -176,10 +176,9 @@ def test_t11_1_second_scope_gets_the_active_job(make_world: Any) -> None:
 
 
 def test_t43_1_a_cross_site_page_cannot_purge(make_world: Any) -> None:
-    """A43 (E8): a browser page of another site gets past CORS (its preflight
-    is answered) but its request and confirm are refused and start nothing;
-    a request without ``Origin`` (curl, plugins) or from this server's own
-    page is served."""
+    """A43 (E8): a browser page of another site is refused at every step (its
+    preflight, request and confirm) and starts nothing; a request without
+    ``Origin`` (curl, plugins) or from this server's own page is served."""
     world = make_world("T43.1")
     srv, root = world.srv, world.srv.root
     before = nothing_deleted_snapshot(root)
@@ -208,10 +207,9 @@ def test_t43_1_a_cross_site_page_cannot_purge(make_world: Any) -> None:
             "request_own_page": [own.status_code, own.json()],
         },
     )
-    # CORS alone would let the page through: the preflight is answered.
-    assert preflight.status_code == 200
-    assert preflight.headers["access-control-allow-origin"] in ("*", evil["origin"])
-    for resp in (asked, confirmed):
+    # The cross-site guard answers before CORS: no preflight grant either.
+    assert "access-control-allow-origin" not in preflight.headers
+    for resp in (preflight, asked, confirmed):
         assert resp.status_code == 403, resp.text
         assert resp.json()["error"]["code"] == "CROSS_SITE_REFUSED"
     assert "nonce" not in asked.text
