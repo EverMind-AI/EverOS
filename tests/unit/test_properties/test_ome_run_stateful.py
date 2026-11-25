@@ -56,6 +56,7 @@ from everos.infra.ome._stores import storage as storage_mod
 from everos.memory.deps import MemoryDeps
 from everos.memory.ports import Event, Immediate, StrategySpec
 from tests.fakes import make_deps
+from tests.helpers.event_loop import new_stepped_loop
 from tests.helpers.ome import StrategyTestHarness, strategy_spec
 
 settings.register_profile(
@@ -154,7 +155,7 @@ class OmeRunMachine(RuleBasedStateMachine):
 
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         _calls.clear()
         self.h = StrategyTestHarness()
         self.h._engine._config.run_timeout_seconds = RUN_TIMEOUT

@@ -48,7 +48,6 @@ atomic there, and that is the issue's subject.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import shutil
@@ -99,6 +98,7 @@ from tests.fakes import (
     bundled_instructions,
     unused_raw_file_builder,
 )
+from tests.helpers.event_loop import new_stepped_loop
 
 settings.register_profile(
     "ci",
@@ -131,7 +131,7 @@ def event(label: str) -> None:
 class BoundaryMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.tmp = Path(tempfile.mkdtemp(prefix="boundary_stateful_"))
         root = MemoryRoot(self.tmp)
         root.ensure()

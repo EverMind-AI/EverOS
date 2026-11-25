@@ -59,6 +59,7 @@ from everos.infra.persistence.sqlite._repos.md_change_state import (
     MdChangeStateRepo,
 )
 from everos.infra.persistence.sqlite._tables import MdChangeState
+from tests.helpers.event_loop import new_stepped_loop
 
 settings.register_profile(
     "ci",
@@ -140,7 +141,7 @@ class _ScriptedHandler(Handler):
 class CascadeMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.tmp = Path(tempfile.mkdtemp(prefix="cascade_stateful_"))
         root = MemoryRoot(self.tmp)
         root.ensure()

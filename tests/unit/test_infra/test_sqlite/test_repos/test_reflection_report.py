@@ -6,6 +6,7 @@ listing including status filtering (rolled_back rows excluded).
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
@@ -21,14 +22,15 @@ from everos.infra.persistence.sqlite._tables import ReflectionReport
 
 
 @pytest.fixture
-async def repo(tmp_path: Path) -> ReflectionReportRepo:
+async def repo(tmp_path: Path) -> AsyncIterator[ReflectionReportRepo]:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     engine = create_system_engine(mr.system_db, SqliteSettings())
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    return ReflectionReportRepo(session_factory=factory)
+    yield ReflectionReportRepo(session_factory=factory)
+    await engine.dispose()
 
 
 def _make_report(

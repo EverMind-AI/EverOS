@@ -58,6 +58,7 @@ from everos.infra.persistence.markdown._base import entries as ent
 from everos.infra.persistence.markdown._base import frontmatter as fm
 from everos.infra.persistence.markdown._base.writer import MarkdownWriter
 from everos.infra.persistence.markdown._writers.episode_writer import EpisodeWriter
+from tests.helpers.event_loop import new_stepped_loop
 
 settings.register_profile(
     "ci",
@@ -88,7 +89,7 @@ def event(label: str) -> None:
 class DailyLogMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.tmp = Path(tempfile.mkdtemp(prefix="daily_log_stateful_"))
         root = MemoryRoot(self.tmp)
         root.ensure()

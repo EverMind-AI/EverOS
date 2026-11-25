@@ -14,6 +14,7 @@ strategies must always see a fully-hydrated :class:`AlgoCluster` on read.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import numpy as np
@@ -28,14 +29,15 @@ from everos.infra.persistence.sqlite._repos.cluster import ClusterRepo
 
 
 @pytest.fixture
-async def repo(tmp_path: Path) -> ClusterRepo:
+async def repo(tmp_path: Path) -> AsyncIterator[ClusterRepo]:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     engine = create_system_engine(mr.system_db, SqliteSettings())
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    return ClusterRepo(session_factory=factory)
+    yield ClusterRepo(session_factory=factory)
+    await engine.dispose()
 
 
 def _make_cluster(

@@ -14,6 +14,8 @@ from typing import Any
 import httpx
 import pytest
 
+from tests.helpers.event_loop import new_stepped_loop
+
 from .conftest import chat, free_port
 from .observe import wait_converged
 
@@ -159,7 +161,7 @@ class _Gate:
     def __init__(self, target: int) -> None:
         self.target = target
         self.port = free_port()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.open: asyncio.Event | None = None
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.ready = threading.Event()

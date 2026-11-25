@@ -17,6 +17,7 @@ Pins the queue contract the worker relies on:
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
 
@@ -33,14 +34,15 @@ from everos.infra.persistence.sqlite._tables import MemorizeInbox
 
 
 @pytest.fixture
-async def repo(tmp_path: Path) -> MemorizeInboxRepo:
+async def repo(tmp_path: Path) -> AsyncIterator[MemorizeInboxRepo]:
     mr = MemoryRoot(tmp_path)
     mr.ensure()
     engine = create_system_engine(mr.system_db, SqliteSettings())
     factory = create_session_factory(engine)
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    return MemorizeInboxRepo(session_factory=factory)
+    yield MemorizeInboxRepo(session_factory=factory)
+    await engine.dispose()
 
 
 _SEQ = iter(range(1, 10_000))

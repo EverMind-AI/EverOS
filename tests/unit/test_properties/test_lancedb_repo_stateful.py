@@ -25,7 +25,6 @@ by the sort column with the true total.
 
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
 import os
 import shutil
@@ -47,6 +46,7 @@ from everos.infra.persistence.lancedb import (
 )
 from everos.infra.persistence.records import IndexRecord
 from tests.fakes import TEST_DIM, arrow_schema
+from tests.helpers.event_loop import new_stepped_loop
 
 settings.register_profile(
     "ci",
@@ -99,7 +99,7 @@ def _key(r: _Row) -> Key:
 class LanceRepoMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
-        self.loop = asyncio.new_event_loop()
+        self.loop = new_stepped_loop()
         self.tmp = Path(tempfile.mkdtemp(prefix="lance_repo_stateful_"))
         LanceRepoBase._reset_locks_for_tests()
         self.repo: _Repo = self.run(self._open())
