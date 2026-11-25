@@ -1,6 +1,7 @@
 """Build the throughput benchmark's store: real conversations, real extraction.
 
-usage: python build_store.py <base_url> <sources_dir> [--plan PLAN] [--workers N]
+usage: python build_store.py <base_url> <sources_dir> --root <everos_root>
+                              [--plan PLAN] [--workers N]
 
 Ingests conversations into a running EverOS server (configured with real LLM and
 embedding providers) under app ``perf`` / project ``real100k``:
@@ -10,7 +11,8 @@ embedding providers) under app ``perf`` / project ``real100k``:
   lme:<i>      LongMemEval-S question i's haystack sessions, one user (``lme_<i>``)
 
 <sources_dir> holds ``locomo10.json`` and ``longmemeval_s_cleaned.json``
-(``bash benchmarks/download_data.sh locomo`` / ``longmemeval``). A LongMemEval
+(``bash benchmarks/download_data.sh locomo``; the cleaned LongMemEval-S as in
+benchmarks/throughput.md, Reproduce step 1). A LongMemEval
 session shared by several questions goes to the first of them in plan order, so
 no conversation is stored twice. Each session is one or more synchronous
 ``/memory/add`` calls of at most 50 messages, then ``/memory/flush``; a call
@@ -18,10 +20,11 @@ that fails (not 200, or no answer) is sent again, up to ``--attempts`` times. A
 session still failing then is left unfinished, and once every worker is done the
 build exits 1 listing them: a store missing sessions is not the documented one.
 On EverOS 1.8.0 or later re-running it is safe: a resent message is not stored
-twice. Otherwise it waits
-until the store stops growing: facts and profiles are extracted in the
-background, so it waits for five minutes in a row of an idle cascade and
-unchanged index row counts.
+twice. Otherwise it waits until the store stops growing: facts and profiles
+are extracted in the background, and no HTTP signal tells when that work is
+done, so it waits for five minutes in a row of an idle cascade, an empty
+memorize queue and an unchanged markdown tree under --root (the server's
+EVEROS_ROOT; extraction ends by writing markdown, which the cascade indexes).
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ import argparse
 import asyncio
 import datetime as dt
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -120,16 +124,35 @@ async def post(
     return status
 
 
-async def index_state(client: httpx.AsyncClient) -> tuple[int, dict[str, int]]:
-    """The cascade's pending count and the row count of each index table."""
-    cascade = (await client.get("/health")).json().get("cascade") or {}
-    return cascade.get("pending", -1), cascade.get("index_rows", {})
+def markdown_state(root: Path) -> tuple[int, int, int]:
+    """Count, total size and newest mtime of the markdown files under ``root``."""
+    count = size = newest = 0
+    for top, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d != ".index"]
+        for name in files:
+            if name.endswith(".md"):
+                st = os.stat(os.path.join(top, name))
+                count, size, newest = (
+                    count + 1,
+                    size + st.st_size,
+                    max(newest, st.st_mtime_ns),
+                )
+    return count, size, newest
+
+
+async def background_work(client: httpx.AsyncClient) -> tuple[int, int]:
+    """Changes the cascade has yet to index, and batches the memorize queue holds."""
+    health = (await client.get("/health")).json()
+    cascade = health.get("cascade") or {}
+    queue = health.get("memorize_queue") or {}
+    return cascade.get("pending", -1), queue.get("pending", 0)
 
 
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("base")
     ap.add_argument("sources", type=Path)
+    ap.add_argument("--root", type=Path, required=True, help="the server's EVEROS_ROOT")
     ap.add_argument("--plan", default="locomo:0-9,lme:0-111")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--attempts", type=int, default=3)
@@ -139,10 +162,11 @@ async def main() -> None:
     queue: asyncio.Queue[tuple[str, list[dict]]] = asyncio.Queue()
     for item in todo:
         queue.put_nowait(item)
-    started, failed = time.monotonic(), []
+    started, failed, finished = time.monotonic(), [], 0
     async with httpx.AsyncClient(base_url=a.base, timeout=900) as client:
 
         async def worker() -> None:
+            nonlocal finished
             while not queue.empty():
                 sid, msgs = queue.get_nowait()
                 calls = [
@@ -160,8 +184,8 @@ async def main() -> None:
                     if codes[-1] != 200:
                         failed.append((sid, codes))
                         break
-                done = len(todo) - queue.qsize()
-                print(f"{done}/{len(todo)} {sid} {codes}", flush=True)
+                finished += 1
+                print(f"{finished}/{len(todo)} {sid} {codes}", flush=True)
 
         await asyncio.gather(*(worker() for _ in range(a.workers)))
         print(f"ingested in {time.monotonic() - started:.0f} s", flush=True)
@@ -172,10 +196,11 @@ async def main() -> None:
         calm, last = 0, None
         while calm < 5:
             await asyncio.sleep(60)
-            pending, rows = await index_state(client)
-            calm = calm + 1 if pending == 0 and rows == last else 0
-            last = rows
-            print(f"pending {pending} rows {rows}", flush=True)
+            pending, queued = await background_work(client)
+            md = markdown_state(a.root)
+            calm = calm + 1 if pending == 0 and queued == 0 and md == last else 0
+            last = md
+            print(f"cascade {pending} queue {queued} markdown {md[:2]}", flush=True)
     print(f"settled after {time.monotonic() - started:.0f} s")
 
 

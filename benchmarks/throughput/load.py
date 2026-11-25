@@ -9,11 +9,12 @@ so a server that cannot keep up shows as climbing latency, not as a lower rate.
 Each request is POST /api/v2/memory/search for a (user_id, query) line drawn from
 --queries. Writes <out>.jsonl (one line per request) and <out>.summary.json.
 
-Kept up = every request returned 200 and latency did not climb during the step:
-the median of the last third of requests stays under twice the first third's
-(or within 0.5 s of it). Throughput counts requests both sent and completed while
-requests were still being sent, so a tail after the last send cannot hide a
-backlog.
+Kept up = every request returned 200, throughput reached 90% of the rate, and
+latency did not climb during the step: the median of the last third of requests
+stays under twice the first third's (or within 0.5 s of it). Throughput counts
+requests both sent and completed while requests were still being sent, so a tail
+after the last send cannot hide a backlog, and a server slow from the first
+request on fails on throughput even when its latency stays flat.
 
 With --pid (Linux), /proc is read once a second while requests go out: the
 server's CPU in cores (process and children) and its peak resident memory.
@@ -189,15 +190,18 @@ def judge(a: argparse.Namespace, rows: list[dict]) -> dict:
     early = pct([r["s"] for r in rows[:third] if r["status"] == 200], 50) or 0.0
     late = pct([r["s"] for r in rows[-third:] if r["status"] == 200], 50) or 0.0
     lat = [r["s"] for r in ok]
+    throughput = sum(r["sent"] + r["s"] <= t0 + span for r in ok) / span
     return {
         "method": a.method,
         "rate": a.rate,
         "sent": len(rows),
         "ok": len(ok),
-        "throughput": round(sum(r["sent"] + r["s"] <= t0 + span for r in ok) / span, 1),
+        "throughput": round(throughput, 1),
         "p50_ms": round(1000 * (pct(lat, 50) or 0)),
         "p95_ms": round(1000 * (pct(lat, 95) or 0)),
-        "keeps_up": len(ok) == len(rows) and late <= max(2 * early, early + 0.5),
+        "keeps_up": len(ok) == len(rows)
+        and throughput >= 0.9 * a.rate
+        and late <= max(2 * early, early + 0.5),
     }
 
 

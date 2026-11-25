@@ -15,8 +15,8 @@
 #                (default hybrid: 4 5 6 8 10 12 14 16 20 24 28 32,
 #                         keyword: 40 60 80 100 120 140 160 180 200)
 #   STEP_SECONDS per step (default hybrid 60, keyword 30)
-#   SENDERS      load.py processes sharing each step's rate (default 1; one process
-#                stalls near 140 requests/s, so the keyword sweep used 4)
+#   SENDERS      load.py processes sharing each step's rate (default 1; the published
+#                keyword sweep used 4, see benchmarks/throughput.md, Limits)
 #   SERVER_WRAP  command prefix for the server, e.g. core pinning and limits:
 #                "systemd-run --user --scope --quiet -p MemoryMax=8G -p CPUQuota=400% taskset -c 0-3"
 #   CLIENT_WRAP  command prefix for the stub and the load, e.g. "taskset -c 4-7"
@@ -25,11 +25,14 @@
 #                written before 1.8 is rebuilt to IVF_RQ by the cascade's
 #                maintenance beat after start-up, which takes minutes)
 set -u
-EVEROS=$1; STORE=$(cd "$2" && pwd); OUT=$3; METHOD=$4
-mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
+EVEROS=$1; STORE=$(cd "$2" && pwd) || exit 2; OUT=$3; METHOD=$4
 HERE=$(cd "$(dirname "$0")" && pwd)
 PY=${PY:-$(dirname "$EVEROS")/python}
 QUERIES=${QUERIES:-$STORE/../queries.jsonl}
+[ -x "$EVEROS" ] || { echo "no everos executable at $EVEROS"; exit 2; }
+[ -s "$QUERIES" ] || { echo "no queries at $QUERIES (set QUERIES)"; exit 2; }
+[ -d "$STORE/.index" ] || { echo "$STORE is not an EverOS root (no .index/)"; exit 2; }
+mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 case $METHOD in
   hybrid) RATES=${RATES:-"4 5 6 8 10 12 14 16 20 24 28 32"}; STEP=${STEP_SECONDS:-60} ;;
   keyword) RATES=${RATES:-"40 60 80 100 120 140 160 180 200"}; STEP=${STEP_SECONDS:-30} ;;
@@ -66,7 +69,13 @@ env -u VIRTUAL_ENV EVEROS_ROOT="$OUT/store" EVEROS_API__HOST=127.0.0.1 EVEROS_AP
   EVEROS_RERANK__API_KEY=stub EVEROS_RERANK__MODEL=stub ${SERVER_ENV:-} \
   ${SERVER_WRAP:-} "$EVEROS" server start > "$OUT/server.log" 2>&1 &
 SRV=$!
-log "everos $("$PY" -c 'import importlib.metadata as m; print(m.version("everos"))'), server pid $SRV port $SP, $METHOD"
+# The version alone cannot tell main from the release it is ahead of; a GitHub
+# install records its commit in direct_url.json.
+build=$("$PY" -c 'import importlib.metadata as m, json
+d = m.distribution("everos")
+url = json.loads(d.read_text("direct_url.json") or "{}")
+print(d.version, url.get("vcs_info", {}).get("commit_id", "")[:12] or "(no commit recorded)")')
+log "everos $build, server pid $SRV port $SP, $METHOD"
 
 for _ in $(seq 1 150); do curl -sf -m 2 "http://127.0.0.1:$SP/health" > /dev/null && break; sleep 2; done
 curl -sf -m 5 "http://127.0.0.1:$SP/health" > /dev/null || { log "server never healthy"; tail -20 "$OUT/server.log"; exit 1; }
@@ -107,15 +116,17 @@ PID_ARG=""
 # low rate first (kept in warmup/, not counted).
 mkdir -p "$OUT/warmup"
 # shellcheck disable=SC2086
-log "warm-up $(${CLIENT_WRAP:-} "$PY" "$HERE/load.py" --base "http://127.0.0.1:$SP" --method "$METHOD" \
-  --rate 2 --seconds 30 --queries "$QUERIES" --seed 1 --out "$OUT/warmup/${METHOD}_2")"
+warm=$(${CLIENT_WRAP:-} "$PY" "$HERE/load.py" --base "http://127.0.0.1:$SP" --method "$METHOD" \
+  --rate 2 --seconds 30 --queries "$QUERIES" --seed 1 --out "$OUT/warmup/${METHOD}_2") \
+  || { log "warm-up load.py failed"; exit 1; }
+log "warm-up $warm"
 sleep 10
 behind=0
 for r in $RATES; do
   # shellcheck disable=SC2086
   line=$(${CLIENT_WRAP:-} "$PY" "$HERE/load.py" --base "http://127.0.0.1:$SP" --method "$METHOD" \
     --rate "$r" --seconds "$STEP" --queries "$QUERIES" $PID_ARG --senders "${SENDERS:-1}" \
-    --out "$OUT/${METHOD}_$r")
+    --out "$OUT/${METHOD}_$r") || { log "load.py failed at $r/s"; exit 1; }
   log "$line"
   case $line in *'"keeps_up": false'*) behind=$((behind + 1)) ;; esac
   [ $behind -ge 2 ] && break
