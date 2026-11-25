@@ -103,8 +103,8 @@ agent trajectories 保存为可读 Markdown，并同步本地 SQLite 与 LanceDB
 [benchmarks/locomo.zh.md](benchmarks/locomo.zh.md)，每个数字怎么复现见
 [benchmarks/README.zh.md](benchmarks/README.zh.md)。
 
-加压下，在一台存着 16.9 万条记忆的 4 核 8 GB 服务器上，1.8.0 的 `hybrid` 检索每秒撑得住 14 到 16 次（1.7.1：4 次），
-`keyword` 检索 120 到至少 140 次（1.7.1：60 次）；环境、延迟、内存和复现方法见
+加压下，在一台存着 16.9 万条记忆的 4 核 8 GB 服务器上，1.8.0（发版前的 main）的 `hybrid` 检索每秒撑得住 14 到 16 次（1.7.1：不到 4 次），
+`keyword` 检索 120 到 140 次（1.7.1：70 次）；环境、延迟、内存和复现方法见
 [benchmarks/throughput.zh.md](benchmarks/throughput.zh.md)。
 
 <br>

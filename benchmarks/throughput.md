@@ -1,7 +1,7 @@
 # Search throughput
 
 On a 4-core, 8 GB server holding 168,821 memories, `hybrid` search sustains
-**14 to 16 requests per second on 1.8.0, against 4 on 1.7.1**, in about a sixth of
+**14 to 16 requests per second on 1.8.0, against fewer than 4 on 1.7.1**, in about a sixth of
 the memory; `keyword` search sustains **120 to 140, against 70**.
 Measured on main at `c5d9ace9`, ahead of the 1.8.0 release, with the model providers
 stubbed so that only EverOS is measured. Everything needed to reproduce it is in
@@ -12,8 +12,8 @@ stubbed so that only EverOS is measured. Everything needed to reproduce it is in
 ## Results
 
 `hybrid` ran two rounds and `keyword` three; a rate counts only when every round kept
-up at it. `keyword` was sent by four load-generator processes, since one cannot send
-much past 140 requests/s (see [Limits](#limits)). `glibc` and `jemalloc` are the same
+up at it. `keyword` was sent by four load-generator processes, after a single one froze at
+160 and 180 requests/s in a first run (see [Limits](#limits)). `glibc` and `jemalloc` are the same
 1.8.0 build: on Linux the 1.8.0 CLI preloads
 jemalloc when `libjemalloc2` is installed, and runs on glibc otherwise.
 
@@ -22,21 +22,24 @@ round), and the highest rate any single round kept up at:
 
 | Search | Version | Sustained requests/s | p50 | p95 | CPU (cores) | Peak memory | Best round |
 |---|---|---|---|---|---|---|---|
-| `hybrid` | 1.7.1 | 4 | 4.50 s | 8.70 s | 3.45 | 4,093 MB | 6 |
+| `hybrid` | 1.7.1 | < 4 | – | – | – | – | 4 |
 | `hybrid` | 1.8.0, glibc | 14 | 1.06 s | 3.41 s | 2.50 | 681 MB | 14 |
 | `hybrid` | 1.8.0, jemalloc | 16 | 0.72 s | 2.48 s | 2.07 | 595 MB | 16 |
 | `keyword` | 1.7.1 | 70 | 75 ms | 345 ms | 2.35 | 597 MB | 70 |
 | `keyword` | 1.8.0, glibc | 120 | 25 ms | 197 ms | 1.75 | 700 MB | 150 |
 | `keyword` | 1.8.0, jemalloc | 140 | 24 ms | 241 ms | 1.56 | 563 MB | 170 |
 
+1.7.1 did not sustain `hybrid`'s lowest rate: at 4/s its second round completed 3.45
+requests per second (see the same-load table below).
+
 Near the top the rounds disagree. A step there can fall behind after a stall of a few
 seconds that the little headroom left cannot clear within the step: in the first
 `jemalloc` round 130 fell behind while 140 and 150 kept up, and the third round kept up
 to 170. What stalls the server was not found; its log shows nothing at those moments.
 
-**At the same load**: `hybrid` at the highest rate all three sustain, and `keyword` at
-60/s from the first run (one load generator, 30 s steps, two rounds), where all three
-kept up:
+**At the same load**: `hybrid` at 4/s, the lowest rate tried (1.7.1 kept up there in one
+round of two), and `keyword` at 60/s from the first run (one load generator, 30 s
+steps, two rounds), where all three kept up:
 
 | Search, rate | Version | p50 | p95 | CPU (cores) | Peak memory |
 |---|---|---|---|---|---|
@@ -53,6 +56,13 @@ again: measured separately on this store, 449 ms and 1.1 GB of transient memory 
 query. 1.8.0 builds
 IVF_RQ indexes (24 MB for the same facts): 35 to 50 ms and 59 to 130 MB. A store
 written by 1.7.1 is converted on its first maintenance pass after the upgrade.
+
+`jemalloc`'s 16 `hybrid` searches per second may be set by the query embedding rather
+than by EverOS. A `hybrid` search waits for one query embedding, and EverOS runs at most
+16 at once (`[embedding] query_max_concurrent`). At 20/s, with the stub's mean latency of
+0.78 s, about 15.6 are in flight on average, close to that cap, while the server used
+2.35 of its 4 cores. A run with a larger cap or a faster provider would tell; it was not
+made. On glibc, 16/s already fell behind with 2.7 cores in use.
 
 <details>
 <summary>Every step of every round</summary>
@@ -98,11 +108,11 @@ written by 1.7.1 is converted on its first maintenance pass after the upgrade.
 | hybrid | 1.8.0-jemalloc | 24 | r1 | 1440/1440 | 17 | 11659 ms | 21342 ms | 2.27 | 583 MB | no |
 | hybrid | 1.8.0-jemalloc | 24 | r2 | 1440/1440 | 16.2 | 13432 ms | 24626 ms | 2.31 | 595 MB | no |
 | hybrid | v1.7.1 | 4 | r1 | 240/240 | 3.7 | 4215 ms | 6358 ms | 3.45 | 2830 MB | yes |
-| hybrid | v1.7.1 | 4 | r2 | 240/240 | 3.4 | 4503 ms | 8698 ms | 3.31 | 4093 MB | yes |
+| hybrid | v1.7.1 | 4 | r2 | 240/240 | 3.4 | 4503 ms | 8698 ms | 3.31 | 4093 MB | no |
 | hybrid | v1.7.1 | 5 | r1 | 300/300 | 3.9 | 7953 ms | 14582 ms | 3.32 | 4379 MB | no |
-| hybrid | v1.7.1 | 5 | r2 | 300/300 | 3.2 | 18934 ms | 23948 ms | 3.11 | 3644 MB | yes |
+| hybrid | v1.7.1 | 5 | r2 | 300/300 | 3.2 | 18934 ms | 23948 ms | 3.11 | 3644 MB | no |
 | hybrid | v1.7.1 | 6 | r1 | 360/360 | 4.5 | 11031 ms | 16040 ms | 3.46 | 3882 MB | no |
-| hybrid | v1.7.1 | 6 | r2 | 360/360 | 4.4 | 12641 ms | 17468 ms | 3.43 | 3533 MB | yes |
+| hybrid | v1.7.1 | 6 | r2 | 360/360 | 4.4 | 12641 ms | 17468 ms | 3.43 | 3533 MB | no |
 | hybrid | v1.7.1 | 8 | r2 | 480/480 | 3.7 | 30924 ms | 40560 ms | 3.5 | 4081 MB | no |
 | hybrid | v1.7.1 | 10 | r2 | 575/600 | 3 | 52015 ms | 59110 ms | 3.45 | 4254 MB | no |
 | keyword | 1.8.0-glibc | 100 | r1 | 6000/6000 | 100 | 23 ms | 34 ms | 1.45 | 613 MB | yes |
@@ -173,9 +183,6 @@ written by 1.7.1 is converted on its first maintenance pass after the upgrade.
 
 | Method | Server | QPS | Round | OK | Done/s | p50 | p95 | CPU | Memory | Kept up |
 |---|---|---|---|---|---|---|---|---|---|---|
-| keyword | 1.8.0-glibc | 120 | 26 ms | 210 ms | 1.72 | 640 MB | 120 |
-| keyword | 1.8.0-jemalloc | >=140 | 18 ms | 256 ms | 1.59 | 468 MB | 160 |
-| keyword | v1.7.1 | 60 | 27 ms | 50 ms | 1.91 | 590 MB | 60 |
 | keyword | 1.8.0-glibc | 40 | r1 | 1200/1200 | 40 | 14 ms | 20 ms | 0.56 | 639 MB | yes |
 | keyword | 1.8.0-glibc | 40 | r2 | 1200/1200 | 40 | 16 ms | 22 ms | 0.6 | 601 MB | yes |
 | keyword | 1.8.0-glibc | 60 | r1 | 1800/1800 | 60 | 14 ms | 18 ms | 0.77 | 639 MB | yes |
@@ -230,7 +237,9 @@ this machine, so run it before comparing your numbers with these.
 EverOS's own extraction from public conversations: the 10 LoCoMo10 conversations (each
 speaker is a user) and the haystacks of the first 112 LongMemEval-S questions (one user
 each). Extraction used `openai/gpt-4.1-mini`; embeddings were `Qwen/Qwen3-Embedding-4B` at
-1024 dimensions. A user holds 1,346 memories at the median and 1,661 at most.
+1024 dimensions. A user holds 1,346 memories at the median and 1,661 at most. The store
+was built by EverOS main at `c2c8d6fc`, between 1.7.0 and 1.7.1; 1.7.1 searched it as
+built, and 1.8.0 searched a copy whose vector indexes it had rebuilt as IVF_RQ.
 
 **Queries.** 2,270 questions from the same datasets, each asked as the user it is about:
 every LongMemEval question to its haystack's user, every LoCoMo question to the speaker it
@@ -245,9 +254,10 @@ at random from 14,252 recorded calls to `Qwen/Qwen3-Embedding-4B` on DeepInfra (
 earlier requests have returned, so a server that falls behind shows climbing latency
 instead of quietly lowering the rate. Each step lasts 60 s (30 s in the first `keyword`
 run), on a freshly started server after a 30 s warm-up at 2 requests/s that is not
-counted. A step **kept up** when every request returned 200 and the median latency of its
-last third stayed under twice that of its first third, or within 0.5 s of it. Rates rise
-until two steps fall behind.
+counted. A step **kept up** when every request returned 200, at least 90% of the rate
+completed while requests were going out, and the median latency of its last third stayed
+under twice that of its first third, or within 0.5 s of it. Rates rise until two steps
+fall behind.
 
 **Rounds.** `hybrid` ran twice, the second round with the servers in reverse order;
 `keyword` ran three times, the servers in a different order each round. The
@@ -284,10 +294,12 @@ real providers; every measurement after that uses the stubs and costs nothing.
    embedding model it was indexed with. Then ingest:
 
    ```bash
-   python benchmarks/throughput/build_store.py http://127.0.0.1:8000 benchmarks/data
+   python benchmarks/throughput/build_store.py http://127.0.0.1:8000 benchmarks/data --root <store>
    ```
 
-   It ingests `locomo:0-9,lme:0-111` and waits until background extraction has finished.
+   It ingests `locomo:0-9,lme:0-111` and waits until background extraction has finished:
+   five minutes in a row with an idle cascade, an empty memorize queue and no change to
+   the markdown under `<store>`.
    A request that still fails after three attempts leaves its session unfinished, and the
    build exits 1 listing those sessions; on 1.8.0 or later, run it again (a resent
    message is not stored twice).
@@ -303,7 +315,7 @@ real providers; every measurement after that uses the stubs and costs nothing.
 3. **Install each version under test** into its own virtual environment:
 
    ```bash
-   uv venv v1.7.1 && uv pip install --python v1.7.1 "everos==1.7.1"
+   uv venv v1.7.1 && uv pip install --python v1.7.1/bin/python "everos==1.7.1"
    ```
 
 4. **Sweep.** One run per version and method; the store is copied first and never
@@ -317,8 +329,11 @@ real providers; every measurement after that uses the stubs and costs nothing.
      bash benchmarks/throughput/sweep.sh v1.7.1/bin/everos <store> results/v1.7.1/r1/keyword keyword
    ```
 
-   `keyword` is sent by four `load.py` processes: one cannot send much past 140
-   requests/s.
+   `keyword` is sent by four `load.py` processes (see Limits). The numbers above stepped
+   by 10: `RATES="40 50 60 70 80 90 100"` for 1.7.1 and
+   `RATES="100 110 120 130 140 150 160 170 180"` for 1.8.0. Each run copies the store,
+   its `everos.toml` included, into `<out_dir>/store`: keep provider keys in the
+   environment rather than in that file.
 
    A store written by v1.7.1 or earlier gets its vector indexes rebuilt as IVF_RQ by
    later versions, a few minutes after start-up; set `WAIT_INDEX=IvfRq` so the sweep
@@ -336,9 +351,14 @@ real providers; every measurement after that uses the stubs and costs nothing.
 - **One provider's latency.** `hybrid` waits for the query embedding; a slower provider
   raises its latency and, once EverOS's concurrent query embeddings
   (`[embedding] query_max_concurrent`, 16) are all waiting, lowers its sustained rate.
-- **Load generator.** On this machine's client cores one `load.py` process stalls
-  somewhere between 140 and 180 requests/s: it cannot keep its send schedule, latency
-  and throughput collapse, and the server sits nearly idle. The `keyword` rates above
-  were sent by four processes (`SENDERS=4`, each with its own query order).
-  `summarize.py` marks a rate as a lower bound (≥) when the rate above it failed only
-  that way (server under 0.3 cores while requests went out).
+- **Load generator.** In the first `keyword` run one `load.py` process froze at 160 and
+  180 requests/s: requests that returned 200 took up to 1,469 s under a 60 s timeout,
+  which only a stalled client produces, while the server used under 0.2 cores. Why it
+  froze was not found. The `keyword` rates above were sent by four processes
+  (`SENDERS=4`, each with its own query order); in that run no request took longer than
+  the timeout and the server used over 1 core in every step. `summarize.py` marks a rate
+  as a lower bound (≥) when the rate above it failed with the server under 0.3 cores,
+  which a stalled client and a hung server both produce.
+- **Queries lean on 20 users.** 2,158 of the 2,270 questions (95%) belong to the 20
+  LoCoMo speakers; each LongMemEval user gets one. A search works within one user's
+  memories, so 168,821 is the store's size, not what a query searches.

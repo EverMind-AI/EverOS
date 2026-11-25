@@ -7,10 +7,12 @@ library never invokes this launcher or changes the host's allocation policy.
 
 Where jemalloc is installed (``libjemalloc.so.2``, Debian/Ubuntu package
 ``libjemalloc2``) the re-exec preloads it with :data:`JEMALLOC_CONF`; otherwise
-glibc runs with two arenas. Measured on a 4-core, 8 GB server (2026-11):
-jemalloc doubled keyword search throughput (161 vs 80 QPS) and halved hybrid
-search latency at 5 QPS (2.4 vs 4.3 s) while the last hour of an 8-hour
-write-and-search soak averaged 1125 MB against glibc's 1221 MB.
+glibc runs with two arenas. Measured on a 4-core, 8 GB server (2026-11),
+before 1.8.0's search fixes: jemalloc doubled keyword search throughput (161
+vs 80 QPS) and halved hybrid search latency at 5 QPS (2.4 vs 4.3 s), and the
+last hour of an 8-hour write-and-search soak averaged 1125 MB against glibc's
+1221 MB. With those fixes the gap is smaller: keyword 140 vs 120 and hybrid
+16 vs 14 sustained requests/s (benchmarks/throughput.md), 1033 vs 1036 MB.
 """
 
 from __future__ import annotations
