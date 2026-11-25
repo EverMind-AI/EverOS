@@ -9,13 +9,18 @@ across these methods is covered separately in
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
+import lancedb
 import pytest
 
 from everos.infra.persistence.lancedb import (
     AgentSkill as LanceAgentSkill,
 )
+from everos.infra.persistence.lancedb._base.indexes import ensure_vector_indexes
+from everos.infra.persistence.lancedb._repos.agent_skill import _AgentSkillRepo
+from tests.fakes import arrow_schema
 from tests.fakes.storage import Storage
 
 
@@ -150,3 +155,51 @@ async def test_find_topk_relevant_in_cluster_raises_on_empty_vector(
         await storage.repos.agent_skill.find_topk_relevant_in_cluster(
             owner_id="a", cluster_id="cl_x", query_vector=[], top_k=2
         )
+
+
+async def test_find_topk_relevant_in_cluster_matches_the_scan_on_an_index(
+    tmp_path: Path,
+) -> None:
+    """On an IVF_RQ index the query re-ranks its candidates on the stored
+    vectors (``VECTOR_QUERY_REFINE_FACTOR``), so its top 5 match the
+    brute-force answer. Ranked on one bit of an 8-dim vector alone they do
+    not, and dropping the re-rank fails this test. ``top_k`` 50 re-ranks 250
+    of the 300 rows."""
+    dim = 8
+    conn = await lancedb.connect_async(str(tmp_path / "lancedb"))
+    table = await conn.create_table(
+        LanceAgentSkill.TABLE_NAME, schema=arrow_schema(LanceAgentSkill, dim=dim)
+    )
+    repo = _AgentSkillRepo(table, dim=dim)
+    rng = random.Random(7)
+    rows = [
+        _skill_row(
+            name=f"s{i}",
+            owner_id="a",
+            cluster_id="cl_x",
+            vector=[rng.random() for _ in range(dim)],
+        )
+        for i in range(300)
+    ]
+    await repo.upsert(rows)
+    await ensure_vector_indexes(table, repo.index_schema, min_rows=50)
+    assert [
+        i.index_type for i in await table.list_indices() if i.columns == ["vector"]
+    ] == ["IvfRq"]
+
+    exact, got = [], []
+    for row in rows[::30]:
+        scan = await (
+            table.query()
+            .nearest_to(row.vector)
+            .distance_type("cosine")
+            .bypass_vector_index()
+            .limit(5)
+            .to_list()
+        )
+        exact.append({r["name"] for r in scan})
+        top = await repo.find_topk_relevant_in_cluster(
+            owner_id="a", cluster_id="cl_x", query_vector=row.vector, top_k=50
+        )
+        got.append({s.name for s in top[:5]})
+    assert got == exact
