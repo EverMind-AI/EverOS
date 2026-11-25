@@ -7,10 +7,11 @@ one sweep.sh run per (server, round, method). Prints two Markdown tables:
 
 * sustained rate: per method and server, the highest rate that every round
   of that method and server kept up at, with the worst round's p50 / p95
-  latency, CPU and peak memory at that rate. ">=" marks a lower bound: no
-  round fell behind at any rate tried, or the rate above it failed only where
-  the load generator stalled (the server used under 0.3 cores while requests
-  went out: load.py could not send faster, see benchmarks/throughput.md);
+  latency, CPU and peak memory at that rate, and the highest rate any single
+  round kept up at. ">=" marks a lower bound: no round fell behind at any rate
+  tried, or the rate above it failed only where the load generator stalled
+  (the server used under 0.3 cores while requests went out: load.py could not
+  send faster, see benchmarks/throughput.md);
 * every step: each round's result at each rate.
 """
 
@@ -38,8 +39,11 @@ def cell(rows: list[dict], key: str, unit: str = "") -> str:
     return f"{max(vals):g}{unit}" if vals else "-"
 
 
-print("| Method | Server | Sustained QPS | p50 | p95 | CPU (cores) | Peak memory |")
-print("|---|---|---|---|---|---|---|")
+print(
+    "| Method | Server | Sustained QPS | p50 | p95 | CPU (cores) | Peak memory "
+    "| Best round |"
+)
+print("|---|---|---|---|---|---|---|---|")
 for (method, server), per in sorted(steps.items()):
     rounds = {rnd for by in per.values() for rnd in by}
     held = [
@@ -47,8 +51,10 @@ for (method, server), per in sorted(steps.items()):
         for rate, by in sorted(per.items())
         if len(by) == len(rounds) and all(s["keeps_up"] for s in by.values())
     ]
+    kept = [rate for rate, by in per.items() if any(s["keeps_up"] for s in by.values())]
+    best = f"{max(kept):g}" if kept else "-"
     if not held:
-        print(f"| {method} | {server} | below {min(per):g} | | | | |")
+        print(f"| {method} | {server} | below {min(per):g} | | | | | {best} |")
         continue
     top = max(held)
     above = [by for rate, by in sorted(per.items()) if rate > top]
@@ -60,7 +66,7 @@ for (method, server), per in sorted(steps.items()):
     print(
         f"| {method} | {server} | {'>=' if bound else ''}{top:g} "
         f"| {cell(rows, 'p50_ms', ' ms')} | {cell(rows, 'p95_ms', ' ms')} "
-        f"| {cell(rows, 'cpu_cores')} | {cell(rows, 'rss_mb_max', ' MB')} |"
+        f"| {cell(rows, 'cpu_cores')} | {cell(rows, 'rss_mb_max', ' MB')} | {best} |"
     )
 
 print()
