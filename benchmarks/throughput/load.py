@@ -2,6 +2,7 @@
 
 usage: python load.py --base URL --method hybrid --rate 8 --seconds 60
                       --queries queries.jsonl --out DIR/hybrid_8 [--pid SERVER_PID]
+                      [--senders N]
 
 Request i goes out at start + i/rate whether or not earlier ones have returned,
 so a server that cannot keep up shows as climbing latency, not as a lower rate.
@@ -16,6 +17,11 @@ backlog.
 
 With --pid (Linux), /proc is read once a second while requests go out: the
 server's CPU in cores (process and children) and its peak resident memory.
+
+One Python process cannot keep its send schedule much past 140 requests/s on the
+benchmark's client cores. --senders N splits the rate over N processes, each with
+its own query order (seed + k); the step is judged on all their requests merged in
+send order.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ import json
 import os
 import random
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import httpx
@@ -99,14 +106,33 @@ def main() -> None:
     ap.add_argument("--timeout", type=float, default=60.0)
     ap.add_argument("--pid", type=int)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--senders", type=int, default=1)
     a = ap.parse_args()
     lines = Path(a.queries).read_text(encoding="utf-8").splitlines()
-    rows, res = asyncio.run(send(a, [json.loads(line) for line in lines]))
-    rows.sort(key=lambda r: r["i"])
+    queries = [json.loads(line) for line in lines]
+    if a.senders == 1:
+        rows, res = asyncio.run(send(a, queries))
+    else:
+        jobs = [(a, queries, k) for k in range(a.senders)]
+        with ProcessPoolExecutor(a.senders) as pool:
+            parts = list(pool.map(sender, jobs))
+        rows = [row for part, _ in parts for row in part]
+        res = parts[0][1]
+    rows.sort(key=lambda r: r["sent"])
     Path(f"{a.out}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     summary = judge(a, rows) | res
     Path(f"{a.out}.summary.json").write_text(json.dumps(summary, indent=1))
     print(json.dumps(summary))
+
+
+def sender(job: tuple[argparse.Namespace, list[dict], int]) -> tuple[list[dict], dict]:
+    """Sender k of --senders: its share of the rate, its own seed; k 0 samples --pid."""
+    a, queries, k = job
+    share = argparse.Namespace(**vars(a))
+    share.rate, share.seed = a.rate / a.senders, a.seed + k
+    share.pid = a.pid if k == 0 else None
+    rows, res = asyncio.run(send(share, queries))
+    return [r | {"sender": k} for r in rows], res
 
 
 async def send(a: argparse.Namespace, queries: list[dict]) -> tuple[list[dict], dict]:

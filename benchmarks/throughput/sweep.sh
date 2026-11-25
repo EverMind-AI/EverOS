@@ -15,6 +15,8 @@
 #                (default hybrid: 4 5 6 8 10 12 14 16 20 24 28 32,
 #                         keyword: 40 60 80 100 120 140 160 180 200)
 #   STEP_SECONDS per step (default hybrid 60, keyword 30)
+#   SENDERS      load.py processes sharing each step's rate (default 1; one process
+#                stalls near 140 requests/s, so the keyword sweep used 4)
 #   SERVER_WRAP  command prefix for the server, e.g. core pinning and limits:
 #                "systemd-run --user --scope --quiet -p MemoryMax=8G -p CPUQuota=400% taskset -c 0-3"
 #   CLIENT_WRAP  command prefix for the stub and the load, e.g. "taskset -c 4-7"
@@ -112,7 +114,8 @@ behind=0
 for r in $RATES; do
   # shellcheck disable=SC2086
   line=$(${CLIENT_WRAP:-} "$PY" "$HERE/load.py" --base "http://127.0.0.1:$SP" --method "$METHOD" \
-    --rate "$r" --seconds "$STEP" --queries "$QUERIES" $PID_ARG --out "$OUT/${METHOD}_$r")
+    --rate "$r" --seconds "$STEP" --queries "$QUERIES" $PID_ARG --senders "${SENDERS:-1}" \
+    --out "$OUT/${METHOD}_$r")
   log "$line"
   case $line in *'"keeps_up": false'*) behind=$((behind + 1)) ;; esac
   [ $behind -ge 2 ] && break

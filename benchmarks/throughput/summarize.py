@@ -6,11 +6,11 @@ Reads <results_dir>/<server>/<round>/<method>/<method>_<rate>.summary.json,
 one sweep.sh run per (server, round, method). Prints two Markdown tables:
 
 * sustained rate: per method and server, the highest rate that every round
-  kept up at, with the worst round's p50 / p95 latency, CPU and peak memory
-  at that rate. ">=" marks a lower bound: no round fell behind at any rate
-  tried, or the rate above it failed only where the load generator stalled
-  (the server used under 0.3 cores while requests went out: one load.py
-  process could not send faster, see benchmarks/throughput.md);
+  of that method and server kept up at, with the worst round's p50 / p95
+  latency, CPU and peak memory at that rate. ">=" marks a lower bound: no
+  round fell behind at any rate tried, or the rate above it failed only where
+  the load generator stalled (the server used under 0.3 cores while requests
+  went out: load.py could not send faster, see benchmarks/throughput.md);
 * every step: each round's result at each rate.
 """
 
@@ -30,7 +30,6 @@ for f in sorted(root.glob("*/*/*/*.summary.json")):
     s = json.loads(f.read_text())
     steps[(method, server)][s["rate"]][rnd] = s
 
-rounds = sorted({rnd for per in steps.values() for r in per.values() for rnd in r})
 _STALLED_CORES = 0.3
 
 
@@ -42,6 +41,7 @@ def cell(rows: list[dict], key: str, unit: str = "") -> str:
 print("| Method | Server | Sustained QPS | p50 | p95 | CPU (cores) | Peak memory |")
 print("|---|---|---|---|---|---|---|")
 for (method, server), per in sorted(steps.items()):
+    rounds = {rnd for by in per.values() for rnd in by}
     held = [
         rate
         for rate, by in sorted(per.items())
