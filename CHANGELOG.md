@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-25
+
+EverOS 1.8.0 closes the API to other sites' browser pages and makes searching
+a large store cheap. Every route now refuses a request that carries another
+site's `Origin` or arrives under a public domain name, and `file://` content
+items are refused until a directory is allowed. Keyword search reads its
+table once per query instead of once per word, vector search uses a 1-bit
+index re-ranked on the stored vectors, and a search waits for open-file
+headroom instead of failing, so concurrent searches no longer run the server
+out of file descriptors. On a 4-core, 8 GB server holding 169k memories,
+`hybrid` search sustains 14 to 16 requests per second against under 4 in
+1.7.1, and `keyword` 120 to 140 against 70
+([`benchmarks/throughput.md`](benchmarks/throughput.md)). Every accepted
+`/memory/add` is kept in a raw input log, a resent `/memory/add` no longer
+cuts its messages twice, and an LLM reply cut off at the output cap, ending
+in a trailing comma or wrapped in a code fence no longer fails its call.
+MemTrace execution tracing is available as an optional extra.
+
+What changes for an existing setup: a web UI on another origin, a reverse
+proxy that forwards its own domain and a client that sends `file://` items
+each need a setting; the vector index is rebuilt once after the upgrade; the
+raw input log is on by default; and a store indexed with the `nltk`
+tokenizer should be rebuilt. See Upgrade below.
+
 ### Added
 
 - **Search throughput results and the harness that measures them.**
@@ -18,6 +42,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LongMemEval-S by EverOS's own extraction, stub model providers that replay
   recorded query-embedding latency, and open-loop load with a kept-up verdict
   per step.
+- **Every accepted `/memory/add` is kept in a raw input log** (#537). One
+  JSON line per request, written before extraction starts, in
+  `<root>/<app>/<project>/.input_log/YYYY-MM-DD.jsonl`, so the original input
+  survives whatever extraction makes of it. `[memorize.input_log]` sets it:
+  `enabled` (default `true`), `retention_days` (default 30) and
+  `max_inline_bytes` (default 1 MiB; a larger line keeps its text but
+  replaces each base64 attachment with its length and SHA-256). A failed log
+  write is logged and never fails the request. `/memory/delete` with a
+  `session_id` removes that session's lines, and a purge removes the log of
+  the scope it covers. The log has no read API.
+- **Optional MemTrace execution tracing** (`pip install 'everos[memtrace]'`).
+  With `EVEROS_MEMTRACE_ENABLED=1`, `/memory/add`, `/memory/flush` and
+  `/memory/search` record an execution graph -- boundary decisions,
+  extraction evidence, buffer changes and each retrieval stage's candidates
+  -- exported as MemTraceBench-compatible JSON under `<root>/memtrace/`
+  (`EVEROS_MEMTRACE_DIR` overrides). Off by default, and without the extra
+  the hooks do nothing. Built on `smartcomment` (`>=0.1.2,<0.2`); examples
+  are in `examples/memtrace/`.
 
 ### Changed
 
@@ -72,7 +114,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repeats the query term. Vector search is unaffected and LanceDB 0.36 fixes
   it; raising the `<0.35` pin is a separate, validated upgrade. The test now
   waits up to one optimize interval for the hit.
-
 - **An LLM reply cut off at the output cap is sent once more instead of
   failing its call.** A generation that runs away until `max_tokens`
   (`finish_reason` `length`) usually finishes when the identical request is
@@ -85,7 +126,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a reply that is long by nature reaches the cap again and still fails, which
   a larger `max_tokens` for that task fixes. A reply blocked by
   `content_filter` is not resent.
-
 - **A resent `/memory/add` no longer cuts the same messages twice** (#274).
   Messages were deduplicated only against the session buffer, so a client
   retrying after a timeout re-sent messages the first call had already cut
@@ -151,26 +191,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is rebuilt as IVF_RQ once by the cascade worker's next index upkeep
   (seconds at 161k rows); searches keep using the old index until the new
   one is in place.
-
-### Security
-
-- **The `[nltk]` extra now pins NLTK 3.10.4** (was 3.9.4). 3.9.4's
-  `PorterStemmer.stem()` can be driven into a slow path by a crafted word
-  (PYSEC-2026-3738, fixed in 3.10.3), and the `nltk` tokenizer stems every
-  token of ingested text. The two releases tokenize alike except for a word
-  right after an opening quote (`'cause`), which 3.9.4 dropped: 449 of
-  83,484 LoCoMo and LongMemEval texts change. Turn-level BM25 over the 1,977
-  LoCoMo questions with evidence is unchanged (Hit@5 60.09% -> 60.04%, MRR
-  0.4600 -> 0.4600).
-
-### Upgrade
-
-- A store indexed with `[tokenizer] name = "nltk"` should run
-  `everos cascade rebuild` after upgrading, so stored tokens and query
-  tokens come from the same NLTK release. On Linux and macOS, NLTK 3.10 also
-  refuses data another account could write: if the `nltk` tokenizer now
-  reports its data missing, run `chmod -R go-w` on the data directory the
-  error names. The default `jieba` tokenizer is unaffected.
+- **An LLM reply ending in a trailing comma is repaired instead of failing**
+  (#564). In `json_object` / `prompt_only` mode some models (DeepSeek, for
+  one) end an object or array with `,`; such a reply is validated once more
+  with those commas removed before it is resent. A request whose extraction
+  got no usable reply from any attempt now answers `503`, a model fault a
+  later retry may clear, instead of `500`.
+- **An LLM reply wrapped in a markdown code fence is accepted** (#627).
+  Without a schema enforced on the wire, some OpenAI-compatible models wrap
+  the JSON in a `` ```json `` fence; the outer fence is now stripped before
+  validation, together with the trailing-comma repair and before any resend.
+- **Deleting memories no longer races clustering** (#597). Deleting an
+  episode looked up its clusters before taking the owner's clustering lock,
+  so a clustering pass could commit a cluster that still listed the deleted
+  episode. The lookup and the membership rewrite now both run under that
+  lock.
+- **A memory file deleted while it is being read counts as absent** (#597).
+  A read that checked a file and then opened it could meet a deletion in
+  between and fail with `FileNotFoundError`: a `500` for a lookup, or a
+  failed extraction. Profiles, daily memory files, knowledge document indexes
+  and the knowledge taxonomy now treat the vanished file as absent; parse and
+  permission errors still surface.
+- **Episodes dated before September 2001 render again** (#622). The markdown
+  store read episode timestamps through a seconds-or-milliseconds guess that
+  took any value below 10^12 as seconds, so an episode from 2000 raised
+  instead of rendering. Stored timestamps are always milliseconds and are now
+  read as such.
 
 ### Security
 
@@ -192,6 +238,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the path that is read, and refusals name only the uri that was sent, so
   a refused path no longer reveals whether it exists or where a symlink
   points.
+- **The `[nltk]` extra now pins NLTK 3.10.4** (was 3.9.4). 3.9.4's
+  `PorterStemmer.stem()` can be driven into a slow path by a crafted word
+  (PYSEC-2026-3738, fixed in 3.10.3), and the `nltk` tokenizer stems every
+  token of ingested text. The two releases tokenize alike except for a word
+  right after an opening quote (`'cause`), which 3.9.4 dropped: 449 of
+  83,484 LoCoMo and LongMemEval texts change. Turn-level BM25 over the 1,977
+  LoCoMo questions with evidence is unchanged (Hit@5 60.09% -> 60.04%, MRR
+  0.4600 -> 0.4600).
 
 ### Upgrade
 
@@ -218,6 +272,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the refusal now happens in the HTTP middleware, which still answers
   `403 CROSS_SITE_REFUSED`. Code that caught the exception has nothing to
   catch.
+- A store indexed with `[tokenizer] name = "nltk"` should run
+  `everos cascade rebuild` after upgrading, so stored tokens and query
+  tokens come from the same NLTK release. On Linux and macOS, NLTK 3.10 also
+  refuses data another account could write: if the `nltk` tokenizer now
+  reports its data missing, run `chmod -R go-w` on the data directory the
+  error names. The default `jieba` tokenizer is unaffected.
+- The raw input log is on by default: every accepted `/memory/add` adds a
+  line under `<root>/<app>/<project>/.input_log/`, kept for 30 days. Plain
+  text takes a few hundred bytes per message (about 0.2-0.4 GB per million
+  messages), but an attachment smaller than `max_inline_bytes` is stored
+  whole, so a store that receives many images should lower
+  `[memorize.input_log] max_inline_bytes`, or set `enabled = false` to keep
+  no log.
+- Each table's vector index is rebuilt once as IVF_RQ by the cascade worker's
+  next index upkeep after the first start (seconds at 161k rows); searches
+  use the old index until the new one is in place. Nothing needs to be run.
+- Message ids changed: a batch that 1.7.1 already accepted and a client
+  resends after the upgrade is stored a second time. Do not resend, after
+  upgrading, requests the old version answered.
 
 ## [1.7.1] - 2026-11-20
 
@@ -2994,7 +3067,8 @@ for AI agents.
 - **Decoupled algorithms** — memory extraction algorithms live in the standalone
   `everalgo-*` libraries published on PyPI.
 
-[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/EverMind-AI/EverOS/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/EverMind-AI/EverOS/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/EverMind-AI/EverOS/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/EverMind-AI/EverOS/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/EverMind-AI/EverOS/compare/v1.5.1...v1.6.0

@@ -590,7 +590,7 @@ wheels = [
 
 [[package]]
 name = "everos"
-version = "1.7.1"
+version = "1.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -698,7 +698,7 @@ requires-dist = [
     { name = "pymilvus", marker = "extra == 'milvus'", specifier = ">=3.0.0" },
     { name = "python-multipart", specifier = ">=0.0.7" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "smartcomment", marker = "extra == 'memtrace'", specifier = ">=0.1.2" },
+    { name = "smartcomment", marker = "extra == 'memtrace'", specifier = ">=0.1.2,<0.2" },
     { name = "sqlmodel", specifier = ">=0.0.22" },
     { name = "structlog", specifier = ">=24.0.0" },
     { name = "textual", specifier = ">=8.2.7" },
@@ -725,7 +725,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "pytest-rerunfailures", specifier = ">=15.0" },
     { name = "ruff", specifier = ">=0.8.0" },
-    { name = "smartcomment", specifier = ">=0.1.2" },
+    { name = "smartcomment", specifier = ">=0.1.2,<0.2" },
 ]
 
 [[package]]
