@@ -41,7 +41,14 @@ class InputLogWriter:
         self._settings = settings
         self._app_dir = app_dir
         self._project_dir = project_dir
-        self._lock = asyncio.Lock()
+        self._locks: dict[Path, asyncio.Lock] = {}
+
+    def _lock_for(self, directory: Path) -> asyncio.Lock:
+        lock = self._locks.get(directory)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[directory] = lock
+        return lock
 
     async def log_add(self, payload: dict[str, Any], *, request_id: str) -> None:
         """Record one request; a failure is logged and never fails ``/add``."""
@@ -66,7 +73,7 @@ class InputLogWriter:
                 "received_at": now.isoformat(),
             }
         )
-        async with self._lock:
+        async with self._lock_for(directory):
             await asyncio.to_thread(self._append_sync, directory, now, line)
 
     async def delete_session(
@@ -79,29 +86,17 @@ class InputLogWriter:
             / self._project_dir(project_id)
             / _LOG_DIR
         )
-        async with self._lock:
+        async with self._lock_for(directory):
             await asyncio.to_thread(self._delete_session_sync, directory, session_id)
 
     def _delete_session_sync(self, directory: Path, session_id: str) -> None:
         if not directory.is_dir():
             return
         for path in directory.glob("*.jsonl"):
-            original = path.read_text(encoding="utf-8").splitlines()
-            kept: list[str] = []
-            for line in original:
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    kept.append(line)
-                    continue
-                if record.get("session_id") != session_id:
-                    kept.append(line)
-            if not kept:
-                path.unlink(missing_ok=True)
-            elif len(kept) != len(original):
-                temp = path.with_suffix(".tmp")
-                temp.write_text("\n".join(kept) + "\n", encoding="utf-8")
-                temp.replace(path)
+            self._rewrite_streaming(
+                path,
+                lambda record: record.get("session_id") != session_id,
+            )
 
     async def delete_owner(
         self,
@@ -123,7 +118,7 @@ class InputLogWriter:
             / self._project_dir(project_id)
             / _LOG_DIR
         )
-        async with self._lock:
+        async with self._lock_for(directory):
             await asyncio.to_thread(
                 self._delete_owner_sync, directory, owner_id, session_id
             )
@@ -134,55 +129,62 @@ class InputLogWriter:
         if not directory.is_dir():
             return
         for path in directory.glob("*.jsonl"):
-            original = path.read_text(encoding="utf-8").splitlines()
-            kept: list[str] = []
-            changed = False
-            for line in original:
+            self._rewrite_streaming(
+                path,
+                lambda record: not _owner_in_line(record, owner_id, session_id),
+            )
+
+    def _rewrite_streaming(
+        self, path: Path, keep: Callable[[dict[str, Any]], bool]
+    ) -> None:
+        """Rewrite one daily file line by line, with O(1) extra memory."""
+        temp = path.with_suffix(".tmp")
+        changed = False
+        kept_any = False
+        with (
+            path.open("r", encoding="utf-8") as src,
+            temp.open("w", encoding="utf-8") as dst,
+        ):
+            for line in src:
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError:
-                    kept.append(line)
+                    dst.write(line)
+                    kept_any = True
                     continue
-                if session_id is not None and record.get("session_id") != session_id:
-                    kept.append(line)
-                    continue
-                messages = record.get("messages")
-                if not isinstance(messages, list):
-                    kept.append(line)
-                    continue
-                if any(
-                    isinstance(message, dict) and message.get("sender_id") == owner_id
-                    for message in messages
-                ):
+                if keep(record):
+                    dst.write(line)
+                    kept_any = True
+                else:
                     changed = True
-                    continue
-                kept.append(line)
-            if not kept:
-                path.unlink(missing_ok=True)
-            elif changed:
-                temp = path.with_suffix(".tmp")
-                temp.write_text("\n".join(kept) + "\n", encoding="utf-8")
-                temp.replace(path)
+        if not changed:
+            temp.unlink(missing_ok=True)
+        elif kept_any:
+            temp.replace(path)
+        else:
+            temp.unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
 
     async def purge_scope(self, scope: Any) -> None:
         """Remove every ``.input_log`` directory the purge scope covers."""
-        async with self._lock:
-            await asyncio.to_thread(self._purge_scope_sync, scope)
+        for directory in self._purge_dirs(scope):
+            async with self._lock_for(directory):
+                await asyncio.to_thread(self._purge_directory_sync, directory)
 
-    def _purge_scope_sync(self, scope: Any) -> None:
+    def _purge_directory_sync(self, directory: Path) -> None:
+        try:
+            shutil.rmtree(directory)
+        except FileNotFoundError:
+            # Already gone is success; any other removal failure must escape
+            # so the purge runner retries the step.
+            return
+
+    def _purge_dirs(self, scope: Any) -> list[Path]:
         if scope.kind == "space":
-            dirs = list(self._root.glob("*/*/.input_log"))
-        elif scope.kind == "app":
-            dirs = list((self._root / str(scope.app_dir)).glob("*/.input_log"))
-        else:
-            dirs = [self._root / str(scope.app_dir) / str(scope.project_dir) / _LOG_DIR]
-        for directory in dirs:
-            try:
-                shutil.rmtree(directory)
-            except FileNotFoundError:
-                # Already gone is success; any other removal failure must
-                # escape so the purge runner retries the step.
-                continue
+            return list(self._root.glob("*/*/.input_log"))
+        if scope.kind == "app":
+            return list((self._root / str(scope.app_dir)).glob("*/.input_log"))
+        return [self._root / str(scope.app_dir) / str(scope.project_dir) / _LOG_DIR]
 
     def _directory(self, payload: dict[str, Any]) -> Path:
         app_id = str(payload.get("app_id", "default"))
@@ -236,6 +238,20 @@ class InputLogWriter:
                 continue
             if day < cutoff:
                 path.unlink(missing_ok=True)
+
+
+def _owner_in_line(
+    record: dict[str, Any], owner_id: str, session_id: str | None
+) -> bool:
+    if session_id is not None and record.get("session_id") != session_id:
+        return False
+    messages = record.get("messages")
+    if not isinstance(messages, list):
+        return False
+    return any(
+        isinstance(message, dict) and message.get("sender_id") == owner_id
+        for message in messages
+    )
 
 
 def _encode(line: dict[str, Any]) -> str:

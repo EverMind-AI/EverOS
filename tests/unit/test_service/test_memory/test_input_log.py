@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -301,3 +302,54 @@ async def test_delete_owner_can_be_limited_to_one_session(tmp_path: Path) -> Non
 
     lines = _lines(tmp_path)
     assert [line["session_id"] for line in lines] == ["s2"]
+
+
+async def test_session_delete_streams_instead_of_reading_whole_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    await writer.log_add(_payload(), request_id="r1")
+
+    def _forbidden(*args: object, **kwargs: object) -> str:
+        raise AssertionError("delete must not read the whole daily file")
+
+    monkeypatch.setattr(Path, "read_text", _forbidden)
+    await writer.delete_session(app_id="default", project_id="default", session_id="s1")
+
+
+async def test_delete_in_one_scope_does_not_block_another_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    await writer.log_add(_payload(), request_id="r1")
+    started = threading.Event()
+    release = threading.Event()
+    original = writer._delete_session_sync
+
+    def _slow(directory: Path, session_id: str) -> None:
+        started.set()
+        release.wait(timeout=2)
+        original(directory, session_id)
+
+    monkeypatch.setattr(writer, "_delete_session_sync", _slow)
+    delete = asyncio.create_task(
+        writer.delete_session(app_id="default", project_id="default", session_id="s1")
+    )
+    assert await asyncio.to_thread(started.wait, 1)
+    other = _payload()
+    other["project_id"] = "p2"
+    await asyncio.wait_for(writer.log_add(other, request_id="r2"), timeout=1)
+    release.set()
+    await delete

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An owner-only deletion now removes the owner's raw input-log lines.**
+  `/memory/delete` with `user_id` or `agent_id` previously left those lines
+  behind, including assistant replies that can quote the deleted user. A line
+  containing the owner is removed whole; a pure session deletion keeps its
+  existing whole-line behavior. The rewrite streams each daily file and locks
+  per scope, so it does not read the file into memory or block `/add` in
+  another project.
 - **An LLM reply cut off at the output cap is sent once more instead of
   failing its call.** A generation that runs away until `max_tokens`
   (`finish_reason` `length`) usually finishes when the identical request is

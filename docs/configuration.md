@@ -518,8 +518,10 @@ joins it only behind its session's backlog)
 ### `[memorize.input_log]`
 
 An append-only JSONL record of accepted `/add` requests, independent of
-extraction (issue #537). A session deletion removes that session's lines,
-and a purge removes the covered scopes' `.input_log/` directories.
+extraction (issue #537). A session deletion removes that session's lines; an
+owner-only deletion removes every line that contains that owner's messages,
+even when another owner also appears in it. A purge removes the covered
+scopes' `.input_log/` directories.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
