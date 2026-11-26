@@ -58,7 +58,7 @@ from sqlalchemy import select
 from sqlmodel import SQLModel
 
 from everos.config import SqliteSettings, load_settings
-from everos.core.errors import SessionBufferQuarantinedError
+from everos.core.errors import BoundaryLLMError, SessionBufferQuarantinedError
 from everos.infra.persistence import MemoryRoot
 from everos.infra.persistence.sqlite import (
     SqliteMemcellStore,
@@ -252,6 +252,13 @@ async def _jittered(
                 accepted[session].update(ids)  # persisted, on the quarantine track
                 run.consecutive_failures[session] = 0
                 event("call: session buffer quarantined")
+                return
+            except BoundaryLLMError:
+                # Infrastructure failure: expected, but it must not count
+                # toward the poison-output streak.
+                run.note(f"call#{k} -> boundary infrastructure failed")
+                unknown[session].update(ids)
+                event("call: boundary infrastructure failed")
                 return
             except LLMOutputError:
                 run.note(f"call#{k} -> boundary failed")
