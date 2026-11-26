@@ -12,6 +12,7 @@ import asyncio
 import datetime as dt
 import hashlib
 import json
+import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +25,9 @@ from everos.core.utils.datetime import get_now_with_timezone
 logger = get_logger(__name__)
 
 _LOG_DIR = ".input_log"
+_PRIVATE_DIR = 0o700
+_PRIVATE_FILE = 0o600
+_POSIX = os.name == "posix"
 
 
 class InputLogWriter:
@@ -100,7 +104,7 @@ class InputLogWriter:
                 path.unlink(missing_ok=True)
             elif len(kept) != len(original):
                 temp = path.with_suffix(".tmp")
-                temp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+                _write_private(temp, "\n".join(kept) + "\n")
                 temp.replace(path)
 
     async def purge_scope(self, scope: Any) -> None:
@@ -160,10 +164,15 @@ class InputLogWriter:
     def _append_sync(
         self, directory: Path, now: dt.datetime, line: dict[str, Any]
     ) -> None:
-        directory.mkdir(parents=True, exist_ok=True)
+        directory.mkdir(parents=True, exist_ok=True, mode=_PRIVATE_DIR)
+        if _POSIX:
+            os.chmod(directory, _PRIVATE_DIR)
         self._prune(directory, now.date())
         path = directory / f"{now.date().isoformat()}.jsonl"
-        with path.open("a", encoding="utf-8") as handle:
+        fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, _PRIVATE_FILE)
+        if _POSIX:
+            os.chmod(path, _PRIVATE_FILE)
+        with os.fdopen(fd, "a", encoding="utf-8") as handle:
             handle.write(_encode(line) + "\n")
 
     def _prune(self, directory: Path, today: dt.date) -> None:
@@ -179,3 +188,11 @@ class InputLogWriter:
 
 def _encode(line: dict[str, Any]) -> str:
     return json.dumps(line, ensure_ascii=False, separators=(",", ":"))
+
+
+def _write_private(path: Path, text: str) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, _PRIVATE_FILE)
+    if _POSIX:
+        os.chmod(path, _PRIVATE_FILE)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
