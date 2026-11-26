@@ -223,3 +223,81 @@ async def test_purge_scope_removes_the_log_directory(tmp_path: Path) -> None:
         tmp_path / app_dir_name("default") / project_dir_name("default") / ".input_log"
     )
     assert not directory.exists()
+
+
+async def test_delete_owner_drops_a_whole_line_with_other_owners(
+    tmp_path: Path,
+) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    payload = _payload()
+    payload["messages"].append(
+        {"role": "assistant", "sender_id": "u2", "timestamp": 2, "content": "hi"}
+    )
+    await writer.log_add(payload, request_id="r1")
+
+    await writer.delete_owner(app_id="default", project_id="default", owner_id="u1")
+
+    assert _lines(tmp_path) == []
+
+
+async def test_delete_owner_keeps_a_line_with_only_other_owners(
+    tmp_path: Path,
+) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    payload = _payload()
+    payload["messages"][0]["sender_id"] = "u2"
+    await writer.log_add(payload, request_id="r1")
+
+    await writer.delete_owner(app_id="default", project_id="default", owner_id="u1")
+
+    lines = _lines(tmp_path)
+    assert len(lines) == 1
+    assert [m["sender_id"] for m in lines[0]["messages"]] == ["u2"]
+
+
+async def test_delete_owner_drops_a_line_with_no_messages_left(tmp_path: Path) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    await writer.log_add(_payload(), request_id="r1")
+
+    await writer.delete_owner(app_id="default", project_id="default", owner_id="u1")
+
+    assert _lines(tmp_path) == []
+    directory = (
+        tmp_path / app_dir_name("default") / project_dir_name("default") / ".input_log"
+    )
+    assert list(directory.glob("*.jsonl")) == []
+
+
+async def test_delete_owner_can_be_limited_to_one_session(tmp_path: Path) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    await writer.log_add(_payload(), request_id="r1")
+    other = _payload()
+    other["session_id"] = "s2"
+    await writer.log_add(other, request_id="r2")
+
+    await writer.delete_owner(
+        app_id="default", project_id="default", owner_id="u1", session_id="s1"
+    )
+
+    lines = _lines(tmp_path)
+    assert [line["session_id"] for line in lines] == ["s2"]

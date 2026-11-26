@@ -103,6 +103,67 @@ class InputLogWriter:
                 temp.write_text("\n".join(kept) + "\n", encoding="utf-8")
                 temp.replace(path)
 
+    async def delete_owner(
+        self,
+        *,
+        app_id: str,
+        project_id: str,
+        owner_id: str,
+        session_id: str | None = None,
+    ) -> None:
+        """Drop every line that contains one owner's messages.
+
+        Privacy takes precedence over keeping other owners' raw text: a line
+        with the deleted owner and another owner is removed whole. The
+        ``session_id`` filter limits which lines are considered.
+        """
+        directory = (
+            self._root
+            / self._app_dir(app_id)
+            / self._project_dir(project_id)
+            / _LOG_DIR
+        )
+        async with self._lock:
+            await asyncio.to_thread(
+                self._delete_owner_sync, directory, owner_id, session_id
+            )
+
+    def _delete_owner_sync(
+        self, directory: Path, owner_id: str, session_id: str | None
+    ) -> None:
+        if not directory.is_dir():
+            return
+        for path in directory.glob("*.jsonl"):
+            original = path.read_text(encoding="utf-8").splitlines()
+            kept: list[str] = []
+            changed = False
+            for line in original:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    kept.append(line)
+                    continue
+                if session_id is not None and record.get("session_id") != session_id:
+                    kept.append(line)
+                    continue
+                messages = record.get("messages")
+                if not isinstance(messages, list):
+                    kept.append(line)
+                    continue
+                if any(
+                    isinstance(message, dict) and message.get("sender_id") == owner_id
+                    for message in messages
+                ):
+                    changed = True
+                    continue
+                kept.append(line)
+            if not kept:
+                path.unlink(missing_ok=True)
+            elif changed:
+                temp = path.with_suffix(".tmp")
+                temp.write_text("\n".join(kept) + "\n", encoding="utf-8")
+                temp.replace(path)
+
     async def purge_scope(self, scope: Any) -> None:
         """Remove every ``.input_log`` directory the purge scope covers."""
         async with self._lock:
