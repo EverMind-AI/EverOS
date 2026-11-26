@@ -100,6 +100,28 @@ async def test_large_attachment_is_replaced_by_length_and_sha(tmp_path: Path) ->
     assert item["extras"]["base64_sha256"] == hashlib.sha256(big.encode()).hexdigest()
 
 
+async def test_startup_sweep_expires_idle_scopes(tmp_path: Path) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True, retention_days=1),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+    directory = (
+        tmp_path / app_dir_name("default") / project_dir_name("default") / ".input_log"
+    )
+    directory.mkdir(parents=True)
+    old = directory / "2020-01-01.jsonl"
+    old.write_text("{}\n")
+    fresh = directory / "2999-01-01.jsonl"
+    fresh.write_text("{}\n")
+
+    await writer.sweep_retention()
+
+    assert not old.exists()
+    assert fresh.exists()
+
+
 async def test_large_string_content_is_retained(tmp_path: Path) -> None:
     content = "x" * 500
     payload = _payload()
