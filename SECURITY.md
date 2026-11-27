@@ -62,8 +62,10 @@ following in mind:
 - Secrets (LLM / embedding API keys) live in your local `.env`; protect that
   file as you would any credential. EverOS never transmits them anywhere except
   the providers you configure.
-- Memory content is stored as plaintext `.md` files; apply OS-level file
-  permissions or disk encryption if your data is sensitive.
+- Memory content is stored as plaintext `.md` files. On POSIX, EverOS creates
+  memory directories as `0700` and Markdown files as `0600`, and tightens an
+  existing file/directory on its next write. Windows keeps its default ACL
+  behaviour; use disk encryption if the data is sensitive.
 - **What counts as a vulnerability.** An issue qualifies for a security
   advisory when untrusted input (an ingested document, or a caller outside the
   supported threat model) can reach data or files beyond what the API already
