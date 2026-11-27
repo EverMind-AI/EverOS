@@ -223,3 +223,25 @@ async def test_purge_scope_removes_the_log_directory(tmp_path: Path) -> None:
         tmp_path / app_dir_name("default") / project_dir_name("default") / ".input_log"
     )
     assert not directory.exists()
+
+
+async def test_write_failure_is_visible_in_health(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = InputLogWriter(
+        root=tmp_path,
+        settings=InputLogSettings(enabled=True),
+        app_dir=app_dir_name,
+        project_dir=project_dir_name,
+    )
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(writer, "_append_sync", _boom)
+    await writer.log_add(_payload(), request_id="r1")
+
+    health = writer.health()
+    assert health.failures == 1
+    assert health.last_request_id == "r1"
+    assert health.reasons and "disk full" not in health.reasons[0]

@@ -23,6 +23,7 @@ __all__ = [
     "ExtractionSupervisor",
     "FinishedMemcells",
     "FlushResult",
+    "InputLogHealth",
     "InputLogWriter",
     "MemorizeResult",
     "MemoryService",
@@ -53,7 +54,7 @@ from ._delete import Deleter
 from ._delete import DeleteResult as DeleteResult
 from ._extraction import ExtractionSupervisor as ExtractionSupervisor
 from ._extraction import FinishedMemcells as FinishedMemcells
-from ._input_log import InputLogWriter
+from ._input_log import InputLogHealth, InputLogWriter
 from ._memorize import Memorizer, flush_payload
 from ._models import FlushResult as FlushResult
 from ._models import MemorizeResult as MemorizeResult
@@ -339,6 +340,12 @@ class MemoryService:
         return await self._queue.health()
 
     # ── write use cases ────────────────────────────────────────────────────
+
+    def input_log_health(self) -> InputLogHealth | None:
+        """The audit log's failure state; ``None`` when no writer is wired."""
+        if self._input_log is None:
+            return None
+        return self._input_log.health()
 
     async def log_add(self, payload: dict[str, Any], *, request_id: str) -> None:
         """Record one accepted ``/add`` before it enters the write path."""

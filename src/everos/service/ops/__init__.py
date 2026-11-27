@@ -44,7 +44,13 @@ __all__ = [
 from typing import TYPE_CHECKING
 
 from . import _cascade, _ome, _tasks
-from ._health import QueueHealthProbe, health_report, no_queue
+from ._health import (
+    InputLogProbe,
+    QueueHealthProbe,
+    health_report,
+    no_input_log,
+    no_queue,
+)
 from ._health import compute_disabled_features as compute_disabled_features
 from ._models import Capabilities as Capabilities
 from ._models import CascadeHealthReport as CascadeHealthReport
@@ -113,6 +119,7 @@ class OpsService:
         backfill: BackfillDeps,
         capabilities: Capabilities,
         queue_health: QueueHealthProbe = no_queue,
+        input_log_health: InputLogProbe = no_input_log,
     ) -> None:
         self._settings = settings
         self._root = root
@@ -125,6 +132,7 @@ class OpsService:
         self._backfill = backfill
         self._capabilities = capabilities
         self._queue_health = queue_health
+        self._input_log_health = input_log_health
         self._cascade_attached = False
 
     @property
@@ -155,6 +163,7 @@ class OpsService:
             capabilities=self._capabilities,
             cascade=self._cascade if self._cascade_attached else None,
             queue_health=self._queue_health,
+            input_log_health=self._input_log_health,
         )
 
     # ── tasks ──────────────────────────────────────────────────────────────

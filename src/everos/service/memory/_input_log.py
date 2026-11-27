@@ -9,6 +9,7 @@ switch follow in a second PR.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as dt
 import hashlib
 import json
@@ -24,6 +25,16 @@ from everos.core.utils.datetime import get_now_with_timezone
 logger = get_logger(__name__)
 
 _LOG_DIR = ".input_log"
+
+
+@dataclasses.dataclass(frozen=True)
+class InputLogHealth:
+    """How the audit log has behaved since this process started."""
+
+    failures: int
+    last_failure_at: str | None
+    last_request_id: str | None
+    reasons: list[str]
 
 
 class InputLogWriter:
@@ -42,6 +53,9 @@ class InputLogWriter:
         self._app_dir = app_dir
         self._project_dir = project_dir
         self._lock = asyncio.Lock()
+        self._failures = 0
+        self._last_failure_at: str | None = None
+        self._last_request_id: str | None = None
 
     async def log_add(self, payload: dict[str, Any], *, request_id: str) -> None:
         """Record one request; a failure is logged and never fails ``/add``."""
@@ -50,11 +64,31 @@ class InputLogWriter:
         try:
             await self._write(payload, request_id=request_id)
         except Exception as exc:  # pragma: no cover - defensive boundary
+            self._failures += 1
+            self._last_failure_at = get_now_with_timezone().isoformat()
+            self._last_request_id = request_id
             logger.error(
                 "input_log_write_failed",
                 request_id=request_id,
                 error=f"{type(exc).__name__}: {exc}",
             )
+
+    def health(self) -> InputLogHealth:
+        """The audit log's failure state; reasons stay until restart."""
+        reasons = (
+            [
+                f"audit: {self._failures} input-log writes failed; "
+                f"last at {self._last_failure_at}"
+            ]
+            if self._failures
+            else []
+        )
+        return InputLogHealth(
+            failures=self._failures,
+            last_failure_at=self._last_failure_at,
+            last_request_id=self._last_request_id,
+            reasons=reasons,
+        )
 
     async def _write(self, payload: dict[str, Any], *, request_id: str) -> None:
         now = get_now_with_timezone()

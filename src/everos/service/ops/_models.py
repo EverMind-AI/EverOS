@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from everos.infra.persistence.sqlite import QueueSummary
-    from everos.service.memory import QueueHealth
+    from everos.service.memory import InputLogHealth, QueueHealth
 
 
 @dataclasses.dataclass(frozen=True)
@@ -83,6 +83,7 @@ class HealthReport:
     disabled_features: list[str]
     cascade: CascadeHealthReport | None
     memorize_queue: QueueHealth | None
+    input_log: InputLogHealth | None
 
 
 @dataclasses.dataclass(frozen=True)

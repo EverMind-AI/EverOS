@@ -26,6 +26,7 @@ __all__ = [
     "cascade_report",
     "compute_disabled_features",
     "health_report",
+    "no_input_log",
     "no_queue",
     "queue_probe_failed",
 ]
@@ -45,14 +46,21 @@ from everos.service.ops._models import (
 
 if TYPE_CHECKING:
     from everos.infra.cascade import CascadeAdmin, CascadeHealth, CascadeOrchestrator
+    from everos.service.memory import InputLogHealth
 
 logger = get_logger("everos.service.ops")
 
 QueueHealthProbe = Callable[[], Awaitable[QueueHealth | None]]
+InputLogProbe = Callable[[], "InputLogHealth | None"]
 
 
 async def no_queue() -> QueueHealth | None:
     """The queue probe while no memorize queue is wired in."""
+    return None
+
+
+def no_input_log() -> None:
+    """The audit probe while no input-log writer is wired in."""
     return None
 
 
@@ -62,6 +70,7 @@ async def health_report(
     capabilities: Capabilities,
     cascade: CascadeOrchestrator | None,
     queue_health: QueueHealthProbe,
+    input_log_health: InputLogProbe = no_input_log,
 ) -> HealthReport:
     """Provider flags, disabled features, and the cascade / queue blocks.
 
@@ -88,6 +97,7 @@ async def health_report(
         ),
         cascade=await _probe_cascade(cascade),
         memorize_queue=await _probe_queue(queue_health),
+        input_log=input_log_health(),
     )
 
 

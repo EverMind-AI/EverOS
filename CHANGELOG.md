@@ -114,6 +114,10 @@ tokenizer should be rebuilt. See Upgrade below.
   repeats the query term. Vector search is unaffected and LanceDB 0.36 fixes
   it; raising the `<0.35` pin is a separate, validated upgrade. The test now
   waits up to one optimize interval for the hit.
+- **A failed input-log write is visible in `/health`.** The raw input log is
+  best-effort, so `/add` still succeeds when its write fails; the new
+  `input_log` health block reports the failure count, last failure time and
+  request id, and a reason that stays until restart.
 - **An LLM reply cut off at the output cap is sent once more instead of
   failing its call.** A generation that runs away until `max_tokens`
   (`finish_reason` `length`) usually finishes when the identical request is

@@ -908,6 +908,12 @@ that dies relaunches itself (with backoff) and is relaunched by the next
 `loop_restarts` changing; a growing `oldest_pending_age_s` with a live loop
 means delivery is slower than arrival.
 
+`GET /health` also carries an `input_log` block while the raw input log is
+configured: `failures` (write failures since start), `last_failure_at`,
+`last_request_id`, and `reasons`. A failed audit write never fails `/add`,
+so this block is the operator's signal that the audit trail is incomplete;
+the reason remains until restart.
+
 **Retention.** Every queue row, whatever its status, is deleted seven days
 (`row_retention_hours`) after it was created. `GET /tasks/{task_id}` returns `404`
 after that. A delivered row drops its request body at once. A `failed` row
