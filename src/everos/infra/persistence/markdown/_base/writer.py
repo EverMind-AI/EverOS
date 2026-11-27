@@ -147,6 +147,20 @@ class MarkdownWriter:
             )
         return resolved
 
+    def _secure_parents(self, target: Path) -> None:
+        """Make every directory between the root and ``target`` owner-only."""
+        root = self._memory_root.root.resolve()
+        parent = target.parent.resolve()
+        try:
+            rel = parent.relative_to(root)
+        except ValueError:
+            return
+        current = root
+        for part in rel.parts:
+            current = current / part
+            if current.is_dir():
+                os.chmod(current, 0o700)
+
     async def write(self, path: Path, content: str) -> Path:
         """Atomically write ``content`` to ``path``.
 
@@ -166,10 +180,14 @@ class MarkdownWriter:
         target = Path(path)
         self._ensure_within_root(target)
         await anyio.Path(target.parent).mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            await anyio.to_thread.run_sync(self._secure_parents, target)
         tmp = target.parent / f".{target.name}.tmp.{uuid.uuid4().hex}"
         try:
             await anyio.to_thread.run_sync(_write_and_fsync, tmp, content)
             await anyio.to_thread.run_sync(_replace_with_retry, tmp, target)
+            if os.name == "posix":
+                await anyio.to_thread.run_sync(os.chmod, target, 0o600)
         except Exception:
             # Best-effort cleanup of the staging file on failure.
             await _unlink_quiet(tmp)
@@ -398,7 +416,10 @@ def _replace_with_retry(tmp: Path, target: Path) -> None:
 
 def _write_and_fsync(tmp: Path, content: str) -> None:
     """Sync helper: write + fsync the staging file. Offloaded to a thread."""
-    with open(tmp, "w", encoding="utf-8") as fh:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    if os.name == "posix":
+        os.chmod(tmp, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(content)
         fh.flush()
         os.fsync(fh.fileno())

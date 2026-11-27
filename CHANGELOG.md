@@ -114,6 +114,11 @@ tokenizer should be rebuilt. See Upgrade below.
   repeats the query term. Vector search is unaffected and LanceDB 0.36 fixes
   it; raising the `<0.35` pin is a separate, validated upgrade. The test now
   waits up to one optimize interval for the hit.
+- **Extracted memory is private to its OS user on POSIX.** Markdown writes now
+  create scope directories as `0700` and files as `0600`, and tighten an
+  existing path on its next write. This extends the input-log hardening to
+  profiles, episodes, facts, cases, skills, and knowledge. Windows keeps its
+  default ACL behaviour.
 - **An LLM reply cut off at the output cap is sent once more instead of
   failing its call.** A generation that runs away until `max_tokens`
   (`finish_reason` `length`) usually finishes when the identical request is

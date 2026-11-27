@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
+import stat
 from pathlib import Path
 from unittest.mock import patch
 
@@ -306,3 +308,20 @@ async def test_write_allows_target_inside_root(tmp_path: Path) -> None:
     target = root / "users" / "u1" / "episodes" / "e.md"
     written = await writer.write(target, "hello\n")
     assert written.read_text(encoding="utf-8") == "hello\n"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
+async def test_write_makes_scope_dirs_and_file_private(tmp_path: Path) -> None:
+    writer = _make_writer(tmp_path)
+    target = tmp_path / "default_app" / "default_project" / "users" / "u1" / "out.md"
+
+    await writer.write(target, "private\n")
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    for directory in (
+        tmp_path / "default_app",
+        tmp_path / "default_app" / "default_project",
+        tmp_path / "default_app" / "default_project" / "users",
+        tmp_path / "default_app" / "default_project" / "users" / "u1",
+    ):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
