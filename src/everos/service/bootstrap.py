@@ -491,6 +491,7 @@ def build_application(
             ),
             capabilities=capabilities,
             queue_health=memory.queue_health,
+            input_log_health=memory.input_log_health,
         ),
         purge=purge,
         capabilities=capabilities,
