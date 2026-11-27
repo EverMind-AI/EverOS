@@ -12,6 +12,7 @@ import asyncio
 import datetime as dt
 import hashlib
 import json
+import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -141,9 +142,12 @@ class InputLogWriter:
         temp = path.with_suffix(".tmp")
         changed = False
         kept_any = False
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        if os.name == "posix":
+            os.chmod(temp, 0o600)
         with (
             path.open("r", encoding="utf-8") as src,
-            temp.open("w", encoding="utf-8") as dst,
+            os.fdopen(fd, "w", encoding="utf-8") as dst,
         ):
             for line in src:
                 try:
