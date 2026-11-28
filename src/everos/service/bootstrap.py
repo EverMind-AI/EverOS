@@ -27,6 +27,11 @@ from __future__ import annotations
 
 __all__ = [
     "Application",
+    "ArchiveExportResult",
+    "ArchiveFileEntry",
+    "ArchiveImportResult",
+    "ArchiveManifest",
+    "ArchiveVerifyResult",
     "LLMTaskResolution",
     "Providers",
     "build_application",
@@ -34,6 +39,9 @@ __all__ = [
     "build_replay_engine",
     "configure_process",
     "describe_llm_tasks",
+    "export_memory_root",
+    "import_memory_archive",
+    "verify_memory_archive",
 ]
 
 import asyncio
@@ -41,6 +49,7 @@ import contextlib
 import dataclasses
 import datetime as dt
 import functools
+import os
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from functools import partial
 from pathlib import Path
@@ -74,6 +83,11 @@ from everos.config import (
     resolve_root,
 )
 from everos.config.search_runtime import SearchConfigSource
+from everos.core.errors import (
+    ArchiveConflictError,
+    ArchiveIntegrityError,
+    MemoryRootLockedError,
+)
 from everos.core.observability.logging import configure_logging, get_logger
 from everos.core.observability.metrics import configure_metrics
 from everos.core.observability.tracing import (
@@ -99,10 +113,23 @@ from everos.infra.ome import (
     to_ome_strategy,
 )
 from everos.infra.persistence import (
+    LockError,
     MemoryRoot,
     app_dir_name,
+    memory_root_lock,
     project_dir_name,
     purge_scope,
+)
+from everos.infra.persistence.archive import (
+    ArchiveExportResult,
+    ArchiveFileEntry,
+    ArchiveImportResult,
+    ArchiveManifest,
+    ArchiveVerifyResult,
+    export_archive,
+    extract_archive,
+    is_root_empty,
+    verify_archive,
 )
 from everos.infra.persistence.factories import (
     build_derived_index,
@@ -363,6 +390,228 @@ def describe_llm_tasks(settings: Settings) -> list[LLMTaskResolution]:
     them or checking credentials -- for ``everos config show``.
     """
     return list(resolve_llm_tasks(settings).values())
+
+
+# ── portable memory archive ────────────────────────────────────────────────
+
+
+def export_memory_root(
+    output: Path,
+    *,
+    root: Path | None = None,
+    include_input_log: bool = False,
+    force: bool = False,
+) -> ArchiveExportResult:
+    """Export a memory root's source-of-truth Markdown and configs to ``.tar.gz``.
+
+    Works offline without requiring LLM or embedding configuration. Excludes
+    derived ``.index/`` state, runtime files, and (by default) ``.input_log/``.
+    """
+    import everos
+
+    memory_root = MemoryRoot(resolve_root(str(root) if root is not None else None))
+    result = export_archive(
+        memory_root,
+        output,
+        everos_version=everos.__version__,
+        include_input_log=include_input_log,
+        force=force,
+    )
+    logger.info(
+        "memory_archive_exported",
+        root=str(memory_root.root),
+        archive=str(result.archive_path),
+        files=result.file_count,
+        includes_input_log=include_input_log,
+    )
+    return result
+
+
+def verify_memory_archive(archive: Path) -> ArchiveVerifyResult:
+    """Verify a portable archive's manifest, layout, checksums, and entry counts.
+
+    Runs without touching any live memory root or loading application config.
+    """
+    result = verify_archive(archive)
+    logger.info(
+        "memory_archive_verified",
+        archive=str(result.archive_path),
+        files=result.file_count,
+        entries=sum(result.entry_counts.values()),
+    )
+    return result
+
+
+def _load_settings_for_root(memory_root: MemoryRoot) -> Settings:
+    """Load effective settings for ``memory_root`` without mutating process env."""
+    previous_root = os.environ.get("EVEROS_ROOT")
+    os.environ["EVEROS_ROOT"] = str(memory_root.root)
+    load_settings.cache_clear()
+    try:
+        return load_settings()
+    finally:
+        if previous_root is None:
+            os.environ.pop("EVEROS_ROOT", None)
+        else:
+            os.environ["EVEROS_ROOT"] = previous_root
+        load_settings.cache_clear()
+
+
+async def _rebuild_restored_index(
+    memory_root: MemoryRoot,
+    *,
+    settings: Settings,
+    embedding: EmbeddingProvider | None,
+) -> tuple[int, dict[str, int]]:
+    """Rebuild SQLite + derived index from restored Markdown without an LLM."""
+    tokenizer = build_tokenizer(settings.tokenizer)
+    effective_embedding = (
+        embedding if embedding is not None else _embedding_or_none(settings)
+    )
+    database = SqliteDatabase(memory_root, settings.sqlite)
+    sqlite = SqliteRepos.over(database)
+    index = build_derived_index(settings, memory_root)
+    admin = CascadeAdmin(
+        database=database,
+        ledger=sqlite.md_change_state,
+        index=index,
+        provenance=EmbeddingProvenance(
+            settings.embedding, configured=effective_embedding is not None
+        ),
+    )
+    fence = DeleteFence(warn_entries=settings.cascade.delete_fence_warn_entries)
+    cascade = CascadeOrchestrator(
+        memory_root=memory_root,
+        tokenizer=tokenizer,
+        embedding=effective_embedding,
+        index=index,
+        sqlite=sqlite,
+        watcher_enabled=False,
+        fence=fence,
+    )
+    ome_lock = OmeLock(memory_root.ome_db)
+    with ome_lock.hold():
+        await admin.create_schema()
+        try:
+            await admin.open_index(verify=False, ensure=False, may_attest=True)
+            await admin.reset_ledger()
+            await admin.drop_index_tables()
+            await admin.ensure_index()
+            memory_root.ensure()
+            processed = await cascade.drain_fully()
+            if effective_embedding is not None:
+                await admin.attest_embedding_model(settings.embedding.model or "")
+            summary = await admin.queue_summary()
+            index_rows = await admin.count_index_rows()
+        finally:
+            await admin.close_index()
+            await admin.dispose()
+
+    if summary.pending or summary.failed_permanent or summary.failed_retryable:
+        raise ArchiveIntegrityError(
+            "index rebuild after import did not complete cleanly "
+            f"(pending={summary.pending}, "
+            f"failed_retryable={summary.failed_retryable}, "
+            f"failed_permanent={summary.failed_permanent})"
+        )
+    return processed, index_rows
+
+
+async def import_memory_archive(
+    archive: Path,
+    *,
+    root: Path | None = None,
+    force: bool = False,
+    rebuild: bool = True,
+    settings: Settings | None = None,
+    embedding: EmbeddingProvider | None = None,
+) -> ArchiveImportResult:
+    """Verify and restore a portable archive into ``root``, then rebuild its index.
+
+    Verification runs completely before any write to ``root``. Non-empty target
+    roots are refused unless ``force=True`` (which replaces rather than merges).
+    Index rebuild runs without requiring LLM credentials and verifies that
+    restored Markdown and rebuilt index counts match the manifest.
+    """
+    # 1. Verify archive integrity completely before touching target root.
+    verified = await asyncio.to_thread(verify_archive, archive)
+
+    memory_root = MemoryRoot(resolve_root(str(root) if root is not None else None))
+
+    # 2. Refuse if a live server holds the target root's OME lock.
+    ome_lock_path = Path(str(memory_root.ome_db) + ".lock")
+    if await asyncio.to_thread(ome_lock_path.is_file):
+        is_free = await asyncio.to_thread(OmeLock(memory_root.ome_db).is_free)
+        if not is_free:
+            raise MemoryRootLockedError(
+                f"another process holds this memory root's OME lock at {ome_lock_path}"
+            )
+
+    # 3. Refuse non-empty target root BEFORE creating any lock file or directory.
+    if not await asyncio.to_thread(is_root_empty, memory_root) and not force:
+        raise ArchiveConflictError(
+            f"target memory root is not empty (pass --force to overwrite): "
+            f"{memory_root.root}"
+        )
+
+    # 4. Extract under the root-level exclusive lock, then release it before
+    # rebuilding the derived index (LanceDB's own schema/table operations
+    # acquire memory_root_lock internally, so holding it across rebuild would
+    # self-deadlock; rebuild is guarded by OmeLock instead).
+    try:
+        async with memory_root_lock(memory_root, blocking=False):
+            verified, files_restored, restored_counts = await asyncio.to_thread(
+                extract_archive,
+                archive,
+                memory_root,
+                force=force,
+                preserve_names=frozenset({".lock"}),
+            )
+    except LockError as exc:
+        raise MemoryRootLockedError(str(exc)) from exc
+
+    processed = 0
+    index_rows: dict[str, int] = {}
+    if rebuild:
+        effective_settings = (
+            settings
+            if settings is not None
+            else await asyncio.to_thread(_load_settings_for_root, memory_root)
+        )
+        processed, index_rows = await _rebuild_restored_index(
+            memory_root,
+            settings=effective_settings,
+            embedding=embedding,
+        )
+        mismatches = {
+            kind: (verified.entry_counts[kind], index_rows[kind])
+            for kind in verified.entry_counts
+            if kind in index_rows and index_rows[kind] != verified.entry_counts[kind]
+        }
+        if mismatches:
+            raise ArchiveIntegrityError(
+                f"rebuilt index row counts do not match archive manifest: {mismatches}"
+            )
+
+    logger.info(
+        "memory_archive_imported",
+        archive=str(verified.archive_path),
+        root=str(memory_root.root),
+        files_restored=files_restored,
+        rebuilt=rebuild,
+        processed_md_files=processed,
+    )
+    return ArchiveImportResult(
+        archive_path=verified.archive_path,
+        target_root=memory_root.root,
+        manifest=verified.manifest,
+        files_restored=files_restored,
+        entry_counts_before=dict(verified.entry_counts),
+        entry_counts_after=restored_counts,
+        rebuilt=rebuild,
+        processed_md_files=processed,
+        index_rows=index_rows,
+    )
 
 
 def build_application(

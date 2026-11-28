@@ -14,6 +14,9 @@ def test_help_exits_zero() -> None:
     assert "server" in result.stdout
     assert "cascade" in result.stdout
     assert "config" in result.stdout
+    assert "export" in result.stdout
+    assert "verify" in result.stdout
+    assert "import" in result.stdout
 
 
 def test_no_args_shows_help_and_exits_nonzero() -> None:

@@ -85,8 +85,16 @@ class DuplicateDocumentError(ConflictError):
     """A document with the same identifier already exists."""
 
 
+class ArchiveConflictError(ConflictError):
+    """An archive export or import conflicts with existing filesystem state."""
+
+
 class InvalidInputError(DomainError):
     """Input does not meet domain rules."""
+
+
+class ArchiveIntegrityError(InvalidInputError):
+    """A portable memory archive failed format, layout, checksum, or count checks."""
 
 
 class ExtractionEmptyError(InvalidInputError):
