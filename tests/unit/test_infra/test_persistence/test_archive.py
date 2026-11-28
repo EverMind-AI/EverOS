@@ -576,3 +576,48 @@ def test_extract_force_preserves_existing_root_on_staging_collision(
         p.name for p in tmp_path.iterdir() if p.name.startswith(".everos-import-")
     ]
     assert leftovers == []
+
+
+@pytest.mark.parametrize(
+    ("path_a", "path_b"),
+    [
+        (
+            "Sales/default_project/users/alice/notes.md",
+            "sales/default_project/users/bob/notes.md",
+        ),
+        (
+            "default_app/Alpha/users/alice/notes.md",
+            "default_app/alpha/users/bob/notes.md",
+        ),
+        (
+            "caf\u00e9/default_project/users/alice/notes.md",
+            "cafe\u0301/default_project/users/bob/notes.md",
+        ),
+    ],
+)
+def test_verify_and_extract_reject_directory_aliases_without_clearing_target(
+    tmp_path: Path, path_a: str, path_b: str
+) -> None:
+    """Case-distinct or Unicode-equivalent directory scopes cannot merge on import."""
+    root = _seed_root(tmp_path / "src_root")
+    good = tmp_path / "good.tar.gz"
+    export_archive(root, good, everos_version="1.8.0")
+
+    aliased = tmp_path / "dir_alias.tar.gz"
+
+    def add_aliased_dirs(members: dict[str, bytes]) -> None:
+        _add_manifest_file(members, path_a, b"alice notes\n")
+        _add_manifest_file(members, path_b, b"bob notes\n")
+
+    _rewrite_tar(good, aliased, add_aliased_dirs)
+
+    with pytest.raises(ArchiveIntegrityError, match="directory paths collide"):
+        verify_archive(aliased)
+
+    target_dir = tmp_path / "existing_root"
+    sentinel = target_dir / "existing_app" / "p1" / "keep.md"
+    _write(sentinel, "keep scope intact")
+
+    with pytest.raises(ArchiveIntegrityError, match="directory paths collide"):
+        extract_archive(aliased, MemoryRoot(target_dir), force=True)
+    assert sentinel.read_text(encoding="utf-8") == "keep scope intact"

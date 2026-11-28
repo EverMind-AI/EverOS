@@ -36,6 +36,7 @@ import re
 import shutil
 import tarfile
 import tempfile
+import unicodedata
 from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -336,28 +337,40 @@ def _validate_rel_path(raw: str, *, allow_input_log: bool) -> PurePosixPath:
     return path
 
 
+def _portable_fold(path: str) -> str:
+    """Normalize a POSIX path for case-insensitive and Unicode-normalizing FS checks."""
+    return unicodedata.normalize("NFC", path).casefold()
+
+
 def _validate_portable_path_collisions(rel_paths: Iterable[str]) -> None:
-    """Reject case-insensitive file and file/directory path collisions."""
+    """Reject case-insensitive or Unicode-equivalent file and directory collisions."""
     seen_files: dict[str, str] = {}
     seen_dirs: dict[str, str] = {}
     for rel_posix in sorted(rel_paths):
-        folded = rel_posix.casefold()
+        folded = _portable_fold(rel_posix)
         if folded in seen_files:
             raise ArchiveIntegrityError(
-                "archive paths collide on case-insensitive filesystems: "
-                f"{seen_files[folded]!r} and {rel_posix!r}"
+                "archive paths collide on case-insensitive or normalizing "
+                f"filesystems: {seen_files[folded]!r} and {rel_posix!r}"
             )
         seen_files[folded] = rel_posix
         parts = PurePosixPath(rel_posix).parts
         for idx in range(1, len(parts)):
             dir_posix = "/".join(parts[:idx])
-            seen_dirs.setdefault(dir_posix.casefold(), dir_posix)
+            dir_folded = _portable_fold(dir_posix)
+            existing_dir = seen_dirs.get(dir_folded)
+            if existing_dir is not None and existing_dir != dir_posix:
+                raise ArchiveIntegrityError(
+                    "archive directory paths collide on case-insensitive or "
+                    f"normalizing filesystems: {existing_dir!r} and {dir_posix!r}"
+                )
+            seen_dirs[dir_folded] = dir_posix
 
     for folded, rel_posix in seen_files.items():
         if folded in seen_dirs:
             raise ArchiveIntegrityError(
                 "archive file collides with directory path on case-insensitive "
-                f"filesystems: {rel_posix!r} and {seen_dirs[folded]!r}"
+                f"or normalizing filesystems: {rel_posix!r} and {seen_dirs[folded]!r}"
             )
 
 
