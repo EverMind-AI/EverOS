@@ -11,7 +11,8 @@ before wiring it into a real workflow.
 
 | Doc | Purpose |
 |---|---|
-| [everos-demo.md](everos-demo.md) | `everos demo` — local educational TUI to feel the memory lifecycle before configuring keys |
+| [Quick Start](../QUICKSTART.md) | Install, configure, write and recall the first local memory |
+| [Quick Start (Chinese)](../QUICKSTART.zh-CN.md) | DashScope setup for extraction, embedding and reranking |
 
 ## Reference
 

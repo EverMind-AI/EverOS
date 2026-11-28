@@ -67,7 +67,7 @@ dependencies = [
     "structlog>=24.0.0",
     "prometheus-client>=0.20.0",
 
-    # CLI + TUI
+    # CLI
     "typer>=0.12.0",
     # click is a transitive dep of uvicorn today, but our CLI raises
     # ``click.exceptions.Abort`` directly (e.g. tests that inject aborts)
@@ -77,7 +77,6 @@ dependencies = [
     # ``click.exceptions.Abort`` stays importable and both classes are
     # covered in the Ctrl-C catch (see backfill exit-130 path).
     "click>=8.1",
-    "textual>=8.2.7",
 
     # Tokenization (BM25 Chinese support)
     "jieba>=0.42.1,<1.0",

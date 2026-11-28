@@ -137,7 +137,7 @@ works as shipped.
 ### Which keys you need
 
 EverOS needs only an LLM; embedding and rerank are optional providers that unlock more
-retrieval methods (see [What works with one key?](../README.md#what-works-with-one-key)).
+retrieval methods (see [provider requirements](../QUICKSTART.md#upgrade-capabilities-when-you-need-them)).
 A benchmark therefore needs what its retrieval method needs -- `methods` in
 `configs/<dataset>.toml` (`agentic` for LoCoMo, `llm_multiround` for the other three),
 or `--methods` for one run:

@@ -10,6 +10,10 @@ CLI.
 CLI commands run **in-process** — they call into the `service/` /
 infrastructure layers directly rather than the HTTP loopback.
 
+The terminal `everos demo` command has been retired. Use the
+[Quick Start](../QUICKSTART.md) to write and recall memory against your own
+local server. The HTTP API and community use-case examples are unchanged.
+
 ## Installation
 
 The script is exposed via `pyproject.toml`:

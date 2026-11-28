@@ -22,7 +22,7 @@ entrypoints  →  service  →  memory  ←  infra
 cross-cutting, usable by every layer: core / component / config
 ```
 
-- `entrypoints/` — cli + api (incl. HTTP middleware) + tui (protocol translation only)
+- `entrypoints/` — cli + api (incl. HTTP middleware; protocol translation only)
 - `service/` — `bootstrap.py` (the one assembler) + `MemoryService` / `KnowledgeService` / `OpsService` facades
 - `memory/` — domain (models + ports + extract + search + strategies + reflection + custom_instructions)
 - `infra/` — adapters implementing `memory.ports` (markdown + sqlite + lancedb + milvus) + the cascade and OME engines
