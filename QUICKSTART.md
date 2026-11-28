@@ -1,10 +1,12 @@
-# Quickstart
+# Quick Start
 
 > Five minutes from one OpenRouter API key to durable Markdown memory and
 > keyword recall.
 
 EverOS runs as a local service. The minimum production path needs only an LLM:
 configure one OpenRouter key, start the server, then call the HTTP API.
+
+[English](QUICKSTART.md) · [中文](QUICKSTART.zh-CN.md) <!-- cjk-allow: language switcher -->
 
 ## What the one-key setup includes
 
@@ -44,28 +46,7 @@ source .venv/bin/activate
 You can also prefix source-checkout commands with `uv run` instead of
 activating the virtual environment.
 
-## 2. Try the standalone demo — no key required
-
-Before initialization or provider setup, run:
-
-```bash
-everos demo
-```
-
-The command asks for one memory and one recall question, then opens a local
-terminal visualizer. It is hardcoded and completely decoupled from the real
-workflow: it needs no API key, does not start or call the EverOS server, and
-does not write to your real memory root.
-
-Press `r` to replay and `q` to quit. For a copyable non-interactive preview:
-
-```bash
-everos demo --plain
-```
-
-See [docs/everos-demo.md](docs/everos-demo.md) for the visualizer's scope.
-
-## 3. Initialize EverOS
+## 2. Initialize EverOS
 
 ```bash
 everos init
@@ -82,7 +63,7 @@ This creates two files under the default memory root:
 To use another root, run `everos init --root <path>` and pass the same
 `--root <path>` to subsequent commands.
 
-## 4. Add your OpenRouter key
+## 3. Add your OpenRouter key
 
 Open `~/.everos/everos.toml`. The generated
 `[llm]` section already contains the recommended model and base URL; replace
@@ -99,7 +80,7 @@ Leave `[embedding]`, `[rerank]`, and `[multimodal]` unchanged for this
 walkthrough. Their empty keys do not prevent the server from starting; this
 setup uses keyword search.
 
-## 5. Start the server
+## 4. Start the server
 
 ```bash
 everos server start
@@ -141,7 +122,7 @@ cascade readiness.
 > encounter file-descriptor errors, run `ulimit -n 4096` in the same shell
 > before starting the server.
 
-## 6. Add a conversation
+## 5. Add a conversation
 
 Business endpoints live under `/api/v2`. The `/api/v1` prefix remains a legacy
 compatibility alias, but new integrations should use `/api/v2`.
@@ -168,7 +149,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/add \
 Messages are buffered by session until EverOS detects a boundary or the client
 explicitly flushes the session.
 
-## 7. Flush at the end of the session
+## 6. Flush at the end of the session
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
@@ -183,7 +164,7 @@ curl -X POST http://127.0.0.1:8000/api/v2/memory/flush \
 A successful flush returns `data.status` as `"extracted"`. The extraction is
 written to Markdown, then the cascade worker projects it into the local index.
 
-## 8. Search with the one-key method
+## 7. Search with the one-key method
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v2/memory/search \
@@ -209,7 +190,7 @@ Keyword retrieval returns matching episodes from the local BM25 index. Atomic
 facts are created by an embedding-dependent strategy, so they are not expected
 in the OpenRouter Tier 1 response.
 
-## 9. Read the Markdown source of truth
+## 8. Read the Markdown source of truth
 
 Your extracted memory is a normal Markdown file under the memory root:
 
@@ -255,6 +236,25 @@ degrading to a different search method.
 You can replace OpenRouter with another OpenAI-compatible LLM endpoint by
 changing the `[llm]` model, base URL, and key.
 
+## Recommended models
+
+The generated `everos.toml` pre-fills these (all but the decider); any
+OpenAI-compatible model can replace them.
+
+| Role | Section | Recommended model |
+| --- | --- | --- |
+| Memory extraction | `[llm]` | `openai/gpt-4.1-mini` |
+| Retrieval decider for `llm_multiround` search | `[llm.decider]` | `qwen3.6-27B` or `deepseek/deepseek-v4-flash-0731`; left empty, the `[llm]` model decides |
+| Embedding | `[embedding]` | `Qwen/Qwen3-Embedding-4B` |
+| Rerank | `[rerank]` | `Qwen/Qwen3-Reranker-4B` |
+| Multimodal parsing | `[multimodal]` | `google/gemini-3.8-flash` |
+
+The extraction model and the deciders above produced our published benchmark
+results; [benchmarks/README.md](benchmarks/README.md#results) lists which
+model ran in which role for each benchmark, and how to reproduce them. To choose
+other models, the [LoCoMo results table](benchmarks/locomo.md#results-by-model-and-retrieval-method)
+compares accuracy and search time across models and retrieval methods.
+
 ## Stop the server
 
 Press `Ctrl+C` in the server terminal.
@@ -265,9 +265,6 @@ Press `Ctrl+C` in the server terminal.
 - Partition memory with `app_id` and `project_id`.
 - Explore the full API contract in [docs/openapi.json](docs/openapi.json).
 - Configure advanced retrieval in the generated `everos.toml`.
-- Run `everos demo --live` after starting a server with embedding configured;
-  unlike the standalone demo in step 2, live mode calls the real API and uses
-  hybrid search.
 - Read [docs/architecture.md](docs/architecture.md) and
   [docs/storage_layout.md](docs/storage_layout.md).
 - Set up multimodal ingestion with [docs/multimodal.md](docs/multimodal.md).
