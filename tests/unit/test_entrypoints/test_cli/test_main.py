@@ -21,3 +21,9 @@ def test_no_args_shows_help_and_exits_nonzero() -> None:
     result = CliRunner().invoke(app, [])
     assert result.exit_code != 0
     assert "Usage" in result.stdout or "Usage" in result.stderr
+
+
+def test_retired_demo_is_not_a_cli_command() -> None:
+    result = CliRunner().invoke(app, ["demo"])
+    assert result.exit_code == 2
+    assert "No such command" in result.stderr

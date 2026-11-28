@@ -1,1 +1,0 @@
-"""EverOS educational demo TUI."""

@@ -1,1 +1,0 @@
-"""TUI entrypoint tests."""
