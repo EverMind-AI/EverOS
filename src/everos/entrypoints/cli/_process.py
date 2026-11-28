@@ -1,6 +1,6 @@
 """Process setup for CLI commands: the log level a command runs at.
 
-Interactive commands (``cascade`` / ``init`` / ``config`` / ``demo``) log
+Interactive commands (``cascade`` / ``init`` / ``config``) log
 WARNING so lifecycle events -- ``sqlite_engine_built``,
 ``lancedb_connection_opened`` and friends -- stay out of banners and
 ``[y/N]`` prompts; ``--verbose`` / ``-v`` opens INFO. ``server start`` keeps
