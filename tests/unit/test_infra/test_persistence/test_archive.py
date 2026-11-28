@@ -429,3 +429,150 @@ def test_extract_refuses_non_empty_root_and_replaces_with_force(
     assert counts == verified.entry_counts
     assert not (target_dir / "existing_app").exists()
     assert (target_dir / "everos.toml").is_file()
+
+
+def _add_manifest_file(
+    members: dict[str, bytes], rel_posix: str, payload: bytes
+) -> None:
+    """Insert a data member and matching manifest entry (with valid sha256)."""
+    import hashlib
+
+    members[f"{DATA_PREFIX}{rel_posix}"] = payload
+    manifest = json.loads(members[MANIFEST_FILENAME].decode("utf-8"))
+    manifest["files"].append(
+        {
+            "path": rel_posix,
+            "size": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+    )
+    manifest["files"].sort(key=lambda item: item["path"])
+    members[MANIFEST_FILENAME] = json.dumps(manifest).encode("utf-8")
+
+
+def test_verify_and_extract_reject_case_collision_without_clearing_target(
+    tmp_path: Path,
+) -> None:
+    """Case-colliding non-counted files are rejected before touching target root."""
+    root = _seed_root(tmp_path / "src_root")
+    good = tmp_path / "good.tar.gz"
+    export_archive(root, good, everos_version="1.8.0")
+
+    colliding = tmp_path / "case_collision.tar.gz"
+
+    def add_case_collision(members: dict[str, bytes]) -> None:
+        base = "default_app/default_project/agents/a_ops/skills/skill_backup/references"
+        _add_manifest_file(members, f"{base}/Notes.md", b"Upper-case variant\n")
+
+    _rewrite_tar(good, colliding, add_case_collision)
+
+    with pytest.raises(ArchiveIntegrityError, match="case-insensitive"):
+        verify_archive(colliding)
+
+    target_dir = tmp_path / "existing_root"
+    sentinel = target_dir / "existing_app" / "p1" / "keep.md"
+    _write(sentinel, "do not lose me")
+
+    with pytest.raises(ArchiveIntegrityError, match="case-insensitive"):
+        extract_archive(colliding, MemoryRoot(target_dir), force=True)
+    assert sentinel.read_text(encoding="utf-8") == "do not lose me"
+
+
+@pytest.mark.parametrize(
+    ("bad_name", "match"),
+    [
+        ("CON.md", "Windows-reserved"),
+        ("nul.txt", "Windows-reserved"),
+        ("bad:name.md", "non-portable character"),
+        ("trailing_dot.", "trailing space or dot"),
+    ],
+)
+def test_verify_and_extract_reject_non_portable_segments_without_clearing(
+    tmp_path: Path, bad_name: str, match: str
+) -> None:
+    """Windows-reserved or non-portable segments fail before touching target root."""
+    root = _seed_root(tmp_path / "src_root")
+    good = tmp_path / "good.tar.gz"
+    export_archive(root, good, everos_version="1.8.0")
+
+    bad_archive = tmp_path / f"bad_{bad_name.replace(':', '_')}.tar.gz"
+
+    def add_bad_member(members: dict[str, bytes]) -> None:
+        base = "default_app/default_project/agents/a_ops/skills/skill_backup/references"
+        _add_manifest_file(members, f"{base}/{bad_name}", b"payload\n")
+
+    _rewrite_tar(good, bad_archive, add_bad_member)
+
+    with pytest.raises(ArchiveIntegrityError, match=match):
+        verify_archive(bad_archive)
+
+    target_dir = tmp_path / "existing_root"
+    sentinel = target_dir / "existing_app" / "p1" / "keep.md"
+    _write(sentinel, "still intact")
+
+    with pytest.raises(ArchiveIntegrityError, match=match):
+        extract_archive(bad_archive, MemoryRoot(target_dir), force=True)
+    assert sentinel.read_text(encoding="utf-8") == "still intact"
+
+
+def test_extract_force_preserves_existing_root_on_staging_os_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If staging fails on the target filesystem, the existing root is untouched."""
+    from everos.infra.persistence import archive as archive_mod
+
+    root = _seed_root(tmp_path / "src_root")
+    good = tmp_path / "good.tar.gz"
+    export_archive(root, good, everos_version="1.8.0")
+
+    target_dir = tmp_path / "existing_root"
+    sentinel = target_dir / "existing_app" / "p1" / "keep.md"
+    _write(sentinel, "precious data")
+
+    original_open = Path.open
+
+    def failing_open(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if mode == "xb" and self.name == "notes.md":
+            raise OSError("simulated filesystem error")
+        return original_open(self, mode, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "open", failing_open)
+    with pytest.raises(ArchiveIntegrityError, match="cannot materialize"):
+        archive_mod.extract_archive(good, MemoryRoot(target_dir), force=True)
+
+    # Existing root is completely preserved and no staging dirs are left behind.
+    assert sentinel.read_text(encoding="utf-8") == "precious data"
+    leftovers = [
+        p.name for p in tmp_path.iterdir() if p.name.startswith(".everos-import-")
+    ]
+    assert leftovers == []
+
+
+def test_extract_force_preserves_existing_root_on_staging_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Target-filesystem FileExistsError during staging leaves existing root intact."""
+    root = _seed_root(tmp_path / "src_root")
+    good = tmp_path / "good.tar.gz"
+    export_archive(root, good, everos_version="1.8.0")
+
+    target_dir = tmp_path / "existing_root"
+    sentinel = target_dir / "existing_app" / "p1" / "keep.md"
+    _write(sentinel, "keep intact")
+
+    original_open = Path.open
+
+    def colliding_open(self: Path, mode: str = "r", *args: object, **kwargs: object):
+        if mode == "xb" and self.name == "notes.md":
+            raise FileExistsError("simulated Unicode/case collision")
+        return original_open(self, mode, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "open", colliding_open)
+    with pytest.raises(ArchiveIntegrityError, match="target filesystem path collision"):
+        extract_archive(good, MemoryRoot(target_dir), force=True)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep intact"
+    leftovers = [
+        p.name for p in tmp_path.iterdir() if p.name.startswith(".everos-import-")
+    ]
+    assert leftovers == []

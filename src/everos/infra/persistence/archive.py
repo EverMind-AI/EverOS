@@ -36,7 +36,7 @@ import re
 import shutil
 import tarfile
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -94,6 +94,17 @@ _SYSTEM_TOP_LEVEL = frozenset({".index", ".tmp", ".lock"})
 _INPUT_LOG_DIR = ".input_log"
 _ROOT_CONFIG_FILES = frozenset({"everos.toml", "ome.toml"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_WINDOWS_FORBIDDEN_CHARS = frozenset('<>:"|?*')
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }
+)
 
 _DAILY_KIND_SCHEMAS: tuple[tuple[str, type[BaseFrontmatter]], ...] = (
     ("episode", EpisodeDailyFrontmatter),
@@ -282,6 +293,19 @@ def _validate_rel_path(raw: str, *, allow_input_log: bool) -> PurePosixPath:
         raise ArchiveIntegrityError(f"unsafe archive path segment: {raw!r}")
     if path.as_posix() != raw:
         raise ArchiveIntegrityError(f"non-canonical archive path: {raw!r}")
+    for part in parts:
+        if any(ord(ch) < 32 or ch in _WINDOWS_FORBIDDEN_CHARS for ch in part):
+            raise ArchiveIntegrityError(
+                f"non-portable character in archive path segment: {raw!r}"
+            )
+        if part.endswith((" ", ".")):
+            raise ArchiveIntegrityError(
+                f"trailing space or dot is not portable across filesystems: {raw!r}"
+            )
+        if part.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES:
+            raise ArchiveIntegrityError(
+                f"Windows-reserved path segment is not portable: {raw!r}"
+            )
 
     top = parts[0]
     if top in _SYSTEM_TOP_LEVEL:
@@ -310,6 +334,31 @@ def _validate_rel_path(raw: str, *, allow_input_log: bool) -> PurePosixPath:
             f"hidden app/project directory not allowed in archive layout: {raw!r}"
         )
     return path
+
+
+def _validate_portable_path_collisions(rel_paths: Iterable[str]) -> None:
+    """Reject case-insensitive file and file/directory path collisions."""
+    seen_files: dict[str, str] = {}
+    seen_dirs: dict[str, str] = {}
+    for rel_posix in sorted(rel_paths):
+        folded = rel_posix.casefold()
+        if folded in seen_files:
+            raise ArchiveIntegrityError(
+                "archive paths collide on case-insensitive filesystems: "
+                f"{seen_files[folded]!r} and {rel_posix!r}"
+            )
+        seen_files[folded] = rel_posix
+        parts = PurePosixPath(rel_posix).parts
+        for idx in range(1, len(parts)):
+            dir_posix = "/".join(parts[:idx])
+            seen_dirs.setdefault(dir_posix.casefold(), dir_posix)
+
+    for folded, rel_posix in seen_files.items():
+        if folded in seen_dirs:
+            raise ArchiveIntegrityError(
+                "archive file collides with directory path on case-insensitive "
+                f"filesystems: {rel_posix!r} and {seen_dirs[folded]!r}"
+            )
 
 
 def _collect_root_files(
@@ -438,6 +487,7 @@ def export_archive(
         )
 
     files_bytes = _collect_root_files(root, include_input_log=include_input_log)
+    _validate_portable_path_collisions(files_bytes.keys())
     file_entries = [
         ArchiveFileEntry(
             path=rel_posix,
@@ -583,6 +633,7 @@ def _read_and_validate_archive(
 
     for rel_posix in data_files:
         _validate_rel_path(rel_posix, allow_input_log=manifest.includes_input_log)
+    _validate_portable_path_collisions(data_files.keys())
 
     manifest_paths = set(manifest_map)
     archive_paths = set(data_files)
@@ -646,6 +697,76 @@ def _clear_directory(
             child.unlink()
 
 
+def _stage_archive_files(staging_dir: Path, data_files: Mapping[str, bytes]) -> None:
+    """Materialize ``data_files`` into ``staging_dir`` on the target filesystem.
+
+    Uses exclusive file creation (``xb``) and checks the on-disk file count so
+    any target-filesystem collision (such as Unicode normalization folding) or
+    unrepresentable path fails here before the live root is touched.
+    """
+    staging_resolved = staging_dir.resolve()
+    for rel_posix in sorted(data_files):
+        dest = (staging_resolved / PurePosixPath(rel_posix)).resolve()
+        try:
+            dest.relative_to(staging_resolved)
+        except ValueError as exc:
+            raise ArchiveIntegrityError(
+                f"extracted path escaped target root: {rel_posix!r}"
+            ) from exc
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with dest.open("xb") as handle:
+                handle.write(data_files[rel_posix])
+        except FileExistsError as exc:
+            raise ArchiveIntegrityError(
+                f"target filesystem path collision while staging {rel_posix!r}"
+            ) from exc
+        except OSError as exc:
+            raise ArchiveIntegrityError(
+                f"cannot materialize {rel_posix!r} on target filesystem: {exc}"
+            ) from exc
+
+    materialized = sum(len(files) for _, _, files in os.walk(staging_resolved))
+    if materialized != len(data_files):
+        raise ArchiveIntegrityError(
+            "staged file count mismatch on target filesystem: "
+            f"expected={len(data_files)}, actual={materialized}"
+        )
+
+
+def _commit_staged_root(
+    staging_dir: Path,
+    target_root: Path,
+    *,
+    preserve_names: frozenset[str] = frozenset(),
+) -> None:
+    """Replace ``target_root`` contents with ``staging_dir`` with rollback."""
+    target_root.mkdir(parents=True, exist_ok=True)
+    backup_dir = Path(
+        tempfile.mkdtemp(prefix=".everos-import-backup-", dir=target_root.parent)
+    )
+    moved_old: list[str] = []
+    try:
+        for child in sorted(target_root.iterdir()):
+            if child.name in preserve_names:
+                continue
+            os.replace(child, backup_dir / child.name)
+            moved_old.append(child.name)
+
+        for staged_child in sorted(staging_dir.iterdir()):
+            os.replace(staged_child, target_root / staged_child.name)
+    except BaseException:
+        # Roll back partial replacement so the previous root stays intact.
+        _clear_directory(target_root, preserve_names=preserve_names)
+        for name in moved_old:
+            old_path = backup_dir / name
+            if old_path.exists():
+                os.replace(old_path, target_root / name)
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        raise
+    shutil.rmtree(backup_dir, ignore_errors=True)
+
+
 def extract_archive(
     archive_path: Path,
     target_root: MemoryRoot,
@@ -655,9 +776,10 @@ def extract_archive(
 ) -> tuple[ArchiveVerifyResult, int, dict[str, int]]:
     """Verify and extract a portable archive into ``target_root``.
 
-    Verification runs completely before any filesystem write to ``target_root``.
-    When ``target_root`` is non-empty, extraction fails unless ``force=True``,
-    in which case existing contents are cleared first (never merged).
+    Verification and target-filesystem staging complete before any existing
+    files in ``target_root`` are replaced. When ``target_root`` is non-empty,
+    extraction fails unless ``force=True``, in which case existing contents
+    are replaced cleanly (never merged) only after staging succeeds.
 
     Returns:
         ``(verify_result, files_restored, restored_entry_counts)``.
@@ -672,33 +794,31 @@ def extract_archive(
         entry_counts=dict(manifest.entry_counts),
     )
 
-    if not is_root_empty(target_root, ignore_names=preserve_names):
-        if not force:
-            raise ArchiveConflictError(
-                f"target memory root is not empty (pass --force to overwrite): "
-                f"{target_root.root}"
-            )
-        _clear_directory(target_root.root, preserve_names=preserve_names)
-
-    target_root.root.mkdir(parents=True, exist_ok=True)
-    root_resolved = target_root.root.resolve()
-
-    for rel_posix in sorted(data_files):
-        dest = (root_resolved / PurePosixPath(rel_posix)).resolve()
-        try:
-            dest.relative_to(root_resolved)
-        except ValueError as exc:
-            raise ArchiveIntegrityError(
-                f"extracted path escaped target root: {rel_posix!r}"
-            ) from exc
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data_files[rel_posix])
-
-    restored_counts = count_root_entries(target_root)
-    if restored_counts != verified.entry_counts:
-        raise ArchiveIntegrityError(
-            f"restored entry_counts mismatch after extraction: "
-            f"expected={verified.entry_counts}, actual={restored_counts}"
+    if not is_root_empty(target_root, ignore_names=preserve_names) and not force:
+        raise ArchiveConflictError(
+            f"target memory root is not empty (pass --force to overwrite): "
+            f"{target_root.root}"
         )
+
+    staging_parent = target_root.root.parent
+    staging_parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(
+        tempfile.mkdtemp(prefix=".everos-import-stage-", dir=staging_parent)
+    )
+    try:
+        _stage_archive_files(staging_dir, data_files)
+        restored_counts = count_root_entries(MemoryRoot(staging_dir))
+        if restored_counts != verified.entry_counts:
+            raise ArchiveIntegrityError(
+                f"restored entry_counts mismatch after staging: "
+                f"expected={verified.entry_counts}, actual={restored_counts}"
+            )
+        _commit_staged_root(
+            staging_dir,
+            target_root.root,
+            preserve_names=preserve_names,
+        )
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
     return verified, len(data_files), restored_counts
