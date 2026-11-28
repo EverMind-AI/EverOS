@@ -21,6 +21,8 @@ External usage::
     await application.aclose()
 """
 
+from everos.core.errors import ArchiveConflictError as ArchiveConflictError
+from everos.core.errors import ArchiveIntegrityError as ArchiveIntegrityError
 from everos.core.errors import DocumentNotFoundError as DocumentNotFoundError
 from everos.core.errors import DuplicateDocumentError as DuplicateDocumentError
 from everos.core.errors import ExtractionEmptyError as ExtractionEmptyError
@@ -35,12 +37,20 @@ from everos.memory.search import SearchRequest as SearchRequest
 from everos.memory.search import SearchResponse as SearchResponse
 
 from .bootstrap import Application as Application
+from .bootstrap import ArchiveExportResult as ArchiveExportResult
+from .bootstrap import ArchiveFileEntry as ArchiveFileEntry
+from .bootstrap import ArchiveImportResult as ArchiveImportResult
+from .bootstrap import ArchiveManifest as ArchiveManifest
+from .bootstrap import ArchiveVerifyResult as ArchiveVerifyResult
 from .bootstrap import LLMTaskResolution as LLMTaskResolution
 from .bootstrap import Providers as Providers
 from .bootstrap import build_application as build_application
 from .bootstrap import build_providers as build_providers
 from .bootstrap import configure_process as configure_process
 from .bootstrap import describe_llm_tasks as describe_llm_tasks
+from .bootstrap import export_memory_root as export_memory_root
+from .bootstrap import import_memory_archive as import_memory_archive
+from .bootstrap import verify_memory_archive as verify_memory_archive
 from .knowledge import CategoryOverview as CategoryOverview
 from .knowledge import CreateDocumentResult as CreateDocumentResult
 from .knowledge import DeleteResult as DeleteResult
@@ -94,6 +104,13 @@ __all__ = [
     "MAX_OWNER_ID_LENGTH",
     "TASK_STATUSES",
     "Application",
+    "ArchiveConflictError",
+    "ArchiveExportResult",
+    "ArchiveFileEntry",
+    "ArchiveImportResult",
+    "ArchiveIntegrityError",
+    "ArchiveManifest",
+    "ArchiveVerifyResult",
     "BackfillDeps",
     "BackfillOutcome",
     "BackfillPresenter",
@@ -152,6 +169,9 @@ __all__ = [
     "compute_disabled_features",
     "configure_process",
     "describe_llm_tasks",
+    "export_memory_root",
     "format_tokens",
+    "import_memory_archive",
     "speaker_owner_id",
+    "verify_memory_archive",
 ]

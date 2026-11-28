@@ -69,7 +69,10 @@ see [glibc's allocator documentation](https://sourceware.org/glibc/manual/latest
 
 ```
 everos
-├── init [--root PATH] [--force] [--print]   Generate starter config files (everos.toml + ome.toml)
+├── init [--root PATH] [--force] [--print]                         Generate starter config files (everos.toml + ome.toml)
+├── export OUT [--root PATH] [--include-input-log] [--force]       Package Markdown, config, and a SHA-256 manifest into a .tar.gz archive
+├── verify ARCHIVE                                                 Verify archive checksums, layout, and entry counts offline
+├── import ARCHIVE [--root PATH] [--force] [--no-rebuild]          Verify and restore an archive into a memory root and rebuild its index
 ├── config
 │   └── show [--root PATH]          Show effective configuration
 ├── server
@@ -92,6 +95,32 @@ sync --force-all` (the first full pass after upgrading from before 1.4.2
 does this by itself); to rebuild the whole index from markdown (recovery
 from drift / corruption, and once after upgrading a Milvus root to 1.4.2)
 run `everos cascade rebuild`.
+
+## Portable memory export and restore (`export` / `verify` / `import`)
+
+Because Markdown is EverOS's single source of truth, a memory root can be moved
+between machines without shipping derived `.index/` files or (by default) raw
+`.input_log/` conversation transcripts:
+
+```bash
+everos export backup.tar.gz --root ~/.everos
+everos verify backup.tar.gz
+everos import backup.tar.gz --root /data/everos-restored
+```
+
+- **`everos export <out>`** writes a `.tar.gz` archive containing Markdown
+  source-of-truth files, root configuration (`everos.toml`, `ome.toml`), and a
+  `manifest.json` with EverOS version, file list, per-file SHA-256 digests, and
+  entry counts per kind. `.index/`, `.tmp/`, and `.lock` are always excluded;
+  `.input_log/` is excluded unless `--include-input-log` is passed.
+- **`everos verify <archive>`** validates the archive structure, path layout,
+  every SHA-256 digest, and per-kind entry counts without touching any live
+  memory root.
+- **`everos import <archive>`** verifies the archive completely before writing
+  anything, refuses to overwrite a non-empty root unless `--force` is passed
+  (replacing rather than merging), rebuilds the derived index from restored
+  Markdown (unless `--no-rebuild` is given), and verifies that before/after
+  entry counts and rebuilt index row counts match the manifest.
 
 ## `everos server start`
 
@@ -153,6 +182,7 @@ everos server start --log-level debug   # see all sql / lance traffic
 |---|---|---|
 | Hot-path business (`/add` `/flush` `/search` `/get`) | ✅ | — (HTTP only) |
 | Setup (generate config files) | — | `everos init` |
+| Portable archive (export / verify / restore) | — | `everos {export,verify,import}` |
 | Inspect effective config | — | `everos config show` |
 | Run the server | — | `everos server start` |
 | Index ops (drain / inspect / fix the cascade queue) | — | `everos cascade {status,sync,fix}` |
